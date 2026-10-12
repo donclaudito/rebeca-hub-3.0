@@ -24,6 +24,11 @@ const state = {
   videoTransicao: 'fade',
   videoDuracao: 0.6,
   pararVideo: false,
+  // Trilha sonora: o ficheiro escolhido (fica só nesta sessão) e a duração lida.
+  musicaFicheiro: null,
+  musicaDuracao: 0,
+  musicaLigada: true,
+  musicaUrl: '',
   servico: 'deepseek',
   modelo: '',
   busy: false,
@@ -1193,6 +1198,141 @@ function criarZip(ficheiros) {
 }
 
 // ---------------------------------------------------------------- vídeo
+// ---------------------------------------------------------------- trilha sonora
+// A música vem do computador do utilizador (não há faixas dentro da app, para
+// ela continuar leve e sem licenças). Fica só nesta sessão — um ficheiro de
+// música não cabe no armazenamento do browser sem o encher.
+let trilhaAudio = null; // o <audio> da pré-escuta
+
+function pararPreviaTrilha() {
+  if (!trilhaAudio) return;
+  try {
+    trilhaAudio.pause();
+  } catch {
+    /* já parado */
+  }
+  trilhaAudio = null;
+  const b = $('btn-trilha-ouvir');
+  if (b) b.textContent = '▶️ Ouvir';
+}
+
+// Desenha o estado da trilha: nome, duração, e que botões fazem sentido.
+function atualizarTrilha() {
+  const tem = Boolean(state.musicaFicheiro);
+  const est = $('trilha-estado');
+  if (est) {
+    if (!tem) {
+      est.className = 'hint';
+      est.textContent = 'Nenhuma música escolhida — o vídeo sai só com a narração.';
+    } else {
+      est.className = 'trilha-estado-nome';
+      const dur = state.musicaDuracao ? ` · ${formatarMinutos(state.musicaDuracao)}` : '';
+      const nome = state.musicaFicheiro.name || 'música';
+      est.textContent = `🎵 ${nome}${dur}`;
+    }
+  }
+  const ouvir = $('btn-trilha-ouvir');
+  const tirar = $('btn-trilha-tirar');
+  const ligada = $('trilha-ligada');
+  if (ouvir) ouvir.hidden = !tem;
+  if (tirar) tirar.hidden = !tem;
+  if (ligada) {
+    ligada.disabled = !tem;
+    ligada.checked = tem && state.musicaLigada;
+  }
+}
+
+const formatarMinutos = (s) => {
+  const t = Math.max(0, Math.round(Number(s) || 0));
+  return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
+};
+
+// Lê a duração real do ficheiro sem o descodificar todo: um <audio> temporário
+// dá-nos isso de graça, e é o que mostramos ao utilizador para ele confirmar.
+function medirTrilha(ficheiro) {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(ficheiro);
+    const a = new Audio();
+    let pronto = false;
+    const fim = (d) => {
+      if (pronto) return;
+      pronto = true;
+      a.removeAttribute('src');
+      resolve(d);
+    };
+    a.preload = 'metadata';
+    a.onloadedmetadata = () => fim(isFinite(a.duration) ? a.duration : 0);
+    a.onerror = () => fim(0);
+    setTimeout(() => fim(0), 8000);
+    a.src = url;
+  });
+}
+
+async function escolherTrilha() {
+  const input = $('input-trilha');
+  const f = input?.files?.[0];
+  if (!f) return;
+
+  pararPreviaTrilha();
+  state.musicaFicheiro = f;
+  state.musicaLigada = true;
+  state.musicaDuracao = 0;
+  atualizarTrilha();
+
+  const dur = await medirTrilha(f);
+  // Se entretanto o utilizador escolheu outra, não estragamos o estado novo.
+  if (state.musicaFicheiro !== f) return;
+  state.musicaDuracao = dur;
+  atualizarTrilha();
+
+  const mb = (f.size / 1048576).toFixed(1);
+  toast(
+    dur
+      ? `Trilha: ${f.name} (${formatarMinutos(dur)}, ${mb} MB). Ouça antes de gerar.`
+      : `Trilha: ${f.name} (${mb} MB).`,
+    'ok',
+  );
+  if (input) input.value = ''; // permite escolher o mesmo ficheiro outra vez
+}
+
+function tirarTrilha() {
+  pararPreviaTrilha();
+  state.musicaFicheiro = null;
+  state.musicaDuracao = 0;
+  state.musicaUrl = '';
+  atualizarTrilha();
+  toast('Trilha tirada.', '');
+}
+
+async function ouvirTrilha() {
+  if (trilhaAudio) {
+    pararPreviaTrilha();
+    return;
+  }
+  const f = state.musicaFicheiro;
+  if (!f) return;
+  if (state.musicaUrl) URL.revokeObjectURL(state.musicaUrl);
+  state.musicaUrl = URL.createObjectURL(f);
+  trilhaAudio = new Audio(state.musicaUrl);
+  trilhaAudio.volume = 0.6;
+  trilhaAudio.onended = pararPreviaTrilha;
+  $('btn-trilha-ouvir').textContent = '⏹ Parar';
+  try {
+    await trilhaAudio.play();
+  } catch {
+    pararPreviaTrilha();
+    toast('Não consegui tocar essa música neste browser.', 'err');
+  }
+}
+
+function ligarTrilha() {
+  const c = $('trilha-ligada');
+  if (!c) return;
+  state.musicaLigada = c.checked;
+  guardar();
+}
+
+// ---------------------------------------------------------------- vídeo
 // O vídeo é montado no browser (não há ffmpeg na nuvem). Ver public/video.mjs.
 function estadoVideo(msg, tipo = '') {
   const el = $('vid-estado');
@@ -1264,13 +1404,23 @@ async function iniciarVideo() {
   state.videoDuracao = dur.id;
   [...cd.children].forEach((x) => x.classList.toggle('on', Number(x.dataset.id) === dur.id));
 
+  // Trilha sonora
+  $('btn-trilha-add').onclick = () => $('input-trilha').click();
+  $('input-trilha').onchange = escolherTrilha;
+  $('btn-trilha-ouvir').onclick = ouvirTrilha;
+  $('btn-trilha-tirar').onclick = tirarTrilha;
+  $('trilha-ligada').onchange = ligarTrilha;
+  atualizarTrilha();
+
   // Suporte do browser
   if (!mod.suporta()) {
     $('btn-video').disabled = true;
     estadoVideo('⚠️ Este browser não consegue gravar vídeo. Use o Chrome ou o Edge.', 'err');
   } else {
+    const comTrilha = state.musicaFicheiro && state.musicaLigada;
     estadoVideo(
-      `Pronto para montar. Formato ${state.videoFormato}, transição "${escolhida.rotulo}". ` +
+      `Pronto para montar. Formato ${state.videoFormato}, transição "${escolhida.rotulo}"` +
+        `${comTrilha ? `, trilha "${state.musicaFicheiro.name}" por baixo da voz` : ', sem trilha'}. ` +
         'A gravação demora o tempo do vídeo.',
       '',
     );
@@ -1331,12 +1481,16 @@ async function gerarVideoFinal() {
   const preview = $('vid-preview');
   preview.hidden = false;
 
+  // A trilha só entra se houver música escolhida E a caixa estiver marcada.
+  const musica = state.musicaFicheiro && state.musicaLigada ? state.musicaFicheiro : null;
+
   try {
     const r = await mod.gerarVideo({
       cenas,
       formato: state.videoFormato,
       transicao: state.videoTransicao,
       duracaoTransicao: state.videoDuracao,
+      musica,
       // Desenha no canvas visível: vê-se a montagem enquanto grava.
       canvas: preview,
       aoProgredir: (p) => {
@@ -1368,10 +1522,15 @@ async function gerarVideoFinal() {
 
     estadoVideo(
       `✅ Vídeo pronto: ${Math.round(r.duracao)}s, ${(r.blob.size / 1048576).toFixed(1)} MB, ` +
-        `formato ${r.formato}, transição "${r.transicao}". Descarregado como ${nome}.`,
+        `formato ${r.formato}, transição "${r.transicao}"` +
+        `${r.comMusica ? ', com trilha' : musica ? ', SEM trilha' : ''}. Descarregado como ${nome}.` +
+        `${r.musicaAviso ? ` ⚠️ ${r.musicaAviso}` : ''}`,
+      r.musicaAviso ? 'wait' : 'ok',
+    );
+    toast(
+      r.comMusica ? `Vídeo pronto (${Math.round(r.duracao)}s), com trilha.` : `Vídeo pronto (${Math.round(r.duracao)}s).`,
       'ok',
     );
-    toast(`Vídeo pronto (${Math.round(r.duracao)}s).`, 'ok');
   } catch (e) {
     estadoVideo(`❌ ${e.message}`, 'err');
     toast(e.message, 'err');
@@ -1407,6 +1566,7 @@ function guardar() {
         videoFormato: state.videoFormato,
         videoTransicao: state.videoTransicao,
         videoDuracao: state.videoDuracao,
+        musicaLigada: state.musicaLigada,
       }),
     );
   } catch {
@@ -1625,6 +1785,7 @@ function init() {
   state.videoFormato = c.videoFormato || '1920x1080';
   state.videoTransicao = c.videoTransicao || 'fade';
   state.videoDuracao = Number(c.videoDuracao) || 0.6;
+  state.musicaLigada = c.musicaLigada !== false;
   marcarMotor();
   marcarTom();
   iniciarVideo();

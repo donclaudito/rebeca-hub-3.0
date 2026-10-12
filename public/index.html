@@ -41,6 +41,7 @@
         </p>
       </div>
       <input id="input-files" type="file" accept="image/*" multiple hidden />
+      <input id="input-trilha" type="file" accept="audio/*,.mp3,.wav,.m4a,.ogg,.aac,.flac" hidden />
     </section>
 
     <main id="workspace" hidden>
@@ -183,6 +184,27 @@
               <div class="vp-group">
                 <span class="vp-label">Duração</span>
                 <div id="vid-duracoes" class="chips"></div>
+              </div>
+
+              <div class="vp-group vp-trilha">
+                <span class="vp-label">Trilha sonora</span>
+                <div id="trilha-caixa" class="trilha-caixa">
+                  <div class="trilha-linha">
+                    <span id="trilha-estado" class="hint">Nenhuma música escolhida — o vídeo sai só com a narração.</span>
+                  </div>
+                  <div class="trilha-linha">
+                    <button id="btn-trilha-add" class="ghost small" type="button">🎵 Escolher música</button>
+                    <button id="btn-trilha-ouvir" class="ghost small" type="button" hidden>▶️ Ouvir</button>
+                    <button id="btn-trilha-tirar" class="ghost small danger" type="button" hidden>🗑 Tirar</button>
+                  </div>
+                  <div class="trilha-linha">
+                    <label class="trilha-check" for="trilha-ligada">
+                      <input id="trilha-ligada" type="checkbox" checked />
+                      Usar a música no vídeo
+                    </label>
+                    <span class="hint">toca em ciclo, bem baixinho (16%), por baixo da voz</span>
+                  </div>
+                </div>
               </div>
 
               <div class="vp-group">

@@ -180,6 +180,23 @@ main { padding: 18px 22px 60px; }
 }
 .vid-preview[hidden] { display: none; }
 
+/* ---------- trilha sonora ---------- */
+/* Este grupo é em coluna: tem texto, botões e uma caixa de seleção. */
+.vp-trilha { align-items: flex-start; }
+.trilha-caixa {
+  flex: 1; min-width: 240px; display: flex; flex-direction: column; gap: 8px;
+  padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg-3);
+}
+.trilha-linha { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+.trilha-linha .hint { margin: 0; }
+.trilha-estado-nome { font-size: 13px; color: var(--txt); overflow-wrap: anywhere; }
+.trilha-check {
+  display: inline-flex; align-items: center; gap: 7px; font-size: 13px;
+  color: var(--txt); cursor: pointer; user-select: none;
+}
+.trilha-check input { width: 15px; height: 15px; accent-color: var(--accent); cursor: pointer; }
+.trilha-check input:disabled { cursor: not-allowed; }
+
 /* ---------- miniaturas ---------- */
 .thumbs { scrollbar-width: thin; scrollbar-color: #3d4453 transparent; }
 .thumbs::-webkit-scrollbar { width: 11px; }

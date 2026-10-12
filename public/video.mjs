@@ -198,6 +198,7 @@ export async function gerarVideo({
   duracaoTransicao = 0.6,
   fps = 30,
   canvas: canvasDado = null,
+  musica = null,
   aoProgredir = () => {},
   deveParar = () => false,
 }) {
@@ -232,6 +233,25 @@ export async function gerarVideo({
   } catch (e) {
     try { await seq.ctx.close(); } catch { /* já fechado */ }
     return { ok: false, erro: `não consegui ler o áudio de uma cena: ${e.message}` };
+  }
+
+  // 2b) a trilha sonora (opcional). Se falhar, o vídeo sai sem música e a
+  // página é avisada — nunca se perde o trabalho por causa da trilha.
+  let trilha = null;
+  let musicaAviso = '';
+  if (musica) {
+    try {
+      const mod = await import('./musica.mjs');
+      const r = await mod.carregarTrilha(musica, seq.ctx);
+      if (r.ok) {
+        trilha = mod.tocarTrilha({ ctx: seq.ctx, destino: seq.destino, musica: r.musica });
+        musicaAviso = r.aviso;
+      } else {
+        musicaAviso = r.erro;
+      }
+    } catch (e) {
+      musicaAviso = `não consegui usar a trilha: ${e.message}`;
+    }
   }
 
   // Duração de cada cena = duração do seu áudio; nunca menos do que a passagem
@@ -307,6 +327,7 @@ export async function gerarVideo({
   } finally {
     // Deixa o último fotograma entrar e fecha — mesmo que algo falhe a meio.
     await new Promise((r) => setTimeout(r, 250));
+    if (trilha) trilha.parar();
     if (gravador.state !== 'inactive') gravador.stop();
     await parado;
     try { await seq.ctx.close(); } catch { /* já fechado */ }
@@ -325,5 +346,7 @@ export async function gerarVideo({
     duracao: acumulado,
     formato: alvo.id,
     transicao,
+    comMusica: Boolean(trilha && trilha.comecou),
+    musicaAviso,
   };
 }

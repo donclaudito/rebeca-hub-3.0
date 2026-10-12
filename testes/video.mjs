@@ -756,5 +756,36 @@ console.log('\n[20] Com narração, o ciclo repete também a voz');
   check(legendasDesenhadas.at(-1).t >= r.duracao - 0.5, `a legenda acompanha até ao fim (${legendasDesenhadas.at(-1).t.toFixed(2)}s de ${r.duracao.toFixed(2)}s)`, String(legendasDesenhadas.at(-1).t));
 }
 
+console.log('\n[21] Explica porque não repetiu, em vez de ficar calado');
+{
+  const duas = [
+    { imagem: 'c1', audio: null, semFala: true, texto: 'Uma.' },
+    { imagem: 'c2', audio: null, semFala: true, texto: 'Duas.' },
+  ];
+  const musica = { name: 'tema.mp3', arrayBuffer: () => Promise.resolve(new ArrayBuffer(64)) };
+
+  // (a) modo natural: diz que foi uma escolha, não uma falha
+  instalarAmbiente([]);
+  const r1 = await correrCom(mod.gerarVideo({ cenas: duas, duracaoCena: 2, modoDuracao: 'natural' }));
+  check(!r1.repetido && /As imagens/.test(r1.semCiclo || ''), `modo natural explica-se: "${r1.semCiclo}"`, String(r1.semCiclo));
+
+  // (b) modo de ciclo sem duração de música conhecida
+  instalarAmbiente([]);
+  const r2 = await correrCom(mod.gerarVideo({ cenas: duas, duracaoCena: 2, musica, modoDuracao: 'trilha', musicaSegundos: 0 }));
+  check(!r2.repetido && /não consegui saber a duração/i.test(r2.semCiclo || ''), `sem duração conhecida: "${r2.semCiclo}"`, String(r2.semCiclo));
+
+  // (c) música mais curta do que o vídeo
+  instalarAmbiente([]);
+  const r3 = await correrCom(mod.gerarVideo({ cenas: duas, duracaoCena: 2, musica, modoDuracao: 'trilha', musicaSegundos: 3 }));
+  check(!r3.repetido && /não é mais longa/i.test(r3.semCiclo || ''), `música curta explica-se: "${r3.semCiclo}"`, String(r3.semCiclo));
+
+  // (d) quando repete, não há explicação de falha e a versão vem sempre
+  instalarAmbiente([]);
+  const r4 = await correrCom(mod.gerarVideo({ cenas: duas, duracaoCena: 2, musica, modoDuracao: 'trilha', musicaSegundos: 10 }));
+  check(r4.repetido && r4.semCiclo === '', 'quando repete, não há nada a explicar', String(r4.semCiclo));
+  check(/^\d+\.\d+\.\d+$/.test(r4.versao || ''), `o motor diz a sua versão (${r4.versao})`, String(r4.versao));
+  check(r4.versao === mod.VERSAO_VIDEO, 'e é a versão exportada pelo módulo', `${r4.versao} ≠ ${mod.VERSAO_VIDEO}`);
+}
+
 console.log(falhas.length ? `\n=== ${falhas.length} FALHA(S) ===` : '\n=== GERAÇÃO DE VÍDEO OK ===');
 process.exit(falhas.length ? 1 : 0);

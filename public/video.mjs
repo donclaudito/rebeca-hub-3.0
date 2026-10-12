@@ -15,6 +15,11 @@
 
 import { blocoAtivo, legendasDasCenas, legendasParaSrt } from './legendas-core.mjs';
 
+// Versão do motor. Aparece no resumo da página: serve para saber, sem dúvidas,
+// qual build está a correr no browser (um build antigo em cache foi uma das
+// causas de "não funcionou" que já apanhei).
+export const VERSAO_VIDEO = '3.4.0';
+
 export const FORMATOS = [
   { id: '1920x1080', rotulo: 'Horizontal 1920×1080 (YouTube)', w: 1920, h: 1080 },
   { id: '1280x720', rotulo: 'Horizontal 1280×720 (leve)', w: 1280, h: 720 },
@@ -66,6 +71,15 @@ const MAX_PASSAGENS = 100;
 //  Silêncio usado numa cena sem narração, quando as outras têm voz. Curto de
 //  propósito: numa montagem narrada, uma cena sem fala não deve arrastar-se.
 const SILENCIO_CURTO = 2;
+
+// Porque é que o ciclo NÃO foi aplicado. Dizer isto é o que transforma um
+// "não funcionou" numa causa concreta.
+function explicarSemCiclo(modoDuracao, alvo, natural) {
+  if (modoDuracao !== 'trilha') return 'o modo de duração escolhido foi "As imagens"';
+  if (!(alvo > 0)) return 'não consegui saber a duração da música';
+  if (!(alvo > natural)) return `a música (${alvo.toFixed(1)}s) não é mais longa do que o vídeo (${natural.toFixed(1)}s)`;
+  return '';
+}
 
 // Uma cena sem narração fica com o tempo escolhido, em vez da duração do
 // silêncio que lá foi posto, para não arrastar a montagem.
@@ -360,6 +374,7 @@ export async function gerarVideo({
   // repetem-se em ciclo até a música acabar (é o que o modo 'trilha' faz).
   const alvoMusica = modoDuracao === 'trilha' ? Number(musicaSegundos) || 0 : 0;
   const repetido = repetirAte(cenas, duracoes, alvoMusica);
+  const semCiclo = explicarSemCiclo(modoDuracao, alvoMusica, natural);
 
   const passagens = repetido.passagens;
   const ciclos = repetido.itens.length ? repetido.itens : cenas.map((c) => ({ ...c, _passagem: 0, _texto: c.texto || '' }));
@@ -504,5 +519,7 @@ export async function gerarVideo({
     repetido: Boolean(repetido.itens.length),
     cortado,
     duracaoNatural: natural,
+    versao: VERSAO_VIDEO,
+    semCiclo,
   };
 }

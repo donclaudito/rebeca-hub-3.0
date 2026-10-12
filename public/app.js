@@ -30,6 +30,8 @@ const state = {
   legendas: true,
   // 'natural' (duração das cenas) ou 'trilha' (repete as imagens até a música acabar).
   modoDuracao: 'natural',
+  // A duração da música foi lida? Se não, o ciclo não pode ser calculado.
+  musicaMedida: false,
   pararVideo: false,
   // Trilha sonora: o ficheiro escolhido (fica só nesta sessão) e a duração lida.
   musicaFicheiro: null,
@@ -1313,6 +1315,22 @@ function vezesQueRepete() {
   return { passagens: n, total: natural * n, alvo };
 }
 
+// Nota do ciclo. Diz SEMPRE o que vai acontecer: quantas passagens, ou porque
+// razão não repete. Foi a falta disto que deixou um "não funcionou" sem pista.
+function notaCiclo() {
+  const r = vezesQueRepete();
+  if (state.modoDuracao !== 'trilha') return '';
+  if (!state.musicaFicheiro) return ' Para repetir até acabar a música, escolha primeiro a trilha.';
+  if (!state.musicaMedida || !(r.alvo > 0)) {
+    return ' ⚠️ Não consegui ler a duração desta música, por isso não sei até quando repetir — ' +
+      'o vídeo fica com a duração das imagens. Experimente outro ficheiro (MP3 ou WAV).';
+  }
+  if (r.passagens === 1) {
+    return ` ℹ️ A música (${formatarMinutos(r.alvo)}) não é mais longa do que o vídeo (${formatarMinutos(r.total)}): não há nada a repetir.`;
+  }
+  return ` 🔁 REPETE: as imagens passam ${r.passagens}×, até acabar a música de ${formatarMinutos(r.alvo)}. O vídeo fica com ${formatarMinutos(r.total)}.`;
+}
+
 // Quanto tempo o vídeo levaria sem repetir nada.
 function duracaoNaturalPrevista() {
   const comTexto = state.scenes.filter((s) => (s.texto || '').trim());
@@ -1326,17 +1344,6 @@ function duracaoNaturalPrevista() {
     const w = palavras(s.texto);
     return soma + Math.max(1.2, w / 2.4);
   }, 0);
-}
-
-// Nota do ciclo, para o resumo: diz quantas passagens e quanto vai durar.
-function notaCiclo() {
-  const r = vezesQueRepete();
-  if (state.modoDuracao !== 'trilha') return '';
-  if (!state.musicaFicheiro) return ' Para repetir até acabar a música, escolha primeiro a trilha.';
-  if (r.passagens === 1) {
-    return ` A música (${formatarMinutos(r.alvo)}) é mais curta do que o vídeo, por isso não há nada a repetir.`;
-  }
-  return ` 🔁 As imagens repetem ${r.passagens}× (${formatarMinutos(r.total)}), até acabar a música de ${formatarMinutos(r.alvo)}.`;
 }
 
 // ---------------------------------------------------------------- trilha sonora
@@ -1426,6 +1433,7 @@ async function escolherTrilha() {
   state.musicaFicheiro = f;
   state.musicaLigada = true;
   state.musicaDuracao = 0;
+  state.musicaMedida = false;
   // O modo "até acabar a música" fica disponível assim que há música.
   state.modoDuracao = 'trilha';
   if (state.videoModo === 'narracao') state.videoModo = 'ambos';
@@ -1436,12 +1444,21 @@ async function escolherTrilha() {
   // Se entretanto o utilizador escolheu outra, não estragamos o estado novo.
   if (state.musicaFicheiro !== f) return;
   state.musicaDuracao = dur;
+  state.musicaMedida = dur > 0;
   atualizarTrilha();
 
   // O tempo da música é lido aqui (o motor não descodifica só para medir).
   state.musicaSegundos = dur;
   guardar();
   aoMudarTrilha();
+
+  if (!dur) {
+    toast(
+      `Não consegui ler a duração de ${f.name}. O vídeo vai ficar com a duração das imagens ` +
+        '(o ciclo até acabar a música não pode ser calculado). Experimente um MP3 ou um WAV.',
+      'err',
+    );
+  }
 
   const mb = (f.size / 1048576).toFixed(1);
   toast(
@@ -1459,6 +1476,7 @@ function tirarTrilha() {
   state.musicaDuracao = 0;
   state.musicaUrl = '';
   state.musicaSegundos = 0;
+  state.musicaMedida = false;
   atualizarTrilha();
   aoMudarTrilha();
   toast('Trilha tirada.', '');
@@ -1508,6 +1526,10 @@ function estadoVideo(msg, tipo = '') {
 
 async function iniciarVideo() {
   const mod = await import('./video.mjs');
+  // A versão fica à vista: se um dia algo "não funcionar", dá para confirmar
+  // num segundo se o browser está a correr o build novo ou um antigo em cache.
+  const v = $('versao');
+  if (v) v.textContent = `vídeo v${mod.VERSAO_VIDEO || '?'}`;
   // O corte da narração em blocos de legenda vem do mesmo módulo do 2.0.
   try {
     Object.assign(leg, await import('./legendas-core.mjs'));
@@ -1779,9 +1801,10 @@ async function gerarVideoFinal() {
       aoProgredir: (p) => {
         if (p.fase === 'a gravar') {
           const pct = p.totalSegundos ? Math.round((p.segundos / p.totalSegundos) * 100) : 0;
-          progress(true, pct, `a gravar imagem ${p.atual} de ${p.total} — ${Math.round(p.segundos)}s de ${Math.round(p.totalSegundos)}s`);
+          const ciclo = p.passagens > 1 ? ` · passagem ${p.passagem} de ${p.passagens}` : '';
+          progress(true, pct, `a gravar imagem ${p.atual} de ${p.total}${ciclo} — ${Math.round(p.segundos)}s de ${Math.round(p.totalSegundos)}s`);
           estadoVideo(
-            `a gravar… imagem ${p.atual} de ${p.total}. Não mude de janela. ` +
+            `a gravar… imagem ${p.atual} de ${p.total}${ciclo}. Não mude de janela. ` +
               `${Math.round(p.segundos)}s de ${Math.round(p.totalSegundos)}s.`,
             'wait',
           );
@@ -1818,11 +1841,15 @@ async function gerarVideoFinal() {
     estadoVideo(
       `✅ Vídeo pronto: ${Math.round(r.duracao)}s, ${(r.blob.size / 1048576).toFixed(1)} MB, ` +
         `formato ${r.formato}, transição "${r.transicao}", ${r.comVoz ? 'com narração' : 'sem voz'}` +
-        `${r.comMusica ? ' e com trilha' : musica ? ' e SEM trilha' : ''}` +
-        `${r.repetido ? `, imagens repetidas ${r.passagens}×` : ''}` +
-        `${r.legendas ? `, ${r.legendas} bloco(s) de legenda` : ''}. ` +
+        `${r.comMusica ? ' e com trilha' : musica ? ' e SEM trilha' : ''}. ` +
+        `${r.repetido
+          ? `🔁 As imagens passaram ${r.passagens}× (${Math.round(r.duracaoNatural)}s cada passagem).`
+          : state.modoDuracao === 'trilha'
+            ? `ℹ️ Não repeti as imagens${r.semCiclo ? `: ${r.semCiclo}` : ''}.`
+            : ''} ` +
+        `${r.legendas ? `${r.legendas} bloco(s) de legenda. ` : ''}` +
         `Descarregado como ${nome}${r.srt ? ' e rebeca-video.srt' : ''}.` +
-        `${r.musicaAviso ? ` ⚠️ ${r.musicaAviso}` : ''}`,
+        `${r.musicaAviso ? ` ⚠️ ${r.musicaAviso}` : ''} (motor v${r.versao})`,
       r.musicaAviso ? 'wait' : 'ok',
     );
     toast(

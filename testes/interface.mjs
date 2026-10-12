@@ -92,7 +92,7 @@ function montar(suportaVideo) {
   return reg;
 }
 
-function ambiente(reg, suportaVideo) {
+function ambiente(reg, suportaVideo, duracaoMusica = 65) {
   const store = {};
   globalThis.localStorage = { getItem: (k) => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = String(v); }, removeItem: (k) => { delete store[k]; } };
   globalThis.document = {
@@ -118,7 +118,7 @@ function ambiente(reg, suportaVideo) {
   globalThis.speechSynthesis = globalThis.window.speechSynthesis;
   globalThis.SpeechSynthesisUtterance = class { constructor(t) { this.text = t; } };
   globalThis.Audio = class {
-    constructor() { this.duration = 65; setTimeout(() => this.onloadedmetadata?.(), 0); }
+    constructor() { this.duration = duracaoMusica; setTimeout(() => this.onloadedmetadata?.(), 0); }
     play() { setTimeout(() => this.onended?.(), 5000); return Promise.resolve(); }
     pause() {}
     removeAttribute() {}
@@ -162,9 +162,9 @@ process.on('unhandledRejection', (e) => {
   process.stderr.write(`>>> PROMESSA REJEITADA: ${e && e.stack ? e.stack : e}\n`);
 });
 
-async function arrancar(suportaVideo) {
+async function arrancar(suportaVideo, duracaoMusica = 65) {
   const reg = montar(suportaVideo);
-  ambiente(reg, suportaVideo);
+  ambiente(reg, suportaVideo, duracaoMusica);
   new Function(src)();
   document.dispatch('DOMContentLoaded');
   await new Promise((r) => setTimeout(r, 300));
@@ -419,7 +419,7 @@ console.log('\n[12] Duração: repetir as imagens até a música acabar');
   check(/🔁/.test(est), `o resumo diz que vai repetir: "${r}"`, est);
   check(/\d+×/.test(est), `diz quantas passagens vai dar (${/\d+×/.exec(est)?.[0]})`, est);
   check(/1:05/.test(est), 'e lembra o tempo da música (65s → 1:05)', est);
-  check(/repetem/i.test(est), 'explica que são as imagens a repetir', est);
+  check(/repetem/i.test(est) || /REPETE/i.test(est), 'explica que são as imagens a repetir', est);
 
   // Voltar a "As imagens" tira a nota do ciclo.
   cdm.children[0].click();
@@ -435,7 +435,26 @@ console.log('\n[12] Duração: repetir as imagens até a música acabar');
   check(cdm.children[1].disabled === true, 'ao tirar a música, o ciclo volta a ficar desativado', 'ficou ativo');
 }
 
-console.log('\n[13] Sem erros de JavaScript');
+console.log('\n[13] Música com duração ilegível: avisa em vez de fingir');
+{
+  // O <audio> não consegue ler a duração (ficheiro estranho / formato que o
+  // browser não conhece): o ciclo não pode ser calculado.
+  const reg = await arrancar(true, 0);
+  reg.get('input-files').onchange({ target: { files: [{ name: 'a.jpg', type: 'image/jpeg', size: 900 }], value: '' } });
+  await new Promise((r) => setTimeout(r, 150));
+  reg.get('vid-modos').children[2].click();
+  await new Promise((r) => setTimeout(r, 40));
+  reg.get('input-trilha').files = [{ name: 'estranho.xyz', size: 1_000_000, type: 'application/octet-stream' }];
+  reg.get('input-trilha').onchange();
+  await new Promise((r) => setTimeout(r, 180));
+
+  const est = reg.get('vid-estado').textContent;
+  check(/Não consegui ler a duração/i.test(est), `diz que não conseguiu ler a duração: "${est.slice(-110)}"`, est);
+  check(/MP3 ou WAV|MP3 ou um WAV/i.test(est), 'sugere um formato que funcione', est);
+  check(!/REPETE/.test(est), 'não promete repetições que não pode calcular', est);
+}
+
+console.log('\n[14] Sem erros de JavaScript');
 if (erros.length) erros.slice(0, 5).forEach((e) => fail(e));
 else ok('nenhum erro não tratado');
 

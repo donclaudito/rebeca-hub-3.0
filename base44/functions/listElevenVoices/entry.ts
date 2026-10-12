@@ -10,6 +10,7 @@
 //  conta. Sem esta lista, o utilizador não tem como saber quais servem.
 // ============================================================
 import { secrets } from 'base44:runtime';
+import { lerDetalhe, traduzirErro } from '../../shared/elevenErrors.ts';
 
 const API = 'https://api.elevenlabs.io/v1';
 
@@ -56,31 +57,15 @@ export default async function (req) {
     }
 
     if (!resposta.ok) {
-      const detalhe = dados?.detail?.message || dados?.detail || texto.slice(0, 250);
-      const t = String(detalhe);
       // A ElevenLabs usa 401 para quase tudo: chave inválida, permissão em
-      // falta E cota esgotada. Distinguir pelo texto evita dizer "chave
-      // recusada" quando o problema é outro — foi o que aconteceu.
-      const semPermissao = /missing the permission/i.test(t);
-      const semCota = /exceeds your quota|credits remaining/i.test(t);
-      const recusada = !semPermissao && !semCota && (resposta.status === 401 || resposta.status === 403 || /invalid api key|unauthorized/i.test(t));
-      let msg;
-      if (semCota) {
-        msg =
-          'A sua conta ElevenLabs está SEM CRÉDITOS. Veja o uso em https://elevenlabs.io/app/subscription — ' +
-          'a cota renova no início do ciclo. Enquanto isso, use a 🌐 Voz do browser, que é gratuita.';
-      } else if (semPermissao) {
-        const qual = /permission (\w+)/i.exec(t)?.[1] || 'necessária';
-        msg =
-          `Esta chave da ElevenLabs não tem a permissão "${qual}". ` +
-          'Crie uma chave nova em https://elevenlabs.io/app/developers/api-keys e ligue as permissões ' +
-          'Voices (Read) e Text to Speech.';
-      } else if (recusada) {
-        msg = 'A chave da ElevenLabs foi recusada. Confirme que copiou a chave completa de https://elevenlabs.io/app/developers/api-keys';
-      } else {
-        msg = t.slice(0, 250);
-      }
-      return json({ ok: false, recusada, semPermissao, semCota, http: resposta.status, error: msg, detalhe: t.slice(0, 200) }, 200);
+      // falta E cota esgotada. A leitura e a tradução vivem no módulo
+      // partilhado elevenErrors — as duas funções nunca divergem.
+      const detalhe = lerDetalhe(texto);
+      const r = traduzirErro(resposta.status, detalhe, { contexto: 'listar' });
+      return json(
+        { ok: false, http: resposta.status, tipo: r.tipo, permissao: r.permissao || '', error: r.msg, detalhe: detalhe.slice(0, 200) },
+        200,
+      );
     }
 
     const vozes = (dados?.voices || []).map((v) => ({

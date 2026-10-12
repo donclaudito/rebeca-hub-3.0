@@ -9,6 +9,7 @@
 //  própria conta — as que aparecem em listElevenVoices — funcionam.
 // ============================================================
 import { secrets } from 'base44:runtime';
+import { lerDetalhe, traduzirErro } from '../../shared/elevenErrors.ts';
 
 const API = 'https://api.elevenlabs.io/v1';
 const MODELO = 'eleven_multilingual_v2';
@@ -35,61 +36,6 @@ const json = (corpo, status = 200) =>
     status,
     headers: { 'Content-Type': 'application/json; charset=utf-8' },
   });
-
-// Traduz as recusas conhecidas para algo accionável.
-// Recebe também as tentativas, porque "chave inválida" e "modelo não permitido"
-// podem dar o mesmo aspeto — e a diferença decide o que o utilizador faz.
-function explicar(status, detalhe, tentativas = []) {
-  const d = String(detalhe || '');
-  const modelosRecusados = tentativas.map((t) => t.modelo);
-  const todosModelos = tentativas.length > 2;
-
-  // COTA ESGOTADA — este caso vem com HTTP 401, o que o faz parecer "chave
-  // inválida". Foi o que aconteceu: a conta tinha 0 de 10000 creditos e todas as
-  // mensagens apontavam para a chave. Aqui é detetado pelo texto, que é o único
-  // sinal fiável (a ElevenLabs usa 401 para quase tudo).
-  const cota = /exceeds your quota|credits remaining|quota of (\d+)/i.exec(d);
-  if (cota) {
-    const restam = /You have (\d+) credits remaining/i.exec(d);
-    const precisa = /while (\d+) credits are required/i.exec(d);
-    const total = /quota of (\d+)/i.exec(d);
-    return (
-      'A sua conta ElevenLabs está SEM CRÉDITOS: ' +
-      `restam ${restam?.[1] ?? '0'} de ${total?.[1] ?? '?'} caracteres, e este pedido precisa de ${precisa?.[1] ?? 'alguns'}. ` +
-      'Veja o uso e a renovação em https://elevenlabs.io/app/subscription — ' +
-      'a cota renova no início do ciclo. Enquanto isso, use a 🌐 Voz do browser, que é gratuita e não precisa de chave.'
-    );
-  }
-  if (/paid_plan_required|payment_required|402/.test(`${status} ${d}`)) {
-    return (
-      'A sua conta ElevenLabs está no plano gratuito e recusa as vozes da BIBLIOTECA ' +
-      '(as do app: Bella, Rachel, Elli, Adam, Domi — erro 402). ' +
-      'Use uma voz da SUA conta: clique em "Carregar as minhas vozes" e escolha uma da lista.'
-    );
-  }
-  if (status === 401 || status === 403 || /invalid api key|api key is invalid|unauthorized/i.test(d)) {
-    // Um 401 é definitivo (paramos logo no primeiro modelo), mas pode ser a
-    // chave ou a PERMISSÃO da chave: as chaves da ElevenLabs podem ser criadas
-    // com acesso restrito, e uma chave só de leitura lista vozes mas não
-    // sintetiza — o que dá um erro que parece "chave inválida".
-    return todosModelos || tentativas.length <= 1
-      ? 'A chave da ElevenLabs foi recusada na síntese. Se a lista de vozes funcionou, a chave é válida mas pode não ter permissão para Text to Speech: crie uma chave nova em https://elevenlabs.io/app/developers/api-keys'
-      : 'A chave da ElevenLabs foi recusada. Copie-a de novo em https://elevenlabs.io/app/developers/api-keys';
-  }
-  if (status === 422 || /model.*not|not.*available|unsupported.*model|invalid.*model|deprecated/i.test(d)) {
-    return (
-      `Nenhum dos modelos disponíveis foi aceite (${modelosRecusados.join(', ')}). ` +
-      'O seu plano pode não incluir a síntese de voz pela API. Veja https://elevenlabs.io/app/subscription'
-    );
-  }
-  if (status === 429 || /rate limit|too many/i.test(d)) {
-    return 'Demasiados pedidos em pouco tempo. Espere um pouco e tente outra vez.';
-  }
-  if (/voice_not_found|does not exist/i.test(d)) {
-    return 'Esta voz não existe na sua conta. Clique em "Carregar as minhas vozes" e escolha outra.';
-  }
-  return String(d).slice(0, 280) || `a ElevenLabs respondeu ${status}`;
-}
 
 export default async function (req) {
   try {
@@ -150,29 +96,34 @@ export default async function (req) {
         break;
       }
 
-      const corpo = await r.text().catch(() => '');
-      let msg = corpo.slice(0, 250);
-      try {
-        msg = JSON.parse(corpo)?.detail?.message || JSON.parse(corpo)?.detail || msg;
-      } catch {
-        /* texto cru */
-      }
+      // O "detail" da ElevenLabs pode chegar como string, objeto ou lista —
+      // a leitura partilhada trata os três formatos.
+      const msg = lerDetalhe(await r.text().catch(() => ''));
       tentativas.push({ modelo: m, http: r.status, erro: String(msg).slice(0, 160) });
       console.warn(`[narrateEleven] modelo "${m}" falhou (HTTP ${r.status}): ${String(msg).slice(0, 120)}`);
 
       // Estes casos NÃO melhoram ao tentar outro modelo: parar poupa tempo e
       // não dá a impressão de que "quase funcionou".
       if (r.status === 401 || r.status === 403) break; // chave/permissão
-      if (/exceeds your quota|credits remaining|paid_plan_required|payment_required/i.test(String(msg))) break; // cota/plano
+      if (/exceeds your quota|credits remaining|paid_plan_required|payment_required|missing the permission/i.test(String(msg)))
+        break; // cota/plano/permissão
     }
 
     if (!resposta) {
       const primeira = tentativas[0] || { http: 0, erro: 'sem resposta' };
+      // A tradução usa a resposta DA SÍNTESE (não da lista de vozes): com o
+      // contexto 'sintetizar', um 401 aponta para a permissão Text to Speech.
+      const traduzido = traduzirErro(primeira.http, primeira.erro, {
+        contexto: 'sintetizar',
+        modelos: tentativas.map((t) => t.modelo),
+      });
       return json(
         {
           ok: false,
           http: primeira.http,
-          error: explicar(primeira.http, primeira.erro, tentativas),
+          tipo: traduzido.tipo,
+          permissao: traduzido.permissao || '',
+          error: traduzido.msg,
           // Lista completa das tentativas — é isto que permite perceber o que
           // se passa quando o erro parece de chave mas não é.
           tentativas,

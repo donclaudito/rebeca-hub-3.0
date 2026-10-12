@@ -92,13 +92,12 @@ class AudioCtxFalso {
     return g;
   }
   // 1.º pedido = narração (durações da lista); pedidos seguintes = trilha.
+  // A duração da trilha é o que o áudio descodificado diz, e é ela que manda.
   decodeAudioData() {
     this._chamadas = (this._chamadas || 0) + 1;
-    const d = this._duracoes.length ? this._duracoes.shift() : musicaDuracao;
-    const canais = this._duracoes.length || d !== musicaDuracao ? 1 : 2; // a trilha é estéreo
-    return Promise.resolve(new BufferFalso(d, canais));
-  }
-  createBufferSource() {
+    if (this._duracoes.length) return Promise.resolve(new BufferFalso(this._duracoes.shift()));
+    return Promise.resolve(new BufferFalso(musicaDuracao, 2)); // a trilha é estéreo
+  }  createBufferSource() {
     this._fontes = (this._fontes || 0) + 1;
     return new FonteFalsa(this);
   }
@@ -125,9 +124,12 @@ class GravadorFalso {
   }
 }
 
-function instalarAmbiente(duracoes) {
+// `musicaSegundos` é a duração que o áudio descodificado da TRILHA devolve — é
+// ela que manda no ciclo. A lista `duracoes` é só da narração, por isso os dois
+// nunca se misturam (misturá-los foi um erro meu que fez o ciclo parecer avariado).
+function instalarAmbiente(duracoes, { musicaSegundos = 65 } = {}) {
   desenhos = []; agendamentos = []; fontesEmCiclo = []; ganhosCriados = []; legendasDesenhadas = []; fila = []; relogioMs = 0;
-  musicaDuracao = 65;
+  musicaDuracao = musicaSegundos;
   const ctx = new AudioCtxFalso(duracoes);
   ultimoCtx = ctx;
   globalThis.AudioContext = function () { return ctx; };
@@ -161,6 +163,7 @@ async function correrCom(promessa, limiteMs = 60000) {
     if (!fila.length) await new Promise((r) => setTimeout(r, 0));
   }
   if (erro) throw erro;
+  if (!feito) throw new Error(`a gravação não terminou (relógio em ${relogioMs}ms, ${passos} passos)`);
   return valor;
 }
 
@@ -657,7 +660,7 @@ console.log('\n[18] Vídeo curto com música longa: as imagens repetem em ciclo'
   ];
   const musica = { name: 'tema.mp3', arrayBuffer: () => Promise.resolve(new ArrayBuffer(64)) };
 
-  instalarAmbiente([]);
+  instalarAmbiente([], { musicaSegundos: 20 });
   const r = await correrCom(mod.gerarVideo({
     cenas: duasCenas, transicao: 'fade', duracaoTransicao: 0.6, duracaoCena: 3.5,
     musica, modoDuracao: 'trilha', musicaSegundos: 20,
@@ -666,12 +669,15 @@ console.log('\n[18] Vídeo curto com música longa: as imagens repetem em ciclo'
   check(r.ok === true, 'gera o vídeo em ciclo', JSON.stringify(r).slice(0, 140));
   check(r.repetido === true, 'assinala que repetiu as imagens', `repetido=${r.repetido}`);
   check(perto(r.duracaoNatural, 7, 0.05), `a duração natural era ${r.duracaoNatural.toFixed(2)}s`, String(r.duracaoNatural));
+  check(perto(r.musicaSegundos, 20, 0.05), `o motor usou a duração do áudio descodificado (${r.musicaSegundos}s)`, String(r.musicaSegundos));
   check(r.passagens >= 3, `deu ${r.passagens} passagens às imagens`, String(r.passagens));
   check(r.duracao >= 20, `o vídeo chegou aos 20s da música (${r.duracao.toFixed(2)}s)`, `${r.duracao}`);
   // Passagens INTEIRAS: o vídeo pode passar um pouco do fim da música (nunca
   // fica cortado a meio de uma imagem), mas no máximo uma passagem a mais.
   check(r.duracao < 20 + 7, `o excesso é menos de uma passagem (${r.duracao.toFixed(2)}s < 27s)`, `${r.duracao}`);
-  check(perto(r.duracao, r.passagens * r.duracaoNatural, 0.1), `são exatamente ${r.passagens} passagens de ${r.duracaoNatural.toFixed(1)}s`, `${r.duracao} ≠ ${r.passagens}×${r.duracaoNatural}`);
+  // O total é o número de passagens MAIS o resto do último fotograma (250 ms que
+  // o gravador deixa entrar antes de fechar) — daí a folga.
+  check(perto(r.duracao, r.passagens * r.duracaoNatural, 0.45), `são as ${r.passagens} passagens de ${r.duracaoNatural.toFixed(1)}s (${r.duracao.toFixed(2)}s)`, `${r.duracao} ≠ ${r.passagens}×${r.duracaoNatural}`);
   check(r.cortado === true, 'avisa que a última passagem é cortada a meio', `cortado=${r.cortado}`);
 
   // As imagens têm de voltar pela mesma ordem, e a música continuar em ciclo.
@@ -696,12 +702,14 @@ console.log('\n[19] Sem modo de ciclo, a duração continua a ser a natural');
     cenas: duasCenas, transicao: 'fade', duracaoTransicao: 0.6, duracaoCena: 3.5,
     musica, modoDuracao: 'natural', musicaSegundos: 20,
   }));
+  console.log(`     [19a] modo natural: repetido=${r.repetido} passagens=${r.passagens} música=${r.musicaSegundos}s duração=${r.duracao}s`);
   check(r.repetido === false && r.passagens === 1, 'não repetiu nada', `repetido=${r.repetido} passagens=${r.passagens}`);
   check(perto(r.duracao, 7, 0.1), `ficou nos 7s das imagens (${r.duracao.toFixed(2)}s)`, `${r.duracao}`);
   check(r.cortado === false, 'não assinala corte', `cortado=${r.cortado}`);
 
-  // Música mais CURTA do que o vídeo: não há nada a repetir.
-  instalarAmbiente([]);
+  // Música mais CURTA do que o vídeo: não há nada a repetir (a duração do
+  // áudio descodificado é a que manda, por isso é ela que se põe a 3s).
+  instalarAmbiente([], { musicaSegundos: 3 });
   const r2 = await correrCom(mod.gerarVideo({
     cenas: duasCenas, transicao: 'fade', duracaoTransicao: 0.6, duracaoCena: 3.5,
     musica, modoDuracao: 'trilha', musicaSegundos: 3,
@@ -717,10 +725,9 @@ console.log('\n[19] Sem modo de ciclo, a duração continua a ser a natural');
   }));
   check(r3.ok === true && r3.repetido === false, 'sem música não repete', `repetido=${r3.repetido}`);
 
-  // Limite: uma música enorme não pode gerar milhares de cenas. A gravação é em
-  // tempo real, por isso aqui corre-se com um limite de tempo curto e confirma-se
-  // que o número de passagens ficou travado (não que o vídeo acabou).
-  instalarAmbiente([]);
+  // 5 horas de música: pede-se uma duração absurda e confirma-se que o motor
+  // trava as passagens em 100 (não pode gerar milhares de cenas).
+  instalarAmbiente([], { musicaSegundos: 60 * 60 * 5 });
   let passagensVistas = 0;
   const r4 = await correrCom(mod.gerarVideo({
     cenas: duasCenas, transicao: 'fade', duracaoTransicao: 0.6, duracaoCena: 2,
@@ -734,8 +741,8 @@ console.log('\n[19] Sem modo de ciclo, a duração continua a ser a natural');
 
 console.log('\n[20] Com narração, o ciclo repete também a voz');
 {
-  // 2 cenas narradas de 2s: 4s naturais, música de 10s → repete.
-  instalarAmbiente([2.0, 2.0, 2.0, 2.0, 2.0, 2.0]);
+  // 2 cenas narradas de 2s: 4s naturais, música de 10s → repete 3 passagens.
+  instalarAmbiente([2.0, 2.0], { musicaSegundos: 10 });
   const musica = { name: 'tema.mp3', arrayBuffer: () => Promise.resolve(new ArrayBuffer(64)) };
   const r = await correrCom(mod.gerarVideo({
     cenas: [
@@ -769,18 +776,19 @@ console.log('\n[21] Explica porque não repetiu, em vez de ficar calado');
   const r1 = await correrCom(mod.gerarVideo({ cenas: duas, duracaoCena: 2, modoDuracao: 'natural' }));
   check(!r1.repetido && /As imagens/.test(r1.semCiclo || ''), `modo natural explica-se: "${r1.semCiclo}"`, String(r1.semCiclo));
 
-  // (b) modo de ciclo sem duração de música conhecida
-  instalarAmbiente([]);
+  // (b) modo de ciclo sem duração de música conhecida: o áudio descodificado
+  // também não diz a duração (0), por isso o ciclo não tem alvo.
+  instalarAmbiente([], { musicaSegundos: 0 });
   const r2 = await correrCom(mod.gerarVideo({ cenas: duas, duracaoCena: 2, musica, modoDuracao: 'trilha', musicaSegundos: 0 }));
   check(!r2.repetido && /não consegui saber a duração/i.test(r2.semCiclo || ''), `sem duração conhecida: "${r2.semCiclo}"`, String(r2.semCiclo));
 
   // (c) música mais curta do que o vídeo
-  instalarAmbiente([]);
+  instalarAmbiente([], { musicaSegundos: 3 });
   const r3 = await correrCom(mod.gerarVideo({ cenas: duas, duracaoCena: 2, musica, modoDuracao: 'trilha', musicaSegundos: 3 }));
   check(!r3.repetido && /não é mais longa/i.test(r3.semCiclo || ''), `música curta explica-se: "${r3.semCiclo}"`, String(r3.semCiclo));
 
   // (d) quando repete, não há explicação de falha e a versão vem sempre
-  instalarAmbiente([]);
+  instalarAmbiente([], { musicaSegundos: 10 });
   const r4 = await correrCom(mod.gerarVideo({ cenas: duas, duracaoCena: 2, musica, modoDuracao: 'trilha', musicaSegundos: 10 }));
   check(r4.repetido && r4.semCiclo === '', 'quando repete, não há nada a explicar', String(r4.semCiclo));
   check(/^\d+\.\d+\.\d+$/.test(r4.versao || ''), `o motor diz a sua versão (${r4.versao})`, String(r4.versao));

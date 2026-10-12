@@ -346,11 +346,15 @@ export async function gerarVideo({
   // página é avisada — nunca se perde o trabalho por causa da trilha.
   let trilha = null;
   let musicaAviso = '';
+  let musicaReal = 0;
   if (musica) {
     try {
       const mod = await import('./musica.mjs');
       const r = await mod.carregarTrilha(musica, seq.ctx);
       if (r.ok) {
+        // Este valor é a verdade sobre a duração: vem do áudio já descodificado,
+        // não de um <audio> a ler metadados. Serve de segunda opinião à página.
+        musicaReal = r.duracao;
         trilha = mod.tocarTrilha({ ctx: seq.ctx, destino: seq.destino, musica: r.musica });
         musicaAviso = r.aviso;
       } else {
@@ -372,7 +376,13 @@ export async function gerarVideo({
 
   // O vídeo é curto e a música é longa? Em vez de cortar a música, as imagens
   // repetem-se em ciclo até a música acabar (é o que o modo 'trilha' faz).
-  const alvoMusica = modoDuracao === 'trilha' ? Number(musicaSegundos) || 0 : 0;
+  //
+  // A duração que manda é a do áudio JÁ DESCODIFICADO (musicaReal), que é a
+  // verdade; a que a página mediu (musicaSegundos) só serve se esta faltar.
+  // Sem esta ordem, uma leitura de metadados falhada deixava o vídeo curto e a
+  // música cortada a meio, sem ninguém saber porquê.
+  const duracaoMusica = musicaReal > 0 ? musicaReal : Number(musicaSegundos) || 0;
+  const alvoMusica = modoDuracao === 'trilha' ? duracaoMusica : 0;
   const repetido = repetirAte(cenas, duracoes, alvoMusica);
   const semCiclo = explicarSemCiclo(modoDuracao, alvoMusica, natural);
 
@@ -521,5 +531,7 @@ export async function gerarVideo({
     duracaoNatural: natural,
     versao: VERSAO_VIDEO,
     semCiclo,
+    // A duração da música que o motor realmente usou (do áudio descodificado).
+    musicaSegundos: duracaoMusica,
   };
 }

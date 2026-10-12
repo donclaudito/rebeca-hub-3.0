@@ -1403,25 +1403,22 @@ const formatarMinutos = (s) => {
   return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
 };
 
-// Lê a duração real do ficheiro sem o descodificar todo: um <audio> temporário
-// dá-nos isso de graça, e é o que mostramos ao utilizador para ele confirmar.
-function medirTrilha(ficheiro) {
-  return new Promise((resolve) => {
-    const url = URL.createObjectURL(ficheiro);
-    const a = new Audio();
-    let pronto = false;
-    const fim = (d) => {
-      if (pronto) return;
-      pronto = true;
-      a.removeAttribute('src');
-      resolve(d);
-    };
-    a.preload = 'metadata';
-    a.onloadedmetadata = () => fim(isFinite(a.duration) ? a.duration : 0);
-    a.onerror = () => fim(0);
-    setTimeout(() => fim(0), 8000);
-    a.src = url;
-  });
+// Lê a duração real do ficheiro com um <audio> temporário. A leitura é feita
+// pelo módulo audio-info.mjs, que ouve VÁRIOS eventos e ainda pergunta em
+// intervalos: um `loadedmetadata` que não chega deixava a duração a 0, o ciclo
+// ficava sem alvo e a música era cortada a meio.
+async function medirTrilha(ficheiro) {
+  const url = URL.createObjectURL(ficheiro);
+  try {
+    const mod = await import('./audio-info.mjs');
+    return await mod.medirDuracaoAudio(url);
+  } catch {
+    // Sem conseguir medir, o ciclo "até acabar a música" não tem alvo: a página
+    // avisa e o vídeo fica com a duração das imagens, em vez de falhar.
+    return 0;
+  } finally {
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
+  }
 }
 
 async function escolherTrilha() {
@@ -1817,6 +1814,23 @@ async function gerarVideoFinal() {
     });
 
     if (!r.ok) throw new Error(r.erro);
+
+    // O motor mediu a música pelo áudio descodificado, que é a verdade. Se a
+    // página tinha medido outra coisa, fica a certa para a próxima vez (e o
+    // desvio vai para a consola, porque um desvio grande é um defeito a olhar).
+    if (r.musicaSegundos > 0 && Math.abs(r.musicaSegundos - (state.musicaSegundos || 0)) > 1) {
+      if (state.musicaSegundos > 0) {
+        console.warn(
+          `[trilha] a página mediu ${state.musicaSegundos.toFixed(2)}s e o áudio descodificado tem ` +
+            `${r.musicaSegundos.toFixed(2)}s; passei a usar o valor do áudio.`,
+        );
+      }
+      state.musicaSegundos = r.musicaSegundos;
+      state.musicaDuracao = r.musicaSegundos;
+      state.musicaMedida = true;
+      atualizarTrilha();
+      guardar();
+    }
 
     const nome = `rebeca-video.${r.extensao}`;
     const url = URL.createObjectURL(r.blob);

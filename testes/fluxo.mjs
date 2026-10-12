@@ -6,6 +6,7 @@ let js = readFileSync(BASE + 'app.js', 'utf8');
 js = js.replace(/await import\('@\/base44Client\.js'\)/g, '({ base44: { functions: { invoke: async () => ({ ok: true }) } } })');
 js = js.replace(/await import\('\.\/video\.mjs'\)/g, "globalThis.__video");
 js = js.replace(/await import\('\.\/legendas-core\.mjs'\)/g, "await import('file:///E:/youtube%20rebeca2/rebeca-hub-3.0-base44/public/legendas-core.mjs')");
+js = js.replace(/await import\('\.\/audio-info\.mjs'\)/g, "await import('file:///E:/youtube%20rebeca2/rebeca-hub-3.0-base44/public/audio-info.mjs')");
 
 class El {
   constructor(tag = 'div') {
@@ -59,7 +60,24 @@ globalThis.document = { getElementById: (id) => reg.get(id) || null, createEleme
 globalThis.window = { MediaRecorder: class { static isTypeSupported() { return true; } }, AudioContext: class {}, speechSynthesis: { getVoices: () => [], speak() {}, cancel() {} } };
 globalThis.speechSynthesis = globalThis.window.speechSynthesis;
 globalThis.SpeechSynthesisUtterance = class {};
-globalThis.Audio = class { constructor() { this.duration = 180; setTimeout(() => this.onloadedmetadata?.(), 0); } play() { return Promise.resolve(); } pause() {} removeAttribute() {} };
+// O <audio> falso só sabe a duração depois de receber o `src` — como um a sério.
+globalThis.Audio = class {
+  constructor() { this.duration = NaN; this.listeners = {}; }
+  set src(v) {
+    this._src = v;
+    setTimeout(() => {
+      this.duration = 180;
+      (this.listeners.loadedmetadata || []).forEach((f) => f());
+      this.onloadedmetadata?.();
+    }, 0);
+  }
+  get src() { return this._src; }
+  load() {}
+  addEventListener(ev, fn) { (this.listeners[ev] = this.listeners[ev] || []).push(fn); }
+  play() { return Promise.resolve(); }
+  pause() {}
+  removeAttribute() {}
+};
 globalThis.AudioContext = globalThis.window.AudioContext;
 globalThis.MediaRecorder = globalThis.window.MediaRecorder;
 globalThis.MediaStream = class { constructor(t) { this.tracks = t; } getTracks() { return this.tracks; } getVideoTracks() { return this.tracks; } getAudioTracks() { return []; } };

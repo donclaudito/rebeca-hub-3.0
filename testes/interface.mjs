@@ -117,8 +117,23 @@ function ambiente(reg, suportaVideo, duracaoMusica = 65) {
   globalThis.window = suportaVideo ? { MediaRecorder: MR, AudioContext: AC, speechSynthesis: fala } : { speechSynthesis: fala };
   globalThis.speechSynthesis = globalThis.window.speechSynthesis;
   globalThis.SpeechSynthesisUtterance = class { constructor(t) { this.text = t; } };
+  // O <audio> falso só sabe a duração DEPOIS de lhe darem o `src` — como um a
+  // sério. Disparar isto no construtor fazia o código (corretamente) ignorar a
+  // leitura, porque nessa altura o `src` ainda não existe.
   globalThis.Audio = class {
-    constructor() { this.duration = duracaoMusica; setTimeout(() => this.onloadedmetadata?.(), 0); }
+    constructor() { this.duration = NaN; this.listeners = {}; }
+    set src(v) {
+      this._src = v;
+      setTimeout(() => {
+        this.duration = duracaoMusica;
+        (this.listeners.loadedmetadata || []).forEach((f) => f());
+        this.onloadedmetadata?.();
+        this.ondurationchange?.();
+      }, 0);
+    }
+    get src() { return this._src; }
+    load() {}
+    addEventListener(ev, fn) { (this.listeners[ev] = this.listeners[ev] || []).push(fn); }
     play() { setTimeout(() => this.onended?.(), 5000); return Promise.resolve(); }
     pause() {}
     removeAttribute() {}
@@ -148,6 +163,7 @@ const VIDEO_URL = 'file:///E:/youtube%20rebeca2/rebeca-hub-3.0-base44/public/vid
 const src = readFileSync(BASE + 'app.js', 'utf8')
   .replace(/await import\('@\/base44Client\.js'\)/g, '({ base44: globalThis.__base44Falso })')
   .replace(/await import\('\.\/video\.mjs'\)/g, `await import('${VIDEO_URL}')`)
+  .replace(/await import\('\.\/audio-info\.mjs'\)/g, `await import('file:///E:/youtube%20rebeca2/rebeca-hub-3.0-base44/public/audio-info.mjs')`)
   .replace(/await import\('\.\/legendas-core\.mjs'\)/g, `await import('file:///E:/youtube%20rebeca2/rebeca-hub-3.0-base44/public/legendas-core.mjs')`);;;
 const erros = [];
 // Um erro não tratado tem de APARECER. Antes ficava só numa lista e, se
@@ -227,7 +243,7 @@ console.log('\n[5] Com texto mas sem áudio: explica onde o gerar');
   const reg = await arrancar(true);
   const input = reg.get('input-files');
   input.onchange({ target: { files: [{ name: 'c1.jpg', type: 'image/jpeg', size: 900 }], value: '' } });
-  await new Promise((r) => setTimeout(r, 150));
+  await new Promise((r) => setTimeout(r, 350));
   const cena = reg.get('scenes').children[0];
   check(!!cena, 'cena criada após importar imagem', 'não criou cena');
   const ta = cena.children[1].children.find((c) => c.tagName === 'TEXTAREA');
@@ -235,7 +251,7 @@ console.log('\n[5] Com texto mas sem áudio: explica onde o gerar');
   ta.value = 'Era uma vez uma menina.';
   ta.dispatchEvent({ type: 'input' });
   reg.get('btn-video').click();
-  await new Promise((r) => setTimeout(r, 250));
+  await new Promise((r) => setTimeout(r, 450));
   const est = reg.get('vid-estado').textContent;
   check(/Ainda não há áudio/i.test(est), 'explica que falta o áudio', `estado: ${est}`);
   check(/Gerar o áudio de todas as cenas/i.test(est), 'diz onde gerar o áudio', `estado: ${est}`);
@@ -299,7 +315,7 @@ console.log('\n[8] Modo "só música": sem narração nenhuma');
 
   // Importa imagens, mas não gera narração nenhuma.
   reg.get('input-files').onchange({ target: { files: [{ name: 'a.jpg', type: 'image/jpeg', size: 900 }, { name: 'b.jpg', type: 'image/jpeg', size: 900 }], value: '' } });
-  await new Promise((r) => setTimeout(r, 150));
+  await new Promise((r) => setTimeout(r, 350));
   check(reg.get('scenes').children.length === 2, '2 imagens importadas', String(reg.get('scenes').children.length));
 
   // Ainda no modo com voz: o botão avisa que falta a narração.
@@ -321,7 +337,7 @@ console.log('\n[8] Modo "só música": sem narração nenhuma');
   input.files = [{ name: 'tema.mp3', size: 2_000_000, type: 'audio/mpeg' }];
   check(typeof input.onchange === 'function', 'o campo da música tem handler ligado', `onchange=${typeof input.onchange}`);
   input.onchange();
-  await new Promise((r) => setTimeout(r, 150));
+  await new Promise((r) => setTimeout(r, 350));
   check(/tema\.mp3/.test(reg.get('trilha-estado').textContent), `a trilha ficou escolhida: "${reg.get('trilha-estado').textContent}"`, reg.get('trilha-estado').textContent);
   const est = reg.get('vid-estado').textContent;
   check(/sem voz/i.test(est), `diz que sai sem voz: "${est.slice(0, 70)}…"`, est);
@@ -380,7 +396,7 @@ console.log('\n[11] O resumo mostra os blocos de legenda da narração');
   const reg = await arrancar(true);
   // Importa uma imagem e escreve uma narração longa.
   reg.get('input-files').onchange({ target: { files: [{ name: 'a.jpg', type: 'image/jpeg', size: 900 }], value: '' } });
-  await new Promise((r) => setTimeout(r, 150));
+  await new Promise((r) => setTimeout(r, 350));
   const cena = reg.get('scenes').children[0];
   const ta = cena.children[1].children.find((c) => c.tagName === 'TEXTAREA');
   ta.value = 'Era uma vez uma menina muito curiosa. Ela vivia numa casa pequena e feliz.';
@@ -403,14 +419,14 @@ console.log('\n[12] Duração: repetir as imagens até a música acabar');
 
   // Importa imagens e escolhe música: o modo de ciclo passa a fazer sentido.
   reg.get('input-files').onchange({ target: { files: [{ name: 'a.jpg', type: 'image/jpeg', size: 900 }, { name: 'b.jpg', type: 'image/jpeg', size: 900 }], value: '' } });
-  await new Promise((r) => setTimeout(r, 150));
+  await new Promise((r) => setTimeout(r, 350));
   reg.get('vid-modos').children[2].click(); // só música, sem narração
   await new Promise((r) => setTimeout(r, 40));
   check(cdm.children[1].disabled === true, 'continua desativado enquanto não há música', 'ativou sem música');
 
   reg.get('input-trilha').files = [{ name: 'tema.mp3', size: 2_000_000, type: 'audio/mpeg' }];
   reg.get('input-trilha').onchange();
-  await new Promise((r) => setTimeout(r, 180));
+  await new Promise((r) => setTimeout(r, 400));
   check(cdm.children[1].disabled === false, 'com música, o modo de ciclo fica utilizável', 'continuou desativado');
   check(cdm.children[1].classList.contains('on'), 'e fica escolhido por omissão', 'não ficou escolhido');
 
@@ -441,12 +457,12 @@ console.log('\n[13] Música com duração ilegível: avisa em vez de fingir');
   // browser não conhece): o ciclo não pode ser calculado.
   const reg = await arrancar(true, 0);
   reg.get('input-files').onchange({ target: { files: [{ name: 'a.jpg', type: 'image/jpeg', size: 900 }], value: '' } });
-  await new Promise((r) => setTimeout(r, 150));
+  await new Promise((r) => setTimeout(r, 350));
   reg.get('vid-modos').children[2].click();
   await new Promise((r) => setTimeout(r, 40));
   reg.get('input-trilha').files = [{ name: 'estranho.xyz', size: 1_000_000, type: 'application/octet-stream' }];
   reg.get('input-trilha').onchange();
-  await new Promise((r) => setTimeout(r, 180));
+  await new Promise((r) => setTimeout(r, 400));
 
   const est = reg.get('vid-estado').textContent;
   check(/Não consegui ler a duração/i.test(est), `diz que não conseguiu ler a duração: "${est.slice(-110)}"`, est);

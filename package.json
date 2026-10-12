@@ -1,0 +1,19 @@
+{
+  "name": "rebeca-hub-3.0-base44",
+  "private": true,
+  "version": "3.0.0",
+  "type": "module",
+  "description": "Rebeca Hub 3.0 alojado na Base44: importa imagens e gera a narração, sem depender de servidor no seu computador.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@base44/sdk": "^0.8.53"
+  },
+  "devDependencies": {
+    "@base44/vite-plugin": "^1.0.44",
+    "vite": "^8.2.0"
+  }
+}

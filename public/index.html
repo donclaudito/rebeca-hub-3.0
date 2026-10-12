@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Rebeca Hub 3.0 — nuvem</title>
+    <link rel="stylesheet" href="/style.css" />
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎙️</text></svg>" />
+  </head>
+  <body>
+    <header class="top">
+      <div class="brand">
+        <span class="logo">🎙️</span>
+        <div>
+          <h1>Rebeca Hub <b>3.0</b> <span class="nuvem">nuvem</span></h1>
+          <p class="tag">Importe as imagens · a narração nasce delas · sem servidor no seu PC</p>
+        </div>
+      </div>
+      <div class="top-actions">
+        <span id="status" class="pill">a ligar…</span>
+        <button id="btn-config" class="ghost" type="button">⚙️ Configurações</button>
+      </div>
+    </header>
+
+    <!-- Avisos -->
+    <div id="aviso" class="aviso" hidden></div>
+
+    <!-- Passo 1 -->
+    <section id="drop" class="drop">
+      <div class="drop-inner">
+        <div class="drop-icon">🖼️</div>
+        <h2 id="drop-title">Arraste uma pasta de imagens para aqui</h2>
+        <p>ou</p>
+        <div class="drop-buttons">
+          <button id="btn-folder" class="primary" type="button">📁 Escolher pasta</button>
+          <button id="btn-files" class="ghost" type="button">Selecionar imagens</button>
+        </div>
+        <p class="hint">
+          As imagens ficam no seu computador e são reduzidas antes de serem enviadas.
+          Para gerar a narração, só as imagens (reduzidas) saem daqui — nunca os ficheiros originais.
+        </p>
+      </div>
+      <input id="input-files" type="file" accept="image/*" multiple hidden />
+    </section>
+
+    <main id="workspace" hidden>
+      <section class="toolbar">
+        <div class="tb-left">
+          <button id="btn-add" class="ghost small" type="button">＋ Adicionar</button>
+          <button id="btn-clear" class="ghost small danger" type="button">🗑 Limpar</button>
+        </div>
+        <div class="tb-mid">
+          <label class="field">
+            <span>Tom</span>
+            <input id="tone" type="text" placeholder="ex.: acolhedor, divertido" />
+          </label>
+          <label class="field tiny">
+            <span>Palavras por imagem</span>
+            <span class="range">
+              <input id="minWords" type="number" min="4" max="60" value="12" />
+              <i>a</i>
+              <input id="maxWords" type="number" min="6" max="80" value="30" />
+            </span>
+          </label>
+          <label class="field">
+            <span>Instrução extra (opcional)</span>
+            <input id="extra" type="text" placeholder="ex.: fale como uma avó contando histórias" />
+          </label>
+        </div>
+        <div class="tb-right">
+          <button id="btn-generate" class="primary" type="button" disabled>✨ Gerar narração das imagens</button>
+        </div>
+      </section>
+
+      <div id="progress" class="progress" hidden>
+        <div class="bar"><span id="bar-fill"></span></div>
+        <span id="progress-text"></span>
+      </div>
+
+      <section class="panes">
+        <!-- Esquerda -->
+        <div class="pane">
+          <div class="abas" id="abas-esq">
+            <button type="button" class="aba on" data-tab="tab-imagens">🖼️ Imagens <span id="count" class="n">0</span></button>
+            <button type="button" class="aba" data-tab="tab-voz">🎙️ Voz e áudio</button>
+          </div>
+
+          <div class="tab" id="tab-imagens">
+            <header class="pane-head">
+              <h2>Ordem das imagens</h2>
+              <span class="pane-hint">Arraste, ou use ▲ ▼</span>
+            </header>
+            <ul id="thumbs" class="thumbs"></ul>
+          </div>
+
+          <div class="tab" id="tab-voz" hidden>
+            <header class="pane-head">
+              <h2>Voz e áudio</h2>
+              <span id="voz-estado" class="pill tiny-pill">…</span>
+            </header>
+            <div class="voice-panel">
+              <div class="vp-group">
+                <span class="vp-label">Voz</span>
+                <div id="vozes" class="chips"></div>
+              </div>
+              <div class="vp-group">
+                <span class="vp-label">Velocidade</span>
+                <div id="velocidades" class="chips"></div>
+              </div>
+              <div class="vp-group">
+                <span class="vp-label">Gravar</span>
+                <div id="modos" class="chips">
+                  <button type="button" class="chip on" data-modo="mic">🎤 Microfone</button>
+                  <button type="button" class="chip" data-modo="ecra">🖥 Partilha de ecrã</button>
+                </div>
+              </div>
+              <p class="hint" style="margin:0">
+                O áudio é gerado <b>no seu browser</b>, com as vozes do sistema — não passa por servidor
+                nenhum. Autorize o microfone uma vez e deixe correr.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Direita -->
+        <div class="pane">
+          <div class="abas" id="abas-dir">
+            <button type="button" class="aba on" data-tab="tab-narracao">📝 Narração</button>
+            <button type="button" class="aba" data-tab="tab-acoes">⚡ Ações</button>
+          </div>
+
+          <div class="tab" id="tab-narracao">
+            <header class="pane-head">
+              <h2>Narração por imagem</h2>
+              <span id="narradas" class="badge"></span>
+            </header>
+            <ol id="scenes" class="scenes"></ol>
+            <p id="empty-scenes" class="empty">Importe imagens e clique em <b>Gerar narração das imagens</b>.</p>
+          </div>
+
+          <div class="tab" id="tab-acoes" hidden>
+            <header class="pane-head">
+              <h2>O que fazer com o resultado</h2>
+            </header>
+            <div class="audio-actions vertical">
+              <button id="btn-ouvir-tudo" class="ghost" type="button">▶️ Ouvir tudo em sequência</button>
+              <button id="btn-gerar-audio" class="primary" type="button">🎧 Gerar o áudio de todas as cenas</button>
+              <button id="btn-parar" class="ghost" type="button">⏹ Parar</button>
+              <button id="btn-zip" class="ghost" type="button">⬇️ Descarregar pacote (ZIP)</button>
+            </div>
+            <p class="hint" style="padding: 0 14px 14px; margin: 0; max-width: none">
+              O pacote leva o texto e um ficheiro de áudio por imagem.
+              A montagem do vídeo com transições continua a ser feita na versão local,
+              com o ffmpeg (o Rebeca Hub 3.0 que corre no seu PC).
+            </p>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Configurações -->
+    <dialog id="dlg" class="dlg">
+      <form method="dialog">
+        <h2>Configurações</h2>
+        <p class="hint">
+          A narração é pedida à função de nuvem <code>generateNarration</code>, que guarda a chave
+          da API como segredo da app. A chave <b>nunca</b> chega a esta página.
+        </p>
+
+        <label class="field wide">
+          <span>Serviço de visão</span>
+          <select id="cfg-servico">
+            <option value="deepseek">DeepSeek — deepseek-flash</option>
+            <option value="openai">OpenAI — gpt-4o-mini</option>
+            <option value="groq">Groq — Llama 4 Scout</option>
+            <option value="gemini">Google Gemini — gemini-2.5-flash</option>
+            <option value="local">Servidor local (127.0.0.1:3100)</option>
+          </select>
+        </label>
+
+        <label class="field wide">
+          <span>Modelo (deixe vazio para o predefinido do serviço)</span>
+          <input id="cfg-modelo" type="text" placeholder="deepseek-flash" />
+        </label>
+
+        <div id="cfg-resultado" class="cfg-result" hidden></div>
+
+        <menu>
+          <button id="cfg-testar" type="button" class="ghost">🔌 Testar ligação</button>
+          <button value="cancel" class="ghost">Fechar</button>
+          <button id="cfg-guardar" value="save" class="primary">Guardar</button>
+        </menu>
+      </form>
+    </dialog>
+
+    <div id="toast" class="toast" hidden></div>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,6 @@
+node_modules/
+dist/
+.env
+.env.local
+base44/.app.jsonc
+*.log

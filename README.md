@@ -1,0 +1,177 @@
+# Rebeca Hub 3.0 — versão na nuvem (Base44)
+
+A mesma ideia do Rebeca Hub 3.0 — **importar imagens de uma pasta → a narração nasce delas** —
+mas **alojada na Base44**. Deixa de precisar de ter um servidor a correr no seu computador,
+e o problema do `spawn EPERM` desaparece: não há processos locais envolvidos.
+
+---
+
+## O que muda em relação à versão local
+
+| | Versão local (`rebeca-hub-3.0`) | Esta versão (nuvem) |
+|---|---|---|
+| Servidor no seu PC | precisa | **não precisa** |
+| Chave da API | fica no seu PC | **fica como segredo na Base44** |
+| Narração (texto) | servidor local → DeepSeek | **função de nuvem** → DeepSeek |
+| Voz (áudio) | PowerShell + ffmpeg (SAPI) | **no próprio browser** (Web Speech) |
+| Formato do áudio | MP3 | WebM/Opus |
+| Vídeo com transições | **sim** (ffmpeg) | não — continua na versão local |
+| Funciona offline | sim | não (precisa de internet) |
+
+**Resumindo:** ganha independência do seu computador; perde o MP3 e o vídeo.
+A versão local continua a existir para essas duas coisas.
+
+---
+
+## Antes de começar
+
+Precisa de:
+
+- **Node.js 20.19 ou superior** (já tem o 26)
+- **Base44 CLI** — já está instalada nesta máquina (versão 0.1.15)
+- **Uma conta na Base44** com o seu Rebeca Hub 2.0 (já tem)
+
+---
+
+## Publicar — passo a passo
+
+### 1. Criar o app na Base44
+
+```powershell
+cd "E:\youtube rebeca2\rebeca-hub-3.0-base44"
+base44 create
+```
+
+Escolha um nome (ex.: *Rebeca Hub 3.0*). No fim, ele mostra o **id do app**.
+
+### 2. Ligar este código ao app
+
+```powershell
+base44 link
+```
+
+Isto preenche o `base44/.app.jsonc` com o id certo.
+
+### 3. Guardar a chave da DeepSeek como segredo
+
+**Este é o passo que resolve o seu problema** — a chave passa a viver na Base44,
+nunca no seu computador nem no browser:
+
+```powershell
+base44 secrets set DEEPSEEK_API_KEY=sk_a_sua_chave
+```
+
+Para usar outro serviço, o nome do segredo muda:
+
+| Serviço | Nome do segredo |
+|---|---|
+| DeepSeek | `DEEPSEEK_API_KEY` |
+| OpenAI | `OPENAI_API_KEY` |
+| Groq | `GROQ_API_KEY` |
+| Google Gemini | `GEMINI_API_KEY` |
+
+Confirme que ficou guardado:
+
+```powershell
+base44 secrets list
+```
+
+### 4. Pôr o id no ficheiro de ambiente
+
+Crie um ficheiro **`.env.local`** na raiz do projeto com:
+
+```
+VITE_BASE44_APP_ID=o_id_do_seu_app
+```
+
+### 5. Desenvolver localmente (para ver antes de publicar)
+
+```powershell
+npm install
+npm run dev
+```
+
+Abre em `http://localhost:5173`. Aqui o site corre no seu PC, mas a narração já é
+pedida à função de nuvem — é o melhor sítio para testar.
+
+### 6. Publicar
+
+```powershell
+base44 deploy
+```
+
+Isto publica a função **e** o site. No fim, abra o site publicado:
+
+```powershell
+base44 site open
+```
+
+A partir daí, a app funciona em **qualquer computador**, sem nada instalado.
+
+---
+
+## Testar a função antes de publicar
+
+Não quer publicar às cegas? Há um teste que corre a **mesma lógica** da função
+de nuvem contra a API real:
+
+```powershell
+cd "E:\youtube rebeca2\rebeca-hub-3.0-base44"
+node TESTAR-FUNCAO.mjs sk_a_sua_chave deepseek
+```
+
+Ele mostra o que o modelo respondeu, cena por cena. Assim sabe se a chave e o
+modelo funcionam **antes** de gastar tempo com deploy.
+
+---
+
+## Como funciona
+
+```
+public/index.html      A página (sem framework, sem build)
+public/app.js          Importar, reordenar, gerar, gravar áudio, ZIP
+public/style.css       Estilo
+src/base44Client.js    Cliente do SDK da Base44
+base44/functions/generateNarration/entry.ts
+                       A FUNÇÃO DE NUVEM: recebe as imagens, fala com o modelo
+                       de visão e devolve a narração. É aqui que vive a chave.
+TESTAR-FUNCAO.mjs      Testa a lógica da função localmente
+```
+
+### O percurso de uma imagem
+
+1. Você arrasta uma pasta → as imagens ficam **só na memória do browser**;
+2. A imagem é **reduzida para 1280 px** antes de sair (o modelo encolhe tudo para
+   ~1300 px de qualquer forma — enviar 2,6 MB por imagem não acrescenta nada);
+3. A página envia as imagens reduzidas à função `generateNarration`;
+4. A função lê a chave do segredo e chama o modelo **com visão**;
+5. Volta a narração, uma frase por imagem, em sequência;
+6. O áudio é gerado **no seu browser** e fica disponível para ouvir e descarregar.
+
+**A chave nunca chega ao browser.** É a razão de existir a função de nuvem.
+
+---
+
+## Limites desta versão
+
+- **Sem MP3.** O áudio sai em **WebM/Opus**, porque converter para MP3 exige ffmpeg.
+  O Chrome, o Edge, o Firefox, o VLC e o DaVinci leem WebM sem problema.
+- **Sem vídeo.** A montagem com transições precisa do ffmpeg — use a versão local.
+- **Precisa de internet** para gerar a narração (o áudio funciona offline, porque
+  é o browser que o faz).
+- **A voz é a do sistema** onde estiver a usar a app. Num telemóvel, as vozes são
+  as do telemóvel.
+
+---
+
+## Problemas comuns
+
+| Sintoma | Causa e solução |
+|---|---|
+| "Falta o VITE_BASE44_APP_ID" | Crie o `.env.local` (passo 4) e reinicie o `npm run dev`. |
+| "Falta o segredo DEEPSEEK_API_KEY" | Corra `base44 secrets set DEEPSEEK_API_KEY=sk_...` (passo 3). |
+| "A chave da API foi recusada" | Confirme o nome do segredo e o serviço escolhido nas Configurações. |
+| "A conta deste serviço está SEM SALDO" | Carregue créditos no painel do serviço, ou mude de serviço. |
+| A voz não sai | Autorize o microfone. No Chrome/Edge funciona; alguns browsers não gravam áudio. |
+| O áudio ficou vazio | Aumente o volume das colunas — no modo microfone, a gravação capta o som da sala. |
+| "o modelo não devolveu JSON válido" | Volte a tentar; se persistir, troque de modelo nas Configurações. |

@@ -119,6 +119,16 @@ export default async function (req) {
     const bytes = new Uint8Array(await resposta.arrayBuffer());
     if (bytes.length < 200) return json({ ok: false, error: 'a ElevenLabs devolveu áudio vazio' }, 200);
 
+    // Nome da voz, para a página poder CONFIRMAR qual foi usada. Sem isto, o
+    // utilizador não tinha como saber se a sua escolha tinha pegado.
+    let nomeVoz = '';
+    try {
+      const vr = await fetch(`${API}/voices/${encodeURIComponent(voz)}`, { headers: { 'xi-api-key': chave } });
+      if (vr.ok) nomeVoz = (await vr.json())?.name || '';
+    } catch {
+      /* o nome é um extra: se falhar, o áudio já está bom */
+    }
+
     // base64 em blocos, para não estourar a pilha com áudio longo.
     let binario = '';
     for (let p = 0; p < bytes.length; p += 0x8000) {
@@ -130,6 +140,7 @@ export default async function (req) {
       audioB64: btoa(binario),
       tipo: 'audio/mpeg',
       voz,
+      nomeVoz,
       tom,
       caracteres: texto.length,
       bytes: bytes.length,

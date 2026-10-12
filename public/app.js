@@ -639,6 +639,23 @@ function marcarTom() {
   guardar();
 }
 
+// Marca a voz escolhida em AMBAS as listas (app e conta) e atualiza o estado.
+// Antes isto só limpava os botões da mesma secção: escolher uma voz da conta
+// deixava uma do app marcada ao mesmo tempo, e parecia que a escolha não pegava.
+function marcarVozEleven(id) {
+  state.vozEleven = id || '';
+  const v = state.vozesEleven.find((x) => x.id === id);
+  ['vozes-app', 'vozes-conta'].forEach((qual) => {
+    [...$(qual).children].forEach((b) => b.classList.toggle('on', b.dataset.id === id));
+  });
+  $('voz-estado').textContent = v
+    ? `ElevenLabs · ${v.rotuloDoApp || v.nome}`
+    : id
+      ? `ElevenLabs · ${id.slice(0, 8)}…`
+      : 'ElevenLabs · escolha uma voz';
+  guardar();
+}
+
 function desenharVozesEleven(dados) {
   const app = $('vozes-app');
   const conta = $('vozes-conta');
@@ -657,28 +674,20 @@ function desenharVozesEleven(dados) {
     b.className = 'chip';
     b.dataset.id = v.id;
     b.textContent = v.rotuloDoApp || v.nome;
-    b.title = `${v.nome}${v.categoria ? ` [${v.categoria}]` : ''}${v.descricao ? ` — ${v.descricao}` : ''}\nid: ${v.id}`;
-    b.onclick = () => {
-      state.vozEleven = v.id;
-      [...caixa.parentElement.querySelectorAll('.chip')].forEach((x) => x.classList.toggle('on', x === b));
-      $('voz-estado').textContent = `ElevenLabs · ${v.rotuloDoApp || v.nome}`;
-      guardar();
-    };
+    b.title =
+      `${v.nome}${v.categoria ? ` [${v.categoria}]` : ''}${v.descricao ? ` — ${v.descricao}` : ''}` +
+      `\nid: ${v.id}\nClique para usar esta voz na narração.`;
+    b.onclick = () => marcarVozEleven(v.id);
     caixa.append(b);
   };
 
   doApp.forEach((v) => criar(v, app));
   daConta.forEach((v) => criar(v, conta));
 
-  // Escolhe uma por omissão: a primeira da CONTA (o plano gratuito aceita-a);
-  // se não houver, a primeira do app.
+  // Escolhe uma por omissão: a que já estava escolhida; senão a primeira da
+  // CONTA (o plano gratuito aceita essas); senão a primeira do app.
   const preferida = state.vozesEleven.find((v) => v.id === state.vozEleven) || daConta[0] || doApp[0];
-  if (preferida) {
-    state.vozEleven = preferida.id;
-    const caixa = preferida.doApp ? app : conta;
-    [...caixa.children].forEach((x) => x.classList.toggle('on', x.dataset.id === preferida.id));
-    $('voz-estado').textContent = `ElevenLabs · ${preferida.rotuloDoApp || preferida.nome}`;
-  }
+  marcarVozEleven(preferida ? preferida.id : '');
 }
 
 function estadoEleven(msg, tipo = '') {
@@ -715,8 +724,10 @@ async function carregarVozesEleven() {
     }
     desenharVozesEleven(d);
     const quantasConta = d.vozes.filter((v) => !v.doApp).length;
+    const marcada = d.vozes.find((v) => v.id === state.vozEleven);
     estadoEleven(
       `✅ ${d.total} voz(es) na sua conta (${quantasConta} suas, ${d.total - quantasConta} do app).` +
+        (marcada ? ` Voz escolhida: "${marcada.nome}".` : '') +
         (d.biblioteca ? ' As do app podem ser recusadas se o plano for gratuito.' : ''),
       'ok',
     );
@@ -746,7 +757,14 @@ async function audioDaEleven(texto) {
   const bin = atob(d.audioB64);
   const bytes = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  return { blob: new Blob([bytes], { type: d.tipo || 'audio/mpeg' }), ext: 'mp3', caracteres: d.caracteres };
+  return {
+    blob: new Blob([bytes], { type: d.tipo || 'audio/mpeg' }),
+    ext: 'mp3',
+    caracteres: d.caracteres,
+    // O servidor confirma qual voz usou — é o que prova que a escolha pegou.
+    nomeVoz: d.nomeVoz || '',
+    voz: d.voz || state.vozEleven,
+  };
 }
 
 // ---------------------------------------------------------------- ações
@@ -847,18 +865,25 @@ async function gerarTodoAudioEleven(alvo) {
       };
 
       marcar('a gerar…', 'busy');
-      progress(true, Math.round((i / alvo.length) * 100), `ElevenLabs — imagem ${i + 1} de ${alvo.length}…`);
+      const nomeVoz = state.vozesEleven.find((v) => v.id === state.vozEleven);
+      progress(
+        true,
+        Math.round((i / alvo.length) * 100),
+        `ElevenLabs${nomeVoz ? ` (${nomeVoz.nome})` : ''} — imagem ${i + 1} de ${alvo.length}…`,
+      );
       try {
         const r = await audioDaEleven(cena.texto);
         if (cena.audioUrl) URL.revokeObjectURL(cena.audioUrl);
         cena.audioUrl = URL.createObjectURL(r.blob);
         cena.audioB64 = await paraBase64(r.blob);
         cena.audioExt = r.ext;
+        cena.vozUsada = r.nomeVoz || nomeVoz?.nome || '';
         if (audio) {
           audio.src = cena.audioUrl;
           audio.hidden = false;
         }
-        marcar('MP3 pronto', 'ok');
+        // Mostra a VOZ usada, não só "pronto": é a prova de que a escolha pegou.
+        marcar(r.nomeVoz ? `MP3 · ${r.nomeVoz}` : 'MP3 pronto', 'ok');
         feitos++;
       } catch (e) {
         falhas.push(idx + 1);
@@ -1234,6 +1259,9 @@ function init() {
   state.vozEleven = c.vozEleven || '';
   marcarMotor();
   marcarTom();
+  // A voz escolhida só se pode marcar depois de a lista chegar do servidor;
+  // o botão "Carregar as minhas vozes" trata disso e repõe a escolha guardada.
+  if (state.vozEleven) $('voz-estado').textContent = `ElevenLabs · ${state.vozEleven.slice(0, 8)}… (por confirmar)`;
   $('cfg-servico').value = state.servico;
   $('cfg-modelo').value = state.modelo;
   [...cv.children].forEach((x) => x.classList.toggle('on', Number(x.dataset.r) === state.velocidade));

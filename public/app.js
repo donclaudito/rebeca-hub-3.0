@@ -849,7 +849,17 @@ async function audioDaEleven(texto) {
   } catch (e) {
     d = e?.response?.data || { ok: false, error: e?.message };
   }
-  if (!d?.ok) throw new Error(d?.error || 'a ElevenLabs não gerou o áudio');
+  if (!d?.ok) {
+    // Leva as tentativas para a mensagem: quando a ElevenLabs recusa, é a lista
+    // de tentativas que diz se o problema é a chave ou o modelo/plano.
+    const det = (d.tentativas || []).map((t) => `${t.modelo}: HTTP ${t.http} — ${t.erro}`).join(' | ');
+    const err = new Error(d?.error || 'a ElevenLabs não gerou o áudio');
+    err.tentativas = det;
+    if (det) console.warn('Tentativas da ElevenLabs:', det);
+    throw err;
+  }
+  // Se o plano recusou o modelo preferido, o servidor usou outro: dizemo-lo.
+  if (d.nota) toast(d.nota, '');
   const bin = atob(d.audioB64);
   const bytes = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
@@ -860,6 +870,7 @@ async function audioDaEleven(texto) {
     // O servidor confirma qual voz usou — é o que prova que a escolha pegou.
     nomeVoz: d.nomeVoz || '',
     voz: d.voz || state.vozEleven,
+    modelo: d.modelo || '',
   };
 }
 

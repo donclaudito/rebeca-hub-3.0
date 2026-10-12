@@ -37,8 +37,13 @@ const json = (corpo, status = 200) =>
   });
 
 // Traduz as recusas conhecidas para algo accionável.
-function explicar(status, detalhe) {
+// Recebe também as tentativas, porque "chave inválida" e "modelo não permitido"
+// podem dar o mesmo aspeto — e a diferença decide o que o utilizador faz.
+function explicar(status, detalhe, tentativas = []) {
   const d = String(detalhe || '');
+  const modelosRecusados = tentativas.map((t) => t.modelo);
+  const todosModelos = tentativas.length > 2;
+
   if (/paid_plan_required|payment_required|402/.test(`${status} ${d}`)) {
     return (
       'A sua conta ElevenLabs está no plano gratuito e recusa as vozes da BIBLIOTECA ' +
@@ -47,7 +52,19 @@ function explicar(status, detalhe) {
     );
   }
   if (status === 401 || status === 403 || /invalid api key|api key is invalid|unauthorized/i.test(d)) {
-    return 'A chave da ElevenLabs foi recusada. Copie-a de novo em https://elevenlabs.io/app/developers/api-keys';
+    // Um 401 é definitivo (paramos logo no primeiro modelo), mas pode ser a
+    // chave ou a PERMISSÃO da chave: as chaves da ElevenLabs podem ser criadas
+    // com acesso restrito, e uma chave só de leitura lista vozes mas não
+    // sintetiza — o que dá um erro que parece "chave inválida".
+    return todosModelos || tentativas.length <= 1
+      ? 'A chave da ElevenLabs foi recusada na síntese. Se a lista de vozes funcionou, a chave é válida mas pode não ter permissão para Text to Speech: crie uma chave nova em https://elevenlabs.io/app/developers/api-keys'
+      : 'A chave da ElevenLabs foi recusada. Copie-a de novo em https://elevenlabs.io/app/developers/api-keys';
+  }
+  if (status === 422 || /model.*not|not.*available|unsupported.*model|invalid.*model/i.test(d)) {
+    return (
+      `Nenhum dos modelos disponíveis foi aceite (${modelosRecusados.join(', ')}). ` +
+      'O seu plano pode não incluir a síntese de voz pela API. Veja https://elevenlabs.io/app/subscription'
+    );
   }
   if (status === 429 || /quota|rate limit|too many/i.test(d)) {
     return 'Atingiu o limite de caracteres do seu plano ElevenLabs. Espere pela renovação, ou use a voz do browser para esta narração.';
@@ -94,26 +111,57 @@ export default async function (req) {
     const marca = MARCAS[tom];
     const falado = marca ? `${marca} ${texto}` : texto;
 
-    const resposta = await fetch(`${API}/text-to-speech/${encodeURIComponent(voz)}?output_format=mp3_44100_128`, {
-      method: 'POST',
-      headers: { 'xi-api-key': chave, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        text: falado,
-        model_id: MODELO,
-        voice_settings: TONS[tom],
-      }),
-    });
+    // TENTA VÁRIOS MODELOS. O plano decide quais aceita, e um modelo recusado
+    // dava um erro que parecia "chave inválida" — quando a chave estava boa
+    // (a lista de vozes funcionava com a mesma chave). Tentar por ordem e
+    // reportar cada tentativa evita este falso diagnóstico.
+    const MODELOS = [MODELO, 'eleven_turbo_v2_5', 'eleven_flash_v2_5', 'eleven_multilingual_v1'];
+    const tentativas = [];
+    let resposta = null;
+    let modeloUsado = '';
 
-    if (!resposta.ok) {
-      const detalhe = await resposta.text().catch(() => '');
-      let msg = detalhe.slice(0, 300);
+    for (const m of MODELOS) {
+      const r = await fetch(`${API}/text-to-speech/${encodeURIComponent(voz)}?output_format=mp3_44100_128`, {
+        method: 'POST',
+        headers: { 'xi-api-key': chave, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: falado, model_id: m, voice_settings: TONS[tom] }),
+      });
+
+      if (r.ok) {
+        resposta = r;
+        modeloUsado = m;
+        if (m !== MODELO) console.log(`[narrateEleven] "${MODELO}" recusado; funcionou com "${m}"`);
+        break;
+      }
+
+      const corpo = await r.text().catch(() => '');
+      let msg = corpo.slice(0, 250);
       try {
-        msg = JSON.parse(detalhe)?.detail?.message || JSON.parse(detalhe)?.detail || msg;
+        msg = JSON.parse(corpo)?.detail?.message || JSON.parse(corpo)?.detail || msg;
       } catch {
         /* texto cru */
       }
-      console.warn(`[narrateEleven] voz ${voz} recusada (HTTP ${resposta.status}): ${String(msg).slice(0, 150)}`);
-      return json({ ok: false, http: resposta.status, error: explicar(resposta.status, msg), detalhe: String(msg).slice(0, 200) }, 200);
+      tentativas.push({ modelo: m, http: r.status, erro: String(msg).slice(0, 160) });
+      console.warn(`[narrateEleven] modelo "${m}" falhou (HTTP ${r.status}): ${String(msg).slice(0, 120)}`);
+
+      // Chave mesmo inválida: não vale a pena tentar os outros modelos.
+      if (r.status === 401 || r.status === 403) break;
+    }
+
+    if (!resposta) {
+      const primeira = tentativas[0] || { http: 0, erro: 'sem resposta' };
+      return json(
+        {
+          ok: false,
+          http: primeira.http,
+          error: explicar(primeira.http, primeira.erro, tentativas),
+          // Lista completa das tentativas — é isto que permite perceber o que
+          // se passa quando o erro parece de chave mas não é.
+          tentativas,
+          detalhe: primeira.erro,
+        },
+        200,
+      );
     }
 
     const bytes = new Uint8Array(await resposta.arrayBuffer());
@@ -142,8 +190,11 @@ export default async function (req) {
       voz,
       nomeVoz,
       tom,
+      modelo: modeloUsado,
       caracteres: texto.length,
       bytes: bytes.length,
+      // Se não foi o modelo preferido, fica registado — o utilizador deve saber.
+      nota: modeloUsado !== MODELO ? `O plano não aceita "${MODELO}"; usei "${modeloUsado}".` : '',
     });
   } catch (erro) {
     console.error('narrateEleven falhou', erro);

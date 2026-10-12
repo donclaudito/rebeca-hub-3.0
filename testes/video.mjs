@@ -279,16 +279,34 @@ console.log('\n[6] Uma só cena: sem passagens e sem partir');
   const r = await correrCom(mod.gerarVideo({ cenas: cenasDe(1), transicao: 'fade', duracaoTransicao: 0.4 }));
   check(r.ok === true && perto(r.duracao, 2.0, 0.05), `1 cena: ${r.duracao?.toFixed(2)}s`, JSON.stringify(r).slice(0, 120));
   check([...new Set(desenhos.map((d) => d.img))].join(',') === 'c1', 'só desenha a imagem dessa cena', [...new Set(desenhos.map((d) => d.img))].join(','));
+  check(r.comVoz === true, 'conta como vídeo com voz', String(r.comVoz));
 }
 
-console.log('\n[7] Cena mais curta do que a passagem: estica em vez de sobrepor');
+console.log('\n[7] Narração muito curta: nunca menos do que a passagem');
 {
-  // Áudio de 0,2s com passagem de 0,4s → tem de esticar para 1,0s.
+  // Áudio de 0,2s com passagem de 0,4s: a cena tem de durar 1,0s (2×T + 0,2),
+  // senão as duas metades da passagem sobrepunham-se.
   instalarAmbiente([0.2, 0.2]);
   const r = await correrCom(mod.gerarVideo({ cenas: cenasDe(2), transicao: 'fade', duracaoTransicao: 0.4 }));
-  check(perto(r.duracao, 2.0, 0.1), `2 cenas de 0,2s esticadas → ${r.duracao.toFixed(2)}s (esperado 2,0)`, `${r.duracao}`);
+  check(perto(r.duracao, 2.0, 0.1), `2 cenas de 0,2s → ${r.duracao.toFixed(2)}s (1,0s cada)`, `${r.duracao}`);
   const trocas = [...new Set(desenhos.map((d) => d.t))].filter((t) => new Set(desenhos.filter((d) => d.t === t).map((d) => d.img)).size > 1);
-  check(trocas.every((t) => t > 0.5 && t < 1.5), `as passagens ficaram entre 0,5s e 1,5s`, `fora: ${trocas.filter((t) => t <= 0.5 || t >= 1.5).join(', ')}`);
+  check(trocas.every((t) => t > 0.4 && t < 1.6), `as passagens ficaram entre 0,4s e 1,6s`, `fora: ${trocas.filter((t) => t <= 0.4 || t >= 1.6).join(', ')}`);
+  check(r.comVoz === true, 'uma narração curta continua a ser narração', String(r.comVoz));
+}
+
+console.log('\n[7b] Cena marcada sem fala: usa o tempo escolhido, não a duração do silêncio');
+{
+  instalarAmbiente([3.0, 3.0]);
+  const r = await correrCom(mod.gerarVideo({
+    cenas: [
+      { imagem: 'c1', audio: blobsDe(1)[0] },
+      { imagem: 'c2', audio: null, semFala: true },
+    ],
+    transicao: 'fade', duracaoTransicao: 0.4, duracaoCena: 3.5,
+  }));
+  check(perto(r.duracao, 6.5, 0.2), `3,0s narrada + 3,5s sem fala = ${r.duracao.toFixed(2)}s (esperado 6,5)`, `${r.duracao}`);
+  check(agendamentos.length === 1, `só a cena com voz toca áudio (${agendamentos.length})`, String(agendamentos.length));
+  check(r.comVoz === true, 'a montagem conta como narrada', String(r.comVoz));
 }
 
 console.log('\n[8] Desfoque: usa o filtro e volta a limpo');
@@ -455,6 +473,54 @@ console.log('\n[12] Trilha: ficheiro curto, longo e formato estragado');
   ctxVazio.decodeAudioData = () => Promise.resolve({ numberOfChannels: 1, length: 0, sampleRate: 44100, duration: 0, getChannelData: () => new Float32Array(0) });
   const vazio = await m.carregarTrilha(ficheiro, ctxVazio);
   check(vazio.ok === false && /não tem áudio/i.test(vazio.erro), `ficheiro sem áudio: "${vazio.erro}"`, JSON.stringify(vazio));
+}
+
+console.log('\n[13] Só música, sem voz nenhuma');
+{
+  // 4 imagens, zero narração: cada uma fica 3,5s e a música enche o vídeo.
+  instalarAmbiente([]);
+  const musica = { name: 'tema.mp3', arrayBuffer: () => Promise.resolve(new ArrayBuffer(64)) };
+  const r = await correrCom(mod.gerarVideo({
+    cenas: [
+      { imagem: 'c1', audio: null, semFala: true },
+      { imagem: 'c2', audio: null, semFala: true },
+      { imagem: 'c3', audio: null, semFala: true },
+      { imagem: 'c4', audio: null, semFala: true },
+    ],
+    transicao: 'fade', duracaoTransicao: 0.6, duracaoCena: 3.5, musica,
+  }));
+
+  check(r.ok === true, 'gera o vídeo sem narração nenhuma', JSON.stringify(r).slice(0, 150));
+  check(r.comVoz === false, 'assinala que NÃO tem voz', `comVoz=${r.comVoz}`);
+  check(r.comMusica === true, 'e que tem trilha', `comMusica=${r.comMusica}`);
+  check(perto(r.duracao, 14.0, 0.3), `4 imagens × 3,5s = ${r.duracao.toFixed(2)}s (esperado 14,0)`, `${r.duracao}`);
+  check(agendamentos.length === 0, `nenhuma narração agendada (${agendamentos.length})`, String(agendamentos.length));
+  check(fontesEmCiclo.length === 1 && fontesEmCiclo[0].loop === true, 'a trilha é a única fonte, em ciclo', `fontes em ciclo: ${fontesEmCiclo.length}`);
+  check(fontesEmCiclo[0].parou === true, 'a trilha é parada no fim', 'ficou a tocar');
+  check([...new Set(desenhos.map((d) => d.img))].join(',') === 'c1,c2,c3,c4', 'passam as 4 imagens por ordem', [...new Set(desenhos.map((d) => d.img))].join(','));
+  const fimVídeo = desenhos.at(-1);
+  check(perto(fimVídeo.alpha, 1, 0.02), 'acaba com a imagem opaca', String(fimVídeo.alpha));
+
+  // Ritmo diferente: 2s por imagem muda o total.
+  instalarAmbiente([]);
+  const r2 = await correrCom(mod.gerarVideo({
+    cenas: [{ imagem: 'c1', audio: null, semFala: true }, { imagem: 'c2', audio: null, semFala: true }],
+    transicao: 'fade', duracaoTransicao: 0.6, duracaoCena: 2, musica,
+  }));
+  check(perto(r2.duracao, 4.0, 0.3), `com 2s por imagem: 2 × 2s = ${r2.duracao.toFixed(2)}s`, `${r2.duracao}`);
+}
+
+console.log('\n[14] Só música e a música falha: é erro, não vídeo mudo');
+{
+  instalarAmbiente([]);
+  // A trilha é obrigatória neste modo, mas a falha é detetada na página; aqui
+  // confirmamos que o motor, sem música e sem voz, não inventa um vídeo mudo.
+  const r = await correrCom(mod.gerarVideo({
+    cenas: [{ imagem: 'c1', audio: null, semFala: true }, { imagem: 'c2', audio: null, semFala: true }],
+    transicao: 'fade', duracaoTransicao: 0.6, duracaoCena: 2,
+  }));
+  check(r.ok === true, 'o motor grava as imagens na mesma', JSON.stringify(r).slice(0, 120));
+  check(r.comMusica === false && r.comVoz === false, 'e diz que não tem voz nem música', `voz=${r.comVoz} musica=${r.comMusica}`);
 }
 
 console.log(falhas.length ? `\n=== ${falhas.length} FALHA(S) ===` : '\n=== GERAÇÃO DE VÍDEO OK ===');

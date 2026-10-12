@@ -13,9 +13,11 @@ class El {
     this.tagName = String(tag).toUpperCase();
     this.children = []; this.listeners = {}; this.style = {}; this.dataset = {}; this.attrs = {};
     this._text = ''; this._html = ''; this.value = ''; this.checked = false;
-    this.hidden = false; this.disabled = false; this.className = ''; this.title = '';
+    this.hidden = false; this.disabled = false; this.title = '';
     this.type = ''; this.src = ''; this.alt = ''; this.href = ''; this.download = ''; this.placeholder = '';
     this.width = 0; this.height = 0;
+    // O classList tem de existir ANTES de className ser atribuído: o setter
+    // abaixo escreve nele. (Era esta a ordem errada que rebentava o teste todo.)
     this.classList = {
       _s: new Set(),
       add: (...c) => c.forEach((x) => this.classList._s.add(x)),
@@ -23,11 +25,14 @@ class El {
       toggle: (c, f) => (f ? this.classList._s.add(c) : this.classList._s.delete(c)),
       contains: (c) => this.classList._s.has(c),
     };
+    this.className = '';
   }
   get textContent() { return this._text; }
   set textContent(v) { this._text = String(v); }
   get innerHTML() { return this._html; }
   set innerHTML(v) { this._html = String(v); if (v === '') this.children = []; }
+  set className(v) { this._classe = String(v); this.classList._s = new Set(String(v).split(/\s+/).filter(Boolean)); }
+  get className() { return this._classe || ''; }
   append(...n) { n.forEach((x) => this.children.push(x)); }
   appendChild(n) { this.children.push(n); return n; }
   remove() {}
@@ -138,10 +143,19 @@ function ambiente(reg, suportaVideo) {
 const VIDEO_URL = 'file:///E:/youtube%20rebeca2/rebeca-hub-3.0-base44/public/video.mjs';
 const src = readFileSync(BASE + 'app.js', 'utf8')
   .replace(/await import\('@\/base44Client\.js'\)/g, '({ base44: globalThis.__base44Falso })')
-  .replace(/await import\('\.\/video\.mjs'\)/g, `await import('${VIDEO_URL}')`);
+  .replace(/await import\('\.\/video\.mjs'\)/g, `await import('${VIDEO_URL}')`);;;
 const erros = [];
-process.on('uncaughtException', (e) => erros.push('uncaught: ' + e.message));
-process.on('unhandledRejection', (e) => erros.push('rejeicao: ' + (e && e.message ? e.message : e)));
+// Um erro não tratado tem de APARECER. Antes ficava só numa lista e, se
+// rebentasse a meio, o teste terminava calado com sucesso — foi assim que uma
+// falha real passou despercebida. Agora escreve sempre no ecrã.
+process.on('uncaughtException', (e) => {
+  erros.push('uncaught: ' + (e && e.message ? e.message : e));
+  process.stderr.write(`>>> ERRO NÃO TRATADO: ${e && e.stack ? e.stack : e}\n`);
+});
+process.on('unhandledRejection', (e) => {
+  erros.push('rejeicao: ' + (e && e.message ? e.message : e));
+  process.stderr.write(`>>> PROMESSA REJEITADA: ${e && e.stack ? e.stack : e}\n`);
+});
 
 async function arrancar(suportaVideo) {
   const reg = montar(suportaVideo);
@@ -270,9 +284,70 @@ console.log('\n[7] Trilha sonora: escolher, ouvir, tirar');
   check(reg.get('btn-trilha-ouvir').hidden === true, 'e o "Ouvir" desaparece outra vez', 'ficou visível');
 }
 
-console.log('\n[8] Sem erros de JavaScript');
+console.log('\n[8] Modo "só música": sem narração nenhuma');
+{
+  const reg = await arrancar(true);
+  const modos = reg.get('vid-modos');
+  check(modos.children.length === 3, `3 modos: ${modos.children.map((b) => b.textContent).join(' | ')}`, String(modos.children.length));
+  check(modos.children[1].classList.contains('on'), 'começa em "Narração + música"', 'não começou no modo esperado');
+  check(reg.get('grupo-cena').hidden === true, 'a duração por imagem está escondida quando há voz', 'está visível');
+
+  // Importa imagens, mas não gera narração nenhuma.
+  reg.get('input-files').onchange({ target: { files: [{ name: 'a.jpg', type: 'image/jpeg', size: 900 }, { name: 'b.jpg', type: 'image/jpeg', size: 900 }], value: '' } });
+  await new Promise((r) => setTimeout(r, 150));
+  check(reg.get('scenes').children.length === 2, '2 imagens importadas', String(reg.get('scenes').children.length));
+
+  // Ainda no modo com voz: o botão avisa que falta a narração.
+  reg.get('btn-video').click();
+  await new Promise((r) => setTimeout(r, 120));
+  check(/Gere a narração primeiro/i.test(reg.get('vid-estado').textContent), 'no modo com voz, pede a narração', reg.get('vid-estado').textContent);
+  check(/Só música/i.test(reg.get('vid-estado').textContent), 'e indica o modo que não precisa de voz', reg.get('vid-estado').textContent);
+
+  // Muda para "só música": agora falta a trilha, não a voz.
+  modos.children[2].click();
+  await new Promise((r) => setTimeout(r, 60));
+  check(modos.children[2].classList.contains('on'), '"Só música" ficou marcado', 'não marcou');
+  check(reg.get('grupo-cena').hidden === false, 'a duração por imagem aparece', 'continua escondida');
+  check(reg.get('vid-cena').children.length === 4, `4 ritmos de imagem (${reg.get('vid-cena').children.map((b) => b.textContent).join(', ')})`, String(reg.get('vid-cena').children.length));
+  check(/precisa de uma trilha/i.test(reg.get('vid-estado').textContent), 'avisa que falta a música', reg.get('vid-estado').textContent);
+
+  // Escolhe a música: o resumo passa a descrever o vídeo que vai sair.
+  const input = reg.get('input-trilha');
+  input.files = [{ name: 'tema.mp3', size: 2_000_000, type: 'audio/mpeg' }];
+  check(typeof input.onchange === 'function', 'o campo da música tem handler ligado', `onchange=${typeof input.onchange}`);
+  input.onchange();
+  await new Promise((r) => setTimeout(r, 150));
+  check(/tema\.mp3/.test(reg.get('trilha-estado').textContent), `a trilha ficou escolhida: "${reg.get('trilha-estado').textContent}"`, reg.get('trilha-estado').textContent);
+  const est = reg.get('vid-estado').textContent;
+  check(/sem voz/i.test(est), `diz que sai sem voz: "${est.slice(0, 70)}…"`, est);
+  check(/tema\.mp3/.test(est), 'nomeia a trilha escolhida', est);
+  check(/2 imagem/.test(est), 'conta as 2 imagens', est);
+  check(/0:07/.test(est), 'calcula a duração (2 × 3,5s = 7s → 0:07)', est);
+  check(!/Gere a narração/i.test(est), 'já não pede narração', est);
+
+  // Mudar o ritmo muda o cálculo.
+  reg.get('vid-cena').children[3].click();
+  await new Promise((r) => setTimeout(r, 40));
+  check(/0:16/.test(reg.get('vid-estado').textContent), '8s por imagem → 16s (0:16)', reg.get('vid-estado').textContent);
+  const g = JSON.parse(globalThis.localStorage.getItem('rh3nuvem') || '{}');
+  check(g.videoModo === 'musica' && Number(g.videoDuracaoCena) === 8, `guardado: modo=${g.videoModo} cena=${g.videoDuracaoCena}`, JSON.stringify({ m: g.videoModo, d: g.videoDuracaoCena }));
+}
+
+console.log('\n[9] Só música sem imagens: pede as imagens');
+{
+  const reg = await arrancar(true);
+  reg.get('vid-modos').children[2].click();
+  reg.get('input-trilha').files = [{ name: 'tema.mp3', size: 1_000_000, type: 'audio/mpeg' }];
+  reg.get('input-trilha').onchange();
+  await new Promise((r) => setTimeout(r, 120));
+  check(/Importe as imagens/i.test(reg.get('vid-estado').textContent), 'sem imagens, pede as imagens', reg.get('vid-estado').textContent);
+}
+
+console.log('\n[10] Sem erros de JavaScript');
 if (erros.length) erros.slice(0, 5).forEach((e) => fail(e));
 else ok('nenhum erro não tratado');
 
 console.log(falhas.length ? `\n=== ${falhas.length} FALHA(S) ===` : '\n=== ABA DE VÍDEO OK ===');
 process.exit(falhas.length ? 1 : 0);
+process.exit(falhas.length ? 1 : 0);
+console.error('>>> CHEGOU AO FIM DO FICHEIRO');

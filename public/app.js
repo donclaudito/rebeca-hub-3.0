@@ -23,6 +23,9 @@ const state = {
   videoFormato: '1920x1080',
   videoTransicao: 'fade',
   videoDuracao: 0.6,
+  // O que entra no vídeo: 'narracao' | 'ambos' | 'musica'.
+  videoModo: 'ambos',
+  videoDuracaoCena: 3.5,
   pararVideo: false,
   // Trilha sonora: o ficheiro escolhido (fica só nesta sessão) e a duração lida.
   musicaFicheiro: null,
@@ -1198,6 +1201,68 @@ function criarZip(ficheiros) {
 }
 
 // ---------------------------------------------------------------- vídeo
+// ---------------------------------------------------------------- modos do vídeo
+// Três formas de montar o vídeo. A terceira existe para quem quer só a trilha:
+// as imagens passam com a música por baixo, sem voz nenhuma e sem ter de gerar
+// narração primeiro.
+const MODOS_VIDEO = [
+  { id: 'narracao', rotulo: '🎙️ Só narração', nota: 'as imagens com a voz, sem música' },
+  { id: 'ambos', rotulo: '🎙️🎵 Narração + música', nota: 'a voz com a trilha por baixo' },
+  { id: 'musica', rotulo: '🎵 Só música', nota: 'as imagens com a trilha, sem voz' },
+];
+
+const modoVideo = () => MODOS_VIDEO.find((m) => m.id === state.videoModo) || MODOS_VIDEO[1];
+const querVoz = () => state.videoModo !== 'musica';
+const querMusica = () => state.videoModo !== 'narracao';
+
+function marcarModoVideo() {
+  const mv = $('vid-modos');
+  if (mv) [...mv.children].forEach((x) => x.classList.toggle('on', x.dataset.id === state.videoModo));
+  // A duração de cada imagem só faz sentido quando não há voz a mandar no ritmo.
+  const grupo = $('grupo-cena');
+  if (grupo) grupo.hidden = querVoz();
+}
+
+// O texto que fica por baixo dos controlos: diz exatamente o que vai sair.
+function resumoVideo() {
+  const m = modoVideo();
+  const n = state.scenes.filter((s) => (s.texto || '').trim()).length || state.images.length;
+  const musica = state.musicaFicheiro && querMusica();
+
+  if (state.videoModo === 'musica') {
+    const seg = n * (Number(state.videoDuracaoCena) || 3.5);
+    if (!n) return estadoVideo('❌ Importe as imagens primeiro (aba 🖼️ Imagens).', 'err');
+    if (!musica) {
+      return estadoVideo('❌ O modo "só música" precisa de uma trilha. Escolha a música aqui em cima.', 'err');
+    }
+    return estadoVideo(
+      `Vai sair um vídeo de ${n} imagem(ns), cerca de ${formatarMinutos(seg)}, com a trilha ` +
+        `"${state.musicaFicheiro.name}" em ciclo e sem voz. Transição "${transicaoRotulo()}". ` +
+        `Demora cerca de ${formatarMinutos(seg)} a gravar.`,
+      '',
+    );
+  }
+
+  const semAudio = state.scenes.filter((s) => (s.texto || '').trim() && !s.audioUrl && !s.previaUrl).length;
+  if (!n) return estadoVideo('❌ Gere a narração primeiro (aba ⚡ Ações).', 'err');
+  if (semAudio === n) {
+    return estadoVideo(
+      '❌ Ainda não há áudio. Vá à aba ⚡ Ações e clique em "🎧 Gerar o áudio de todas as cenas". ' +
+        'Ou mude "O que entra" para 🎵 Só música, que não precisa de voz nenhuma.',
+      'err',
+    );
+  }
+  return estadoVideo(
+    `Pronto: ${n} imagem(ns), transição "${transicaoRotulo()}", ${m.rotulo.toLowerCase()}` +
+      `${semAudio ? ` — ${semAudio} cena(s) sem áudio` : ''}` +
+      `${musica ? `, trilha "${state.musicaFicheiro.name}"` : state.videoModo === 'ambos' ? ' (sem trilha escolhida)' : ''}. ` +
+      'A gravação demora o tempo do vídeo.',
+    semAudio ? 'wait' : '',
+  );
+}
+
+const transicaoRotulo = () => state.videoTransicaoRotulo || state.videoTransicao;
+
 // ---------------------------------------------------------------- trilha sonora
 // A música vem do computador do utilizador (não há faixas dentro da app, para
 // ela continuar leve e sem licenças). Fica só nesta sessão — um ficheiro de
@@ -1242,6 +1307,8 @@ function atualizarTrilha() {
   }
 }
 
+// "1:23" — usado para a duração da música e para o tempo previsto do vídeo.
+// O módulo da trilha tem a sua própria versão, com o mesmo formato.
 const formatarMinutos = (s) => {
   const t = Math.max(0, Math.round(Number(s) || 0));
   return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
@@ -1284,6 +1351,7 @@ async function escolherTrilha() {
   if (state.musicaFicheiro !== f) return;
   state.musicaDuracao = dur;
   atualizarTrilha();
+  resumoVideo();
 
   const mb = (f.size / 1048576).toFixed(1);
   toast(
@@ -1301,6 +1369,7 @@ function tirarTrilha() {
   state.musicaDuracao = 0;
   state.musicaUrl = '';
   atualizarTrilha();
+  resumoVideo();
   toast('Trilha tirada.', '');
 }
 
@@ -1330,6 +1399,7 @@ function ligarTrilha() {
   if (!c) return;
   state.musicaLigada = c.checked;
   guardar();
+  resumoVideo();
 }
 
 // ---------------------------------------------------------------- vídeo
@@ -1375,13 +1445,16 @@ async function iniciarVideo() {
     b.title = t.nota;
     b.onclick = () => {
       state.videoTransicao = t.id;
+      state.videoTransicaoRotulo = t.rotulo;
       [...ct.children].forEach((x) => x.classList.toggle('on', x === b));
       guardar();
+      resumoVideo();
     };
     ct.append(b);
   });
   const escolhida = mod.TRANSICOES.find((t) => t.id === state.videoTransicao) || mod.TRANSICOES[0];
   state.videoTransicao = escolhida.id;
+  state.videoTransicaoRotulo = escolhida.rotulo;
   [...ct.children].forEach((x) => x.classList.toggle('on', x.dataset.id === escolhida.id));
 
   // Durações
@@ -1410,6 +1483,48 @@ async function iniciarVideo() {
   $('btn-trilha-ouvir').onclick = ouvirTrilha;
   $('btn-trilha-tirar').onclick = tirarTrilha;
   $('trilha-ligada').onchange = ligarTrilha;
+
+  // O que entra no vídeo
+  const mv = $('vid-modos');
+  mv.innerHTML = '';
+  MODOS_VIDEO.forEach((m) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'chip';
+    b.dataset.id = m.id;
+    b.textContent = m.rotulo;
+    b.title = m.nota;
+    b.onclick = () => {
+      state.videoModo = m.id;
+      guardar();
+      marcarModoVideo();
+      resumoVideo();
+    };
+    mv.append(b);
+  });
+  marcarModoVideo();
+
+  // Duração de cada imagem, no modo sem voz
+  const cdc = $('vid-cena');
+  cdc.innerHTML = '';
+  mod.DURACOES_CENA.forEach((d) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'chip';
+    b.dataset.id = String(d.id);
+    b.textContent = d.rotulo;
+    b.onclick = () => {
+      state.videoDuracaoCena = d.id;
+      [...cdc.children].forEach((x) => x.classList.toggle('on', Number(x.dataset.id) === d.id));
+      guardar();
+      resumoVideo();
+    };
+    cdc.append(b);
+  });
+  const dc = mod.DURACOES_CENA.find((d) => d.id === Number(state.videoDuracaoCena)) || mod.DURACOES_CENA[1];
+  state.videoDuracaoCena = dc.id;
+  [...cdc.children].forEach((x) => x.classList.toggle('on', Number(x.dataset.id) === dc.id));
+
   atualizarTrilha();
 
   // Suporte do browser
@@ -1417,13 +1532,7 @@ async function iniciarVideo() {
     $('btn-video').disabled = true;
     estadoVideo('⚠️ Este browser não consegue gravar vídeo. Use o Chrome ou o Edge.', 'err');
   } else {
-    const comTrilha = state.musicaFicheiro && state.musicaLigada;
-    estadoVideo(
-      `Pronto para montar. Formato ${state.videoFormato}, transição "${escolhida.rotulo}"` +
-        `${comTrilha ? `, trilha "${state.musicaFicheiro.name}" por baixo da voz` : ', sem trilha'}. ` +
-        'A gravação demora o tempo do vídeo.',
-      '',
-    );
+    resumoVideo();
   }
 
   $('btn-video').onclick = gerarVideoFinal;
@@ -1434,22 +1543,41 @@ async function iniciarVideo() {
 
 async function gerarVideoFinal() {
   if (state.busy) return;
-  const comAudio = state.scenes.filter((s) => (s.texto || '').trim());
-  if (!comAudio.length) {
-    return estadoVideo('❌ Gere a narração primeiro (aba ⚡ Ações).', 'err');
-  }
 
-  // O vídeo precisa do ÁUDIO de cada cena. Se ainda não existe, dizemos o que fazer.
-  const semAudio = comAudio.filter((s) => !s.audioUrl && !s.previaUrl);
-  if (semAudio.length === comAudio.length) {
-    return estadoVideo(
-      '❌ Ainda não há áudio. Vá à aba ⚡ Ações e clique em "🎧 Gerar o áudio de todas as cenas" — ' +
-        'o vídeo usa esse áudio. (A pré-escuta de cada cena também serve.)',
-      'err',
-    );
-  }
-  if (semAudio.length) {
-    estadoVideo(`⚠️ ${semAudio.length} cena(s) sem áudio — o vídeo fica sem voz nessas.`, 'wait');
+  const comTexto = state.scenes.filter((s) => (s.texto || '').trim());
+  const semFala = comTexto.filter((s) => !s.audioUrl && !s.previaUrl);
+  const musica = state.musicaFicheiro && querMusica() && state.musicaLigada ? state.musicaFicheiro : null;
+  const comVoz = querVoz();
+
+  // --- O que é preciso para cada modo ---
+  // Só música: uma trilha e imagens. Narração nenhuma.
+  if (!comVoz) {
+    if (!musica) {
+      return estadoVideo(
+        '❌ O modo "só música" precisa de uma trilha. Escolha a música aqui em cima, ' +
+          'ou mude "O que entra" para 🎙️🎵 Narração + música.',
+        'err',
+      );
+    }
+    if (!state.images.length) {
+      return estadoVideo('❌ Importe as imagens primeiro (aba 🖼️ Imagens).', 'err');
+    }
+  } else {
+    if (!comTexto.length) {
+      return estadoVideo(
+        '❌ Gere a narração primeiro (aba ⚡ Ações). ' +
+          'Se quer um vídeo só com música, mude "O que entra" para 🎵 Só música.',
+        'err',
+      );
+    }
+    if (semFala.length === comTexto.length) {
+      return estadoVideo(
+        '❌ Ainda não há áudio. Vá à aba ⚡ Ações e clique em "🎧 Gerar o áudio de todas as cenas" — ' +
+          'o vídeo usa esse áudio. (A pré-escuta de cada cena também serve.) ' +
+          'Ou mude "O que entra" para 🎵 Só música, que não precisa de voz.',
+        'err',
+      );
+    }
   }
 
   const mod = await import('./video.mjs');
@@ -1458,31 +1586,39 @@ async function gerarVideoFinal() {
   $('btn-video').disabled = true;
   $('btn-video-parar').hidden = false;
 
-  // Busca o blob de cada cena (do áudio gerado ou da pré-escuta).
+  // Uma cena por imagem que tenha ficheiro conhecido. No modo com voz, são as
+  // cenas narradas; no modo só música, são TODAS as imagens importadas.
+  const lista = comVoz ? comTexto : state.images;
   const cenas = [];
-  for (const s of comAudio) {
-    const url = s.audioUrl || s.previaUrl;
-    if (!url) continue;
-    try {
-      const blob = await (await fetch(url)).blob();
-      cenas.push({ imagem: imagemDaCena(s), audio: blob });
-    } catch {
-      /* cena sem áudio legível: salta */
+  for (const s of lista) {
+    const imagem = comVoz ? imagemDaCena(s) : s.url;
+    if (!imagem) continue;
+    let audio = null;
+    const url = comVoz ? s.audioUrl || s.previaUrl : null;
+    if (url) {
+      try {
+        audio = await (await fetch(url)).blob();
+      } catch {
+        audio = null; // fica sem voz nesta cena, mas entra no vídeo
+      }
     }
+    cenas.push({ imagem, audio });
   }
 
   if (!cenas.length) {
     state.busy = false;
     $('btn-video').disabled = false;
     $('btn-video-parar').hidden = true;
-    return estadoVideo('❌ Não consegui ler o áudio de nenhuma cena.', 'err');
+    return estadoVideo('❌ Não consegui preparar nenhuma imagem para o vídeo.', 'err');
+  }
+
+  const semVoz = cenas.filter((c) => !c.audio).length;
+  if (comVoz && semVoz) {
+    estadoVideo(`⚠️ ${semVoz} cena(s) sem áudio — o vídeo fica sem voz nessas.`, 'wait');
   }
 
   const preview = $('vid-preview');
   preview.hidden = false;
-
-  // A trilha só entra se houver música escolhida E a caixa estiver marcada.
-  const musica = state.musicaFicheiro && state.musicaLigada ? state.musicaFicheiro : null;
 
   try {
     const r = await mod.gerarVideo({
@@ -1491,6 +1627,7 @@ async function gerarVideoFinal() {
       transicao: state.videoTransicao,
       duracaoTransicao: state.videoDuracao,
       musica,
+      duracaoCena: state.videoDuracaoCena,
       // Desenha no canvas visível: vê-se a montagem enquanto grava.
       canvas: preview,
       aoProgredir: (p) => {
@@ -1522,13 +1659,14 @@ async function gerarVideoFinal() {
 
     estadoVideo(
       `✅ Vídeo pronto: ${Math.round(r.duracao)}s, ${(r.blob.size / 1048576).toFixed(1)} MB, ` +
-        `formato ${r.formato}, transição "${r.transicao}"` +
-        `${r.comMusica ? ', com trilha' : musica ? ', SEM trilha' : ''}. Descarregado como ${nome}.` +
+        `formato ${r.formato}, transição "${r.transicao}", ${r.comVoz ? 'com narração' : 'sem voz'}` +
+        `${r.comMusica ? ' e com trilha' : musica ? ' e SEM trilha' : ''}. Descarregado como ${nome}.` +
         `${r.musicaAviso ? ` ⚠️ ${r.musicaAviso}` : ''}`,
       r.musicaAviso ? 'wait' : 'ok',
     );
     toast(
-      r.comMusica ? `Vídeo pronto (${Math.round(r.duracao)}s), com trilha.` : `Vídeo pronto (${Math.round(r.duracao)}s).`,
+      `${r.comVoz ? 'Vídeo pronto' : 'Vídeo só com música'} (${Math.round(r.duracao)}s)` +
+        `${r.comMusica ? ', com trilha' : ''}.`,
       'ok',
     );
   } catch (e) {
@@ -1566,6 +1704,8 @@ function guardar() {
         videoFormato: state.videoFormato,
         videoTransicao: state.videoTransicao,
         videoDuracao: state.videoDuracao,
+        videoModo: state.videoModo,
+        videoDuracaoCena: state.videoDuracaoCena,
         musicaLigada: state.musicaLigada,
       }),
     );
@@ -1785,6 +1925,8 @@ function init() {
   state.videoFormato = c.videoFormato || '1920x1080';
   state.videoTransicao = c.videoTransicao || 'fade';
   state.videoDuracao = Number(c.videoDuracao) || 0.6;
+  state.videoModo = MODOS_VIDEO.some((m) => m.id === c.videoModo) ? c.videoModo : 'ambos';
+  state.videoDuracaoCena = Number(c.videoDuracaoCena) || 3.5;
   state.musicaLigada = c.musicaLigada !== false;
   marcarMotor();
   marcarTom();

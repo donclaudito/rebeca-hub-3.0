@@ -36,6 +36,21 @@ export const DURACOES = [
   { id: 1.4, rotulo: 'Lenta (1,4s)' },
 ];
 
+// Quanto tempo cada imagem fica no ecrã quando a cena não tem narração.
+// É o que dá o ritmo do modo "só música" (sem voz nenhuma).
+export const DURACOES_CENA = [
+  { id: 2, rotulo: 'Rápido (2s)' },
+  { id: 3.5, rotulo: 'Normal (3,5s)' },
+  { id: 5, rotulo: 'Calmo (5s)' },
+  { id: 8, rotulo: 'Lento (8s)' },
+];
+
+export const DURACAO_SEM_VOZ = 3.5;
+
+// Silêncio usado numa cena sem narração, quando as outras têm voz. Curto de
+// propósito: numa montagem narrada, uma cena sem fala não deve arrastar-se.
+const SILENCIO_CURTO = 2;
+
 // Escolhe o melhor formato de gravação que o browser aceita.
 export function escolherMime() {
   const candidatos = [
@@ -178,9 +193,20 @@ function criarSequenciaAudio() {
   return { ctx, destino, ganho, clipes: [] };
 }
 
-async function descodificarClipes(seq, blobs) {
+// Descodifica a narração de cada cena.
+//
+// `semFala[i]` é a marca explícita de "esta cena não tem voz". É uma marca e não
+// uma adivinha pela duração: uma narração curta (2 s) é uma narração como as
+// outras e tem de mandar no ritmo da cena. Só as cenas sem fala é que ficam com
+// um silêncio curto, para não arrastarem a montagem.
+async function descodificarClipes(seq, blobs, semFala) {
   const clipes = [];
-  for (const b of blobs) {
+  for (const [i, b] of blobs.entries()) {
+    const semVoz = !b || semFala[i];
+    if (semVoz) {
+      clipes.push(seq.ctx.createBuffer(1, Math.floor(seq.ctx.sampleRate * SILENCIO_CURTO), seq.ctx.sampleRate));
+      continue;
+    }
     const dados = await b.arrayBuffer();
     clipes.push(await seq.ctx.decodeAudioData(dados.slice(0)));
   }
@@ -188,7 +214,8 @@ async function descodificarClipes(seq, blobs) {
   return clipes;
 }
 
-// Grava o vídeo. cenas: [{ imagem: url, audio: Blob }]
+// Grava o vídeo. cenas: [{ imagem: url, audio: Blob|null, semFala?: bool }]
+// `audio: null` ou `semFala: true` = cena sem voz: nesse caso vale `duracaoCena`.
 // `canvas` (opcional): o canvas onde desenhar. Se vier da página, o utilizador
 // VÊ a montagem enquanto grava — é também a forma de confirmar que está certo.
 export async function gerarVideo({
@@ -199,6 +226,8 @@ export async function gerarVideo({
   fps = 30,
   canvas: canvasDado = null,
   musica = null,
+  // Duração de uma cena sem narração (o modo "só música" usa isto para todas).
+  duracaoCena = DURACAO_SEM_VOZ,
   aoProgredir = () => {},
   deveParar = () => false,
 }) {
@@ -227,9 +256,10 @@ export async function gerarVideo({
 
   // 2) preparar o áudio
   const seq = criarSequenciaAudio();
+  const marcaSemFala = cenas.map((c) => Boolean(c.semFala) || !c.audio);
   let clipes;
   try {
-    clipes = await descodificarClipes(seq, cenas.map((c) => c.audio));
+    clipes = await descodificarClipes(seq, cenas.map((c) => c.audio), marcaSemFala);
   } catch (e) {
     try { await seq.ctx.close(); } catch { /* já fechado */ }
     return { ok: false, erro: `não consegui ler o áudio de uma cena: ${e.message}` };
@@ -254,9 +284,17 @@ export async function gerarVideo({
     }
   }
 
+  // Há narração? Se não houver nenhuma, isto é uma montagem só com música:
+  // cada imagem fica o tempo escolhido em vez de seguir uma voz que não existe.
+  const temVoz = marcaSemFala.some((sem) => !sem);
+  const fixa = Math.max(2 * T + 0.2, Number(duracaoCena) || DURACAO_SEM_VOZ);
+
   // Duração de cada cena = duração do seu áudio; nunca menos do que a passagem
-  // precisa (senão as duas passagens sobrepunham-se).
-  const duracoes = clipes.map((c) => Math.max(2 * T + 0.2, c.duration));
+  // precisa (senão as duas passagens sobrepunham-se). Sem voz, é a duração fixa.
+  const duracoes = clipes.map((c, i) => {
+    if (marcaSemFala[i]) return fixa;
+    return Math.max(2 * T + 0.2, c.duration);
+  });
   const inicios = [];
   let soma = 0;
   for (const d of duracoes) {
@@ -290,11 +328,16 @@ export async function gerarVideo({
     for (let i = 0; i < cenas.length; i++) {
       if (deveParar()) break;
 
-      const fonte = seq.ctx.createBufferSource();
-      fonte.buffer = clipes[i];
-      fonte.connect(seq.ganho);
-      // Cada clipe entra no seu lugar exato da linha do tempo.
-      try { fonte.start(agoraCtx() + Math.max(0, inicios[i] - relogio())); } catch { /* já tocou */ }
+      // Sem voz nenhuma não há clipe de narração para tocar — quem enche o
+      // áudio é a trilha, em ciclo. Também não se toca o silêncio das cenas
+      // sem fala numa montagem narrada.
+      if (!marcaSemFala[i]) {
+        const fonte = seq.ctx.createBufferSource();
+        fonte.buffer = clipes[i];
+        fonte.connect(seq.ganho);
+        // Cada clipe entra no seu lugar exato da linha do tempo.
+        try { fonte.start(agoraCtx() + Math.max(0, inicios[i] - relogio())); } catch { /* já tocou */ }
+      }
 
       let interrompido = false;
       await new Promise((resolve) => {
@@ -326,6 +369,7 @@ export async function gerarVideo({
     }
   } finally {
     // Deixa o último fotograma entrar e fecha — mesmo que algo falhe a meio.
+    // Sem voz, este tempo extra é música a tocar por cima do último fotograma.
     await new Promise((r) => setTimeout(r, 250));
     if (trilha) trilha.parar();
     if (gravador.state !== 'inactive') gravador.stop();
@@ -345,6 +389,7 @@ export async function gerarVideo({
     extensao: 'webm',
     duracao: acumulado,
     formato: alvo.id,
+    comVoz: temVoz,
     transicao,
     comMusica: Boolean(trilha && trilha.comecou),
     musicaAviso,

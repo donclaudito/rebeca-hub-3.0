@@ -171,8 +171,20 @@ testes/                Testes automáticos (npm test) — ver testes/LEIAME.md
 ### O vídeo e a trilha (aba 🎬 Vídeo)
 
 Não há ffmpeg na nuvem, por isso o vídeo é montado **no próprio browser**: as
-imagens são desenhadas num canvas com as transições escolhidas, a narração de cada
-cena é tocada por cima e tudo é gravado em tempo real com `MediaRecorder`.
+imagens são desenhadas num canvas com as transições escolhidas, o som é tocado
+por cima e tudo é gravado em tempo real com `MediaRecorder`.
+
+**O que entra** — três formas de montar:
+
+| Modo | O que precisa | O que sai |
+|---|---|---|
+| 🎙️ Só narração | narração gerada | as imagens com a voz |
+| 🎙️🎵 Narração + música | narração gerada + trilha | a voz com a música por baixo |
+| 🎵 Só música | imagens + trilha | as imagens com a música, **sem voz nenhuma** |
+
+No modo **só música** não é preciso gerar narração: cada imagem fica o tempo
+escolhido em “Cada imagem” (2 s a 8 s) e a trilha toca em ciclo por baixo. É o
+modo para fazer um vídeo de ambiente, uma capa animada ou uma montagem de fotos.
 
 - **Grava em tempo real** — um vídeo de 2 minutos leva 2 minutos.
 - **Sai em WebM** (VP9/VP8 + Opus). Para MP4, use a versão local com ffmpeg.

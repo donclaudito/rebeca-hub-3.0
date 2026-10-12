@@ -44,6 +44,22 @@ function explicar(status, detalhe, tentativas = []) {
   const modelosRecusados = tentativas.map((t) => t.modelo);
   const todosModelos = tentativas.length > 2;
 
+  // COTA ESGOTADA — este caso vem com HTTP 401, o que o faz parecer "chave
+  // inválida". Foi o que aconteceu: a conta tinha 0 de 10000 creditos e todas as
+  // mensagens apontavam para a chave. Aqui é detetado pelo texto, que é o único
+  // sinal fiável (a ElevenLabs usa 401 para quase tudo).
+  const cota = /exceeds your quota|credits remaining|quota of (\d+)/i.exec(d);
+  if (cota) {
+    const restam = /You have (\d+) credits remaining/i.exec(d);
+    const precisa = /while (\d+) credits are required/i.exec(d);
+    const total = /quota of (\d+)/i.exec(d);
+    return (
+      'A sua conta ElevenLabs está SEM CRÉDITOS: ' +
+      `restam ${restam?.[1] ?? '0'} de ${total?.[1] ?? '?'} caracteres, e este pedido precisa de ${precisa?.[1] ?? 'alguns'}. ` +
+      'Veja o uso e a renovação em https://elevenlabs.io/app/subscription — ' +
+      'a cota renova no início do ciclo. Enquanto isso, use a 🌐 Voz do browser, que é gratuita e não precisa de chave.'
+    );
+  }
   if (/paid_plan_required|payment_required|402/.test(`${status} ${d}`)) {
     return (
       'A sua conta ElevenLabs está no plano gratuito e recusa as vozes da BIBLIOTECA ' +
@@ -60,14 +76,14 @@ function explicar(status, detalhe, tentativas = []) {
       ? 'A chave da ElevenLabs foi recusada na síntese. Se a lista de vozes funcionou, a chave é válida mas pode não ter permissão para Text to Speech: crie uma chave nova em https://elevenlabs.io/app/developers/api-keys'
       : 'A chave da ElevenLabs foi recusada. Copie-a de novo em https://elevenlabs.io/app/developers/api-keys';
   }
-  if (status === 422 || /model.*not|not.*available|unsupported.*model|invalid.*model/i.test(d)) {
+  if (status === 422 || /model.*not|not.*available|unsupported.*model|invalid.*model|deprecated/i.test(d)) {
     return (
       `Nenhum dos modelos disponíveis foi aceite (${modelosRecusados.join(', ')}). ` +
       'O seu plano pode não incluir a síntese de voz pela API. Veja https://elevenlabs.io/app/subscription'
     );
   }
-  if (status === 429 || /quota|rate limit|too many/i.test(d)) {
-    return 'Atingiu o limite de caracteres do seu plano ElevenLabs. Espere pela renovação, ou use a voz do browser para esta narração.';
+  if (status === 429 || /rate limit|too many/i.test(d)) {
+    return 'Demasiados pedidos em pouco tempo. Espere um pouco e tente outra vez.';
   }
   if (/voice_not_found|does not exist/i.test(d)) {
     return 'Esta voz não existe na sua conta. Clique em "Carregar as minhas vozes" e escolha outra.';
@@ -115,7 +131,7 @@ export default async function (req) {
     // dava um erro que parecia "chave inválida" — quando a chave estava boa
     // (a lista de vozes funcionava com a mesma chave). Tentar por ordem e
     // reportar cada tentativa evita este falso diagnóstico.
-    const MODELOS = [MODELO, 'eleven_turbo_v2_5', 'eleven_flash_v2_5', 'eleven_multilingual_v1'];
+    const MODELOS = [MODELO, 'eleven_turbo_v2_5', 'eleven_flash_v2_5'];
     const tentativas = [];
     let resposta = null;
     let modeloUsado = '';
@@ -144,8 +160,10 @@ export default async function (req) {
       tentativas.push({ modelo: m, http: r.status, erro: String(msg).slice(0, 160) });
       console.warn(`[narrateEleven] modelo "${m}" falhou (HTTP ${r.status}): ${String(msg).slice(0, 120)}`);
 
-      // Chave mesmo inválida: não vale a pena tentar os outros modelos.
-      if (r.status === 401 || r.status === 403) break;
+      // Estes casos NÃO melhoram ao tentar outro modelo: parar poupa tempo e
+      // não dá a impressão de que "quase funcionou".
+      if (r.status === 401 || r.status === 403) break; // chave/permissão
+      if (/exceeds your quota|credits remaining|paid_plan_required|payment_required/i.test(String(msg))) break; // cota/plano
     }
 
     if (!resposta) {

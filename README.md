@@ -135,8 +135,9 @@ npm test
 ```
 
 Cobre as transições sem saltos, o tempo de cada cena, a entrada do áudio, o botão
-Parar, a trilha em ciclo a 16 %, o painel da página e a ligação entre os `id` do
-HTML e o JavaScript. Detalhes em `testes/LEIAME.md`.
+Parar, a trilha em ciclo a 16 %, o corte da narração em blocos de legenda e o
+ficheiro `.srt`, a repetição das imagens até a música acabar, o painel da página e
+a ligação entre os `id` do HTML e o JavaScript. Detalhes em `testes/LEIAME.md`.
 
 ---
 
@@ -185,6 +186,38 @@ por cima e tudo é gravado em tempo real com `MediaRecorder`.
 No modo **só música** não é preciso gerar narração: cada imagem fica o tempo
 escolhido em “Cada imagem” (2 s a 8 s) e a trilha toca em ciclo por baixo. É o
 modo para fazer um vídeo de ambiente, uma capa animada ou uma montagem de fotos.
+
+**Duração** — duas formas de decidir quanto tempo o vídeo dura:
+
+| Opção | O que faz |
+|---|---|
+| 🖼️ As imagens | o vídeo dura o que durar a narração das cenas |
+| 🔁 Até acabar a música | as **imagens repetem em ciclo** até a trilha acabar |
+
+A segunda resolve o caso de um vídeo curto (poucas imagens) com uma música longa:
+em vez de a música ser cortada a meio, as imagens voltam a passar — pela mesma
+ordem, com a narração e as legendas a acompanhar cada passagem. A contagem é por
+passagens inteiras, por isso o vídeo pode passar um pouco do fim da música (nunca
+fica cortado a meio de uma imagem). Uma música enorme (5 horas) fica limitada a
+100 passagens, para não gerar milhares de cenas.
+
+**Legendas** (💬, ligadas por omissão) — a narração é cortada em blocos curtos e
+desenhada no fundo do vídeo, e sai também um ficheiro **`.srt`** com os mesmos
+blocos, para a faixa de legendas do YouTube. A regra de legibilidade é a do
+Rebeca Hub 2.0:
+
+- no máximo **9 palavras** e **42 caracteres** por bloco, quebrando antes numa
+  vírgula/travessão quando dá (corta na pausa da fala, não no meio da ideia);
+- **nenhuma palavra é descartada** — se não couber em 2 linhas, a fonte encolhe
+  até 55 % e, no limite, mostra todas as linhas;
+- cada bloco fica no ecrã em proporção às suas palavras, com um piso de 0,8 s
+  **compensado nos blocos longos**, para a soma não invadir a cena seguinte;
+- estilo fixo, igual ao 2.0: fonte **Luckiest Guy**, cor **amarela (#FBBF24)**,
+  contorno preto grosso e sombra. Sem rede para o Google Fonts, cai na alternativa
+  local e o vídeo sai na mesma.
+
+O resumo por baixo dos controlos diz quantos blocos vão sair e mostra o primeiro,
+para se ver como a fala foi cortada antes de gravar dois minutos de vídeo.
 
 - **Grava em tempo real** — um vídeo de 2 minutos leva 2 minutos.
 - **Sai em WebM** (VP9/VP8 + Opus). Para MP4, use a versão local com ffmpeg.

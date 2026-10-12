@@ -110,7 +110,11 @@ function ambiente(reg, suportaVideo) {
   const MR = class {
     static isTypeSupported(t) { return suportaVideo && /webm/.test(t); }
   };
-  globalThis.window = suportaVideo ? { MediaRecorder: MR, speechSynthesis: { speaking: false, getVoices: () => [], speak() {}, cancel() {} } } : { speechSynthesis: { speaking: false, getVoices: () => [], speak() {}, cancel() {} } };
+  // A app procura o AudioContext em `window` (é assim que um browser se comporta),
+  // por isso tem de estar em window e não só em globalThis.
+  const AC = class { constructor() { this.state = 'running'; } createAnalyser() { return { fftSize: 1024, getByteTimeDomainData(a) { a.fill(128); } }; } createMediaStreamSource() { return { connect() {} }; } createMediaStreamDestination() { return { stream: { getAudioTracks: () => [{}] } }; } createGain() { return { gain: { value: 1 }, connect() {} }; } createBufferSource() { return { connect() {}, start() {} }; } decodeAudioData() { return Promise.resolve({ duration: 4 }); } resume() { return Promise.resolve(); } close() { return Promise.resolve(); } };
+  const fala = { speaking: false, getVoices: () => [], speak() {}, cancel() {} };
+  globalThis.window = suportaVideo ? { MediaRecorder: MR, AudioContext: AC, speechSynthesis: fala } : { speechSynthesis: fala };
   globalThis.speechSynthesis = globalThis.window.speechSynthesis;
   globalThis.SpeechSynthesisUtterance = class { constructor(t) { this.text = t; } };
   globalThis.Audio = class {
@@ -119,7 +123,7 @@ function ambiente(reg, suportaVideo) {
     pause() {}
     removeAttribute() {}
   };
-  globalThis.AudioContext = class { constructor() { this.state = 'running'; } createAnalyser() { return { fftSize: 1024, getByteTimeDomainData(a) { a.fill(128); } }; } createMediaStreamSource() { return { connect() {} }; } createMediaStreamDestination() { return { stream: { getAudioTracks: () => [{}] } }; } createGain() { return { gain: { value: 1 }, connect() {} }; } createBufferSource() { return { connect() {}, start() {} }; } decodeAudioData() { return Promise.resolve({ duration: 4 }); } resume() { return Promise.resolve(); } close() { return Promise.resolve(); } };
+  globalThis.AudioContext = AC;
   globalThis.MediaStream = class { constructor(t) { this.tracks = t; } getTracks() { return this.tracks; } getVideoTracks() { return this.tracks; } getAudioTracks() { return []; } };
   globalThis.Image = class { constructor() { setTimeout(() => { this.naturalWidth = 1280; this.naturalHeight = 720; this.onload?.(); }, 5); } set src(v) { this._src = v; } get src() { return this._src; } };
   globalThis.requestAnimationFrame = (fn) => setTimeout(() => fn(Date.now()), 16);
@@ -143,7 +147,8 @@ function ambiente(reg, suportaVideo) {
 const VIDEO_URL = 'file:///E:/youtube%20rebeca2/rebeca-hub-3.0-base44/public/video.mjs';
 const src = readFileSync(BASE + 'app.js', 'utf8')
   .replace(/await import\('@\/base44Client\.js'\)/g, '({ base44: globalThis.__base44Falso })')
-  .replace(/await import\('\.\/video\.mjs'\)/g, `await import('${VIDEO_URL}')`);;;
+  .replace(/await import\('\.\/video\.mjs'\)/g, `await import('${VIDEO_URL}')`)
+  .replace(/await import\('\.\/legendas-core\.mjs'\)/g, `await import('file:///E:/youtube%20rebeca2/rebeca-hub-3.0-base44/public/legendas-core.mjs')`);;;
 const erros = [];
 // Um erro não tratado tem de APARECER. Antes ficava só numa lista e, se
 // rebentasse a meio, o teste terminava calado com sucesso — foi assim que uma
@@ -343,7 +348,94 @@ console.log('\n[9] Só música sem imagens: pede as imagens');
   check(/Importe as imagens/i.test(reg.get('vid-estado').textContent), 'sem imagens, pede as imagens', reg.get('vid-estado').textContent);
 }
 
-console.log('\n[10] Sem erros de JavaScript');
+console.log('\n[10] Controlo das legendas');
+{
+  const reg = await arrancar(true);
+  const cl = reg.get('vid-legendas');
+  check(cl.children.length === 2, `2 opções de legendas (${cl.children.map((b) => b.textContent).join(' | ')})`, String(cl.children.length));
+  check(cl.children[0].classList.contains('on'), 'as legendas começam ligadas', 'começaram desligadas');
+  check(cl.children[1].classList.contains('on') === false, 'e "Sem legendas" não está marcado', 'está marcado');
+
+  // Sem texto nenhum, o resumo avisa em vez de prometer legendas.
+  check(/Importe as imagens|Gere a narração/i.test(reg.get('vid-estado').textContent), 'sem cenas, pede as imagens ou a narração', reg.get('vid-estado').textContent);
+
+  // Desligar guarda a escolha.
+  cl.children[1].click();
+  await new Promise((r) => setTimeout(r, 40));
+  check(cl.children[1].classList.contains('on'), '"Sem legendas" ficou marcado', 'não marcou');
+  const g1 = JSON.parse(globalThis.localStorage.getItem('rh3nuvem') || '{}');
+  check(g1.legendas === false, 'a escolha de desligar fica guardada', JSON.stringify(g1.legendas));
+  const estadoSem = reg.get('vid-estado').textContent;
+  check(!/bloco\(s\)/.test(estadoSem), `desligadas: o resumo não fala de blocos ("${estadoSem.slice(0, 50)}…")`, estadoSem);
+
+  // Ligar outra vez mostra quantos blocos vão sair e o primeiro deles.
+  cl.children[0].click();
+  await new Promise((r) => setTimeout(r, 40));
+  const g2 = JSON.parse(globalThis.localStorage.getItem('rh3nuvem') || '{}');
+  check(g2.legendas === true, 'ligar fica guardado', JSON.stringify(g2.legendas));
+}
+
+console.log('\n[11] O resumo mostra os blocos de legenda da narração');
+{
+  const reg = await arrancar(true);
+  // Importa uma imagem e escreve uma narração longa.
+  reg.get('input-files').onchange({ target: { files: [{ name: 'a.jpg', type: 'image/jpeg', size: 900 }], value: '' } });
+  await new Promise((r) => setTimeout(r, 150));
+  const cena = reg.get('scenes').children[0];
+  const ta = cena.children[1].children.find((c) => c.tagName === 'TEXTAREA');
+  ta.value = 'Era uma vez uma menina muito curiosa. Ela vivia numa casa pequena e feliz.';
+  ta.dispatchEvent({ type: 'input' });
+  await new Promise((r) => setTimeout(r, 60));
+
+  const est = reg.get('vid-estado').textContent;
+  check(/bloco\(s\)/.test(est), `conta os blocos de legenda: "${est.slice(0, 90)}…"`, est);
+  check(/Era uma vez/.test(est), 'e mostra o primeiro bloco, para se ver como a fala foi cortada', est);
+  check(/\.srt/.test(est), 'avisa que sai também o ficheiro .srt', est);
+}
+
+console.log('\n[12] Duração: repetir as imagens até a música acabar');
+{
+  const reg = await arrancar(true);
+  const cdm = reg.get('vid-duracao-modo');
+  check(cdm.children.length === 2, `2 opções de duração (${cdm.children.map((b) => b.textContent).join(' | ')})`, String(cdm.children.length));
+  check(cdm.children[1].disabled === true, 'sem música, "Até acabar a música" está desativado', 'está ativo sem música');
+  check(cdm.children[0].classList.contains('on'), 'começa em "As imagens"', 'não começou no modo natural');
+
+  // Importa imagens e escolhe música: o modo de ciclo passa a fazer sentido.
+  reg.get('input-files').onchange({ target: { files: [{ name: 'a.jpg', type: 'image/jpeg', size: 900 }, { name: 'b.jpg', type: 'image/jpeg', size: 900 }], value: '' } });
+  await new Promise((r) => setTimeout(r, 150));
+  reg.get('vid-modos').children[2].click(); // só música, sem narração
+  await new Promise((r) => setTimeout(r, 40));
+  check(cdm.children[1].disabled === true, 'continua desativado enquanto não há música', 'ativou sem música');
+
+  reg.get('input-trilha').files = [{ name: 'tema.mp3', size: 2_000_000, type: 'audio/mpeg' }];
+  reg.get('input-trilha').onchange();
+  await new Promise((r) => setTimeout(r, 180));
+  check(cdm.children[1].disabled === false, 'com música, o modo de ciclo fica utilizável', 'continuou desativado');
+  check(cdm.children[1].classList.contains('on'), 'e fica escolhido por omissão', 'não ficou escolhido');
+
+  const est = reg.get('vid-estado').textContent;
+  const r = /🔁[^.]*\./.exec(est)?.[0] || est;
+  check(/🔁/.test(est), `o resumo diz que vai repetir: "${r}"`, est);
+  check(/\d+×/.test(est), `diz quantas passagens vai dar (${/\d+×/.exec(est)?.[0]})`, est);
+  check(/1:05/.test(est), 'e lembra o tempo da música (65s → 1:05)', est);
+  check(/repetem/i.test(est), 'explica que são as imagens a repetir', est);
+
+  // Voltar a "As imagens" tira a nota do ciclo.
+  cdm.children[0].click();
+  await new Promise((r) => setTimeout(r, 40));
+  check(cdm.children[0].classList.contains('on'), '"As imagens" ficou marcado', 'não marcou');
+  check(!/🔁/.test(reg.get('vid-estado').textContent), 'sem ciclo, o resumo já não fala de repetições', reg.get('vid-estado').textContent);
+  const g = JSON.parse(globalThis.localStorage.getItem('rh3nuvem') || '{}');
+  check(g.modoDuracao === 'natural', `a escolha fica guardada (${g.modoDuracao})`, JSON.stringify(g.modoDuracao));
+
+  // Tirar a música volta a desativar o modo de ciclo.
+  reg.get('btn-trilha-tirar').click();
+  await new Promise((r) => setTimeout(r, 40));
+  check(cdm.children[1].disabled === true, 'ao tirar a música, o ciclo volta a ficar desativado', 'ficou ativo');
+}
+
+console.log('\n[13] Sem erros de JavaScript');
 if (erros.length) erros.slice(0, 5).forEach((e) => fail(e));
 else ok('nenhum erro não tratado');
 

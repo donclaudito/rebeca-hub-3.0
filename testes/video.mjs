@@ -13,6 +13,7 @@ const check = (c, bom, mau) => (c ? ok(bom) : fail(mau));
 let relogioMs = 0;               // milissegundos
 let fila = [];                   // requestAnimationFrame pendentes
 let desenhos = [];               // {t, img, escala, alpha, filtro}
+let legendasDesenhadas = [];     // {t, texto, tipo}
 let agendamentos = [];           // {clipe, quando}
 let fontesEmCiclo = [];          // fontes com loop (a trilha)
 let ganhosCriados = [];          // valores de ganho pedidos (narração=1, trilha=0.16)
@@ -28,6 +29,10 @@ class Ctx2D {
   drawImage(img, x, y, w, h) {
     desenhos.push({ t: relogioMs / 1000, img: img && img.nome, escala: w / 1000, alpha: this.globalAlpha, dx: x, filtro: this.filter });
   }
+  // A legenda precisa de medir texto: ~0,55 × tamanho por letra.
+  measureText(t) { return { width: String(t).length * (parseFloat(this.font) || 16) * 0.55 }; }
+  strokeText(t) { legendasDesenhadas.push({ t: relogioMs / 1000, texto: String(t), tipo: 'contorno' }); }
+  fillText(t) { legendasDesenhadas.push({ t: relogioMs / 1000, texto: String(t), tipo: 'preenchimento' }); }
 }
 
 class CanvasFalso {
@@ -121,7 +126,7 @@ class GravadorFalso {
 }
 
 function instalarAmbiente(duracoes) {
-  desenhos = []; agendamentos = []; fontesEmCiclo = []; ganhosCriados = []; fila = []; relogioMs = 0;
+  desenhos = []; agendamentos = []; fontesEmCiclo = []; ganhosCriados = []; legendasDesenhadas = []; fila = []; relogioMs = 0;
   musicaDuracao = 65;
   const ctx = new AudioCtxFalso(duracoes);
   ultimoCtx = ctx;
@@ -521,6 +526,234 @@ console.log('\n[14] Só música e a música falha: é erro, não vídeo mudo');
   }));
   check(r.ok === true, 'o motor grava as imagens na mesma', JSON.stringify(r).slice(0, 120));
   check(r.comMusica === false && r.comVoz === false, 'e diz que não tem voz nem música', `voz=${r.comVoz} musica=${r.comMusica}`);
+}
+
+console.log('\n[15] Legendas desenhadas por cima e ficheiro .srt');
+{
+  const narracoes = [
+    'Era uma vez uma menina, muito curiosa e feliz. Ela vivia numa casa pequena.',
+    'Um dia encontrou um mapa misterioso debaixo da árvore grande, com três sinais estranhos.',
+    'No fim da aventura descobriu que o tesouro era a própria viagem.',
+  ];
+  const cenas = [3.0, 2.0, 1.0].map((_, i) => ({ imagem: `c${i + 1}`, audio: blobsDe(1)[0], texto: narracoes[i] }));
+
+  instalarAmbiente([3.0, 2.0, 1.0]);
+  const r = await correrCom(mod.gerarVideo({
+    cenas, transicao: 'fade', duracaoTransicao: 0.4, legendas: true,
+  }));
+
+  check(r.ok === true, 'gera o vídeo com legendas ligadas', JSON.stringify(r).slice(0, 140));
+  check(r.legendas > 3, `${r.legendas} blocos de legenda no total`, String(r.legendas));
+  // Cada bloco é redesenhado em cada fotograma em que está no ecrã, por isso
+  // contam-se os blocos distintos pelo INSTANTE em que aparecem pela primeira vez.
+  const aparecimentos = [...new Set(legendasDesenhadas.map((l) => l.t))].map(
+    (t) => [...new Set(legendasDesenhadas.filter((l) => l.t === t).map((l) => l.texto))].sort().join(' '),
+  );
+  const inicios = [...new Set(aparecimentos)];
+  check(inicios.length === r.legendas, `desenhou os ${r.legendas} blocos, um a um (${inicios.length} entradas distintas)`, `${inicios.length} ≠ ${r.legendas}`);
+  const contornos = legendasDesenhadas.filter((l) => l.tipo === 'contorno').length;
+  const cheios = legendasDesenhadas.filter((l) => l.tipo === 'preenchimento').length;
+  check(contornos > 0 && contornos === cheios, `cada linha é desenhada com contorno e preenchimento (${contornos}/${cheios})`, `${contornos} contornos, ${cheios} preenchimentos`);
+
+  // Cada bloco desenhado tem de vir da narração (nenhum texto inventado).
+  // O que se desenha são LINHAS do bloco, por isso compara-se palavra a palavra.
+  const palavrasOriginais = new Set(narracoes.join(' ').split(/\s+/));
+  const textos = [...new Set(legendasDesenhadas.map((l) => l.texto))];
+  const inventado = [];
+  for (const linha of textos) {
+    for (const p of linha.split(/\s+/).filter(Boolean)) {
+      if (!palavrasOriginais.has(p)) inventado.push(`${p} (em "${linha}")`);
+    }
+  }
+  check(inventado.length === 0, 'todas as linhas desenhadas usam palavras da narração', inventado.join(' | '));
+
+  // Nada é desenhado depois de o vídeo acabar.
+  const fora = legendasDesenhadas.filter((l) => l.t > r.duracao + 0.2);
+  check(fora.length === 0, `nenhuma legenda aparece depois do fim (${r.duracao.toFixed(2)}s)`, `${fora.length} fora`);
+
+  // A prova de que o texto TODO passou pelo ecrã: para cada bloco da lista de
+  // legendas, todas as suas palavras (menos uma, que pode estar noutra linha do
+  // mesmo desenho) têm de aparecer nas linhas desenhadas.
+  const core = await import(BASE + 'legendas-core.mjs');
+  const listaCues = core.legendasDasCenas(cenas.map((c) => c.texto), [3.0, 2.0, 1.0], [0, 3.0, 5.0]);
+  const desenhado = legendasDesenhadas.map((l) => l.texto).join(' ');
+  const faltas = [];
+  for (const cue of listaCues) {
+    const faltam = cue.texto.split(/\s+/).filter((p) => !desenhado.includes(p));
+    if (faltam.length) faltas.push(`"${cue.texto}": falta ${faltam.join(', ')}`);
+  }
+  check(faltas.length === 0, `as palavras dos ${listaCues.length} blocos aparecem todas no ecrã`, faltas.join(' | '));
+
+  // Nenhuma linha desenhada pode ser comprida demais para se ler.
+  const comprida = textos.filter((l) => l.length > core.CAPT_CHARS + 8);
+  check(comprida.length === 0, `nenhuma linha passa de ${core.CAPT_CHARS + 8} caracteres`, comprida.join(' | '));
+
+  // A legenda acompanha a fala de ponta a ponta, sem buracos.
+  const instantes = [...new Set(legendasDesenhadas.map((l) => l.t))].sort((a, b) => a - b);
+  const buracos = [];
+  for (let i = 0; i < instantes.length - 1; i++) {
+    if (instantes[i + 1] - instantes[i] > 0.25) buracos.push(`${instantes[i].toFixed(2)}→${instantes[i + 1].toFixed(2)}`);
+  }
+  check(instantes[0] < 0.1, `a legenda começa logo no início (${instantes[0].toFixed(2)}s)`, String(instantes[0]));
+  check(buracos.length === 0, `sem buracos na legenda entre ${instantes[0].toFixed(2)}s e ${instantes[instantes.length - 1].toFixed(2)}s`, `buracos: ${buracos.join(', ')}`);
+  check(instantes[instantes.length - 1] >= r.duracao - 0.3, `a legenda acompanha até ao fim (${instantes[instantes.length - 1].toFixed(2)}s de ${r.duracao.toFixed(2)}s)`, `parou em ${instantes[instantes.length - 1].toFixed(2)}s`);
+
+  // O .srt tem os mesmos blocos.
+  check(typeof r.srt === 'string' && r.srt.length > 0, 'devolve o ficheiro .srt', String(typeof r.srt));
+  const numeros = r.srt.split('\n\n').map((b) => b.split('\n')[0]).filter((x) => /^\d+$/.test(x));
+  check(numeros.length === r.legendas, `.srt com ${r.legendas} legendas, as mesmas do vídeo`, `${numeros.length} ≠ ${r.legendas}`);
+  check(r.srt.startsWith('1\n00:00:00,000 -->'), 'o .srt começa no segundo zero', r.srt.slice(0, 40).replace(/\n/g, ' | '));
+  const blocosSrt = r.srt.split('\n\n').filter(Boolean).map((b) => b.split('\n').slice(2).join(' '));
+  // Comparação por CONJUNTO de palavras: o desenho mostra linhas quebradas, o
+  // .srt mostra o bloco inteiro. O que tem de bater é o conteúdo, não a quebra.
+  const palavras = (t) => [...new Set(String(t).split(/\s+/).filter(Boolean))].sort().join(' ');
+  const doVideo = new Set(listaCues.map((c) => palavras(c.texto)));
+  const srtDiferente = blocosSrt.filter((s) => !doVideo.has(palavras(s)));
+  check(srtDiferente.length === 0, `o .srt tem os mesmos ${listaCues.length} blocos que o vídeo desenha`, `só no .srt: ${srtDiferente.join(' | ')}`);
+  const soNoVideo = listaCues.filter((c) => !blocosSrt.some((s) => palavras(s) === palavras(c.texto)));
+  check(soNoVideo.length === 0, 'e nenhum bloco do vídeo falta no .srt', `só no vídeo: ${soNoVideo.map((c) => c.texto).join(' | ')}`);
+}
+
+console.log('\n[16] Sem legendas não se desenha nada');
+{
+  const cenas = [{ imagem: 'c1', audio: blobsDe(1)[0], texto: 'Uma frase para legendar.' }];
+  instalarAmbiente([2.0]);
+  const r = await correrCom(mod.gerarVideo({ cenas, transicao: 'fade', duracaoTransicao: 0.4, legendas: false }));
+  check(r.ok === true && r.legendas === 0, 'legendas desligadas: zero blocos', `legendas=${r.legendas}`);
+  check(legendasDesenhadas.length === 0, 'nada de legenda foi desenhado', `${legendasDesenhadas.length} desenhos`);
+  check(r.srt === '', 'sem blocos não há .srt', JSON.stringify(r.srt));
+
+  // Por omissão também não há legendas (quem não pedir não recebe).
+  instalarAmbiente([2.0]);
+  const r2 = await correrCom(mod.gerarVideo({ cenas, transicao: 'fade', duracaoTransicao: 0.4 }));
+  check(r2.legendas === 0 && legendasDesenhadas.length === 0, 'por omissão não há legendas', `legendas=${r2.legendas}`);
+}
+
+console.log('\n[17] Legendas no modo só música, a partir do texto das cenas');
+{
+  // No modo só música não há voz, mas o texto do guião serve de legenda.
+  instalarAmbiente([]);
+  const musica = { name: 'tema.mp3', arrayBuffer: () => Promise.resolve(new ArrayBuffer(64)) };
+  const r = await correrCom(mod.gerarVideo({
+    cenas: [
+      { imagem: 'c1', audio: null, semFala: true, texto: 'A primeira imagem desta história.' },
+      { imagem: 'c2', audio: null, semFala: true, texto: 'E agora a segunda imagem, com mais palavras.' },
+    ],
+    transicao: 'fade', duracaoTransicao: 0.6, duracaoCena: 4, musica, legendas: true,
+  }));
+  check(r.ok === true && r.comVoz === false, 'vídeo só com música', `comVoz=${r.comVoz}`);
+  check(r.legendas >= 2, `${r.legendas} blocos de legenda sem narração nenhuma`, String(r.legendas));
+  const textos = [...new Set(legendasDesenhadas.map((l) => l.texto))];
+  check(textos.join(' ').includes('primeira imagem'), `o texto do guião vira legenda ("${textos[0]}")`, textos.join(' | '));
+  check(r.srt.includes('segunda imagem'), 'e sai no .srt também', r.srt.slice(0, 60).replace(/\n/g, ' | '));
+}
+
+console.log('\n[18] Vídeo curto com música longa: as imagens repetem em ciclo');
+{
+  // 2 imagens × 3,5s = 7s naturais; música de 20s → tem de repetir.
+  const duasCenas = [
+    { imagem: 'c1', audio: null, semFala: true, texto: 'A primeira imagem.' },
+    { imagem: 'c2', audio: null, semFala: true, texto: 'A segunda imagem.' },
+  ];
+  const musica = { name: 'tema.mp3', arrayBuffer: () => Promise.resolve(new ArrayBuffer(64)) };
+
+  instalarAmbiente([]);
+  const r = await correrCom(mod.gerarVideo({
+    cenas: duasCenas, transicao: 'fade', duracaoTransicao: 0.6, duracaoCena: 3.5,
+    musica, modoDuracao: 'trilha', musicaSegundos: 20,
+  }));
+
+  check(r.ok === true, 'gera o vídeo em ciclo', JSON.stringify(r).slice(0, 140));
+  check(r.repetido === true, 'assinala que repetiu as imagens', `repetido=${r.repetido}`);
+  check(perto(r.duracaoNatural, 7, 0.05), `a duração natural era ${r.duracaoNatural.toFixed(2)}s`, String(r.duracaoNatural));
+  check(r.passagens >= 3, `deu ${r.passagens} passagens às imagens`, String(r.passagens));
+  check(r.duracao >= 20, `o vídeo chegou aos 20s da música (${r.duracao.toFixed(2)}s)`, `${r.duracao}`);
+  // Passagens INTEIRAS: o vídeo pode passar um pouco do fim da música (nunca
+  // fica cortado a meio de uma imagem), mas no máximo uma passagem a mais.
+  check(r.duracao < 20 + 7, `o excesso é menos de uma passagem (${r.duracao.toFixed(2)}s < 27s)`, `${r.duracao}`);
+  check(perto(r.duracao, r.passagens * r.duracaoNatural, 0.1), `são exatamente ${r.passagens} passagens de ${r.duracaoNatural.toFixed(1)}s`, `${r.duracao} ≠ ${r.passagens}×${r.duracaoNatural}`);
+  check(r.cortado === true, 'avisa que a última passagem é cortada a meio', `cortado=${r.cortado}`);
+
+  // As imagens têm de voltar pela mesma ordem, e a música continuar em ciclo.
+  const ordem = desenhos.map((d) => d.img).filter((v, i, a) => v !== a[i - 1]);
+  check(ordem.length >= 6, `as imagens voltaram a passar (${ordem.length} trocas)`, String(ordem.length));
+  const ciclo = ordem.slice(0, 4).join(',');
+  check(ciclo === 'c1,c2,c1,c2', `a ordem repete-se certinha (${ciclo})`, ciclo);
+  check(fontesEmCiclo.length === 1 && fontesEmCiclo[0].loop === true, 'a música continuou em ciclo, sem reiniciar', `fontes em ciclo: ${fontesEmCiclo.length}`);
+  check(fontesEmCiclo[0].parou === true, 'a música é parada no fim', 'ficou a tocar');
+}
+
+console.log('\n[19] Sem modo de ciclo, a duração continua a ser a natural');
+{
+  const duasCenas = [
+    { imagem: 'c1', audio: null, semFala: true, texto: 'A primeira imagem.' },
+    { imagem: 'c2', audio: null, semFala: true, texto: 'A segunda imagem.' },
+  ];
+  const musica = { name: 'tema.mp3', arrayBuffer: () => Promise.resolve(new ArrayBuffer(64)) };
+
+  instalarAmbiente([]);
+  const r = await correrCom(mod.gerarVideo({
+    cenas: duasCenas, transicao: 'fade', duracaoTransicao: 0.6, duracaoCena: 3.5,
+    musica, modoDuracao: 'natural', musicaSegundos: 20,
+  }));
+  check(r.repetido === false && r.passagens === 1, 'não repetiu nada', `repetido=${r.repetido} passagens=${r.passagens}`);
+  check(perto(r.duracao, 7, 0.1), `ficou nos 7s das imagens (${r.duracao.toFixed(2)}s)`, `${r.duracao}`);
+  check(r.cortado === false, 'não assinala corte', `cortado=${r.cortado}`);
+
+  // Música mais CURTA do que o vídeo: não há nada a repetir.
+  instalarAmbiente([]);
+  const r2 = await correrCom(mod.gerarVideo({
+    cenas: duasCenas, transicao: 'fade', duracaoTransicao: 0.6, duracaoCena: 3.5,
+    musica, modoDuracao: 'trilha', musicaSegundos: 3,
+  }));
+  check(r2.repetido === false && perto(r2.duracao, 7, 0.1), `música de 3s: fica nos 7s das imagens (${r2.duracao.toFixed(2)}s)`, `${r2.duracao}`);
+  check(r2.cortado === false, 'e não diz que cortou', `cortado=${r2.cortado}`);
+
+  // Sem música escolhida, o modo de ciclo não faz nada de estranho.
+  instalarAmbiente([]);
+  const r3 = await correrCom(mod.gerarVideo({
+    cenas: duasCenas, transicao: 'fade', duracaoTransicao: 0.6, duracaoCena: 3.5,
+    modoDuracao: 'trilha', musicaSegundos: 0,
+  }));
+  check(r3.ok === true && r3.repetido === false, 'sem música não repete', `repetido=${r3.repetido}`);
+
+  // Limite: uma música enorme não pode gerar milhares de cenas. A gravação é em
+  // tempo real, por isso aqui corre-se com um limite de tempo curto e confirma-se
+  // que o número de passagens ficou travado (não que o vídeo acabou).
+  instalarAmbiente([]);
+  let passagensVistas = 0;
+  const r4 = await correrCom(mod.gerarVideo({
+    cenas: duasCenas, transicao: 'fade', duracaoTransicao: 0.6, duracaoCena: 2,
+    musica, modoDuracao: 'trilha', musicaSegundos: 60 * 60 * 5,
+    aoProgredir: (p) => { if (p.fase === 'a gravar') passagensVistas = Math.max(passagensVistas, p.passagens || 1); },
+    deveParar: () => relogioMs > 30000,
+  }));
+  check(passagensVistas > 0 && passagensVistas <= 100, `uma música de 5 horas fica limitada a ${passagensVistas} passagens`, String(passagensVistas));
+  check(r4.ok === true, 'e o vídeo fecha na mesma', JSON.stringify(r4).slice(0, 90));
+}
+
+console.log('\n[20] Com narração, o ciclo repete também a voz');
+{
+  // 2 cenas narradas de 2s: 4s naturais, música de 10s → repete.
+  instalarAmbiente([2.0, 2.0, 2.0, 2.0, 2.0, 2.0]);
+  const musica = { name: 'tema.mp3', arrayBuffer: () => Promise.resolve(new ArrayBuffer(64)) };
+  const r = await correrCom(mod.gerarVideo({
+    cenas: [
+      { imagem: 'c1', audio: blobsDe(1)[0], texto: 'Primeira fala.' },
+      { imagem: 'c2', audio: blobsDe(1)[0], texto: 'Segunda fala.' },
+    ],
+    transicao: 'fade', duracaoTransicao: 0.4, musica, modoDuracao: 'trilha', musicaSegundos: 10, legendas: true,
+  }));
+  check(r.ok === true && r.comVoz === true, 'vídeo narrado em ciclo', `comVoz=${r.comVoz}`);
+  check(r.passagens >= 2, `${r.passagens} passagens`, String(r.passagens));
+  check(r.duracao >= 10, `chegou aos 10s da música (${r.duracao.toFixed(2)}s)`, `${r.duracao}`);
+  // A narração é tocada uma vez por passagem (não fica em silêncio na repetição).
+  check(agendamentos.length >= 4, `a narração voltou a tocar em cada passagem (${agendamentos.length} clipes)`, String(agendamentos.length));
+  // As legendas acompanham as repetições.
+  const blocosDistintos = [...new Set(legendasDesenhadas.map((l) => l.texto))];
+  check(r.legendas >= 4, `${r.legendas} blocos de legenda nas repetições`, String(r.legendas));
+  check(blocosDistintos.some((t) => /Primeira/.test(t)), 'a legenda da 1.ª cena volta a aparecer', blocosDistintos.join(' | '));
+  check(legendasDesenhadas.at(-1).t >= r.duracao - 0.5, `a legenda acompanha até ao fim (${legendasDesenhadas.at(-1).t.toFixed(2)}s de ${r.duracao.toFixed(2)}s)`, String(legendasDesenhadas.at(-1).t));
 }
 
 console.log(falhas.length ? `\n=== ${falhas.length} FALHA(S) ===` : '\n=== GERAÇÃO DE VÍDEO OK ===');

@@ -26,10 +26,15 @@ const state = {
   // O que entra no vídeo: 'narracao' | 'ambos' | 'musica'.
   videoModo: 'ambos',
   videoDuracaoCena: 3.5,
+  // Legendas incrustadas no vídeo + ficheiro .srt (mesmos blocos).
+  legendas: true,
+  // 'natural' (duração das cenas) ou 'trilha' (repete as imagens até a música acabar).
+  modoDuracao: 'natural',
   pararVideo: false,
   // Trilha sonora: o ficheiro escolhido (fica só nesta sessão) e a duração lida.
   musicaFicheiro: null,
   musicaDuracao: 0,
+  musicaSegundos: 0,
   musicaLigada: true,
   musicaUrl: '',
   servico: 'deepseek',
@@ -304,6 +309,8 @@ function renderScenes() {
       cena.texto = ta.value;
       contar();
       atualizarContador();
+      // O resumo do vídeo conta os blocos de legenda: ao escrever, atualiza-se.
+      resumoVideo();
     });
 
     btnOuvir.onclick = async () => {
@@ -1201,6 +1208,10 @@ function criarZip(ficheiros) {
 }
 
 // ---------------------------------------------------------------- vídeo
+// As contas das legendas vivem em legendas-core.mjs. São carregadas no início
+// (init) e guardadas aqui, para o resumo poder contar os blocos sem esperar.
+const leg = { blocosDaNarracao: () => [] };
+
 // ---------------------------------------------------------------- modos do vídeo
 // Três formas de montar o vídeo. A terceira existe para quem quer só a trilha:
 // as imagens passam com a música por baixo, sem voz nenhuma e sem ter de gerar
@@ -1228,6 +1239,7 @@ function resumoVideo() {
   const m = modoVideo();
   const n = state.scenes.filter((s) => (s.texto || '').trim()).length || state.images.length;
   const musica = state.musicaFicheiro && querMusica();
+  const nota = legendasNota();
 
   if (state.videoModo === 'musica') {
     const seg = n * (Number(state.videoDuracaoCena) || 3.5);
@@ -1237,8 +1249,8 @@ function resumoVideo() {
     }
     return estadoVideo(
       `Vai sair um vídeo de ${n} imagem(ns), cerca de ${formatarMinutos(seg)}, com a trilha ` +
-        `"${state.musicaFicheiro.name}" em ciclo e sem voz. Transição "${transicaoRotulo()}". ` +
-        `Demora cerca de ${formatarMinutos(seg)} a gravar.`,
+        `"${state.musicaFicheiro.name}" em ciclo e sem voz. Transição "${transicaoRotulo()}".` +
+        `${nota}${notaCiclo()} Demora cerca de ${formatarMinutos(vezesQueRepete().total || seg)} a gravar.`,
       '',
     );
   }
@@ -1248,20 +1260,84 @@ function resumoVideo() {
   if (semAudio === n) {
     return estadoVideo(
       '❌ Ainda não há áudio. Vá à aba ⚡ Ações e clique em "🎧 Gerar o áudio de todas as cenas". ' +
-        'Ou mude "O que entra" para 🎵 Só música, que não precisa de voz nenhuma.',
+        'Ou mude "O que entra" para 🎵 Só música, que não precisa de voz nenhuma.' +
+        nota, // mesmo sem áudio, ver como a fala vai ser cortada ajuda
       'err',
     );
   }
   return estadoVideo(
     `Pronto: ${n} imagem(ns), transição "${transicaoRotulo()}", ${m.rotulo.toLowerCase()}` +
       `${semAudio ? ` — ${semAudio} cena(s) sem áudio` : ''}` +
-      `${musica ? `, trilha "${state.musicaFicheiro.name}"` : state.videoModo === 'ambos' ? ' (sem trilha escolhida)' : ''}. ` +
-      'A gravação demora o tempo do vídeo.',
+      `${musica ? `, trilha "${state.musicaFicheiro.name}"` : state.videoModo === 'ambos' ? ' (sem trilha escolhida)' : ''}.` +
+      `${nota}${notaCiclo()} A gravação demora o tempo do vídeo.`,
     semAudio ? 'wait' : '',
   );
 }
 
+// Quantos blocos de legenda vão sair e um exemplo do primeiro — assim o
+// utilizador vê como a fala foi cortada antes de gravar dois minutos de vídeo.
+function legendasNota() {
+  if (!state.legendas) return '';
+  const textos = state.scenes.filter((s) => querVoz() && (s.texto || '').trim()).map((s) => s.texto);
+  const lista = querVoz() ? textos : state.scenes.map((s) => s.texto || '');
+  const blocos = lista.flatMap((t) => (t ? leg.blocosDaNarracao(t) : []));
+  if (!blocos.length) return ' Legendas ligadas, mas não há texto para legendar.';
+  const exemplo = blocos[0].length > 34 ? `${blocos[0].slice(0, 34)}…` : blocos[0];
+  return ` Legendas: ${blocos.length} bloco(s) — o primeiro é “${exemplo}”. Sai também o .srt.`;
+}
+
 const transicaoRotulo = () => state.videoTransicaoRotulo || state.videoTransicao;
+
+// O modo de duração "até acabar a música" precisa mesmo de uma música escolhida,
+// senão não faz nada — quem escolhe fica a saber porquê.
+function marcarModoDuracao() {
+  const cdm = $('vid-duracao-modo');
+  const semMusica = !state.musicaFicheiro;
+  if (state.modoDuracao === 'trilha' && semMusica) state.modoDuracao = 'natural';
+  if (cdm) {
+    [...cdm.children].forEach((x) => {
+      const querido = x.dataset.id === state.modoDuracao;
+      x.classList.toggle('on', querido);
+      x.disabled = x.dataset.id === 'trilha' && semMusica;
+      x.title = x.disabled ? 'escolha primeiro uma música na trilha' : x.title;
+    });
+  }
+}
+
+// Quantas vezes as imagens vão repetir, para o resumo poder prometê-lo.
+function vezesQueRepete() {
+  const natural = duracaoNaturalPrevista();
+  const alvo = Number(state.musicaSegundos) || 0;
+  if (state.modoDuracao !== 'trilha' || !natural || !(alvo > natural)) return { passagens: 1, total: natural, alvo };
+  const n = Math.min(100, Math.max(2, Math.ceil(alvo / natural)));
+  return { passagens: n, total: natural * n, alvo };
+}
+
+// Quanto tempo o vídeo levaria sem repetir nada.
+function duracaoNaturalPrevista() {
+  const comTexto = state.scenes.filter((s) => (s.texto || '').trim());
+  const lista = querVoz() ? comTexto : state.images;
+  if (!lista.length) return 0;
+  if (!querVoz()) return lista.length * (Number(state.videoDuracaoCena) || 3.5);
+  // Com voz manda a duração do áudio de cada cena; enquanto não estiver gerado,
+  // estima-se pela contagem de palavras (~2,4 palavras por segundo, o mesmo
+  // ritmo das vozes usadas) para o resumo não prometer um número inventado.
+  return lista.reduce((soma, s) => {
+    const w = palavras(s.texto);
+    return soma + Math.max(1.2, w / 2.4);
+  }, 0);
+}
+
+// Nota do ciclo, para o resumo: diz quantas passagens e quanto vai durar.
+function notaCiclo() {
+  const r = vezesQueRepete();
+  if (state.modoDuracao !== 'trilha') return '';
+  if (!state.musicaFicheiro) return ' Para repetir até acabar a música, escolha primeiro a trilha.';
+  if (r.passagens === 1) {
+    return ` A música (${formatarMinutos(r.alvo)}) é mais curta do que o vídeo, por isso não há nada a repetir.`;
+  }
+  return ` 🔁 As imagens repetem ${r.passagens}× (${formatarMinutos(r.total)}), até acabar a música de ${formatarMinutos(r.alvo)}.`;
+}
 
 // ---------------------------------------------------------------- trilha sonora
 // A música vem do computador do utilizador (não há faixas dentro da app, para
@@ -1279,6 +1355,12 @@ function pararPreviaTrilha() {
   trilhaAudio = null;
   const b = $('btn-trilha-ouvir');
   if (b) b.textContent = '▶️ Ouvir';
+}
+
+// Sem música escolhida, "até acabar a música" não faz sentido: fica desativado.
+function aoMudarTrilha() {
+  marcarModoDuracao();
+  resumoVideo();
 }
 
 // Desenha o estado da trilha: nome, duração, e que botões fazem sentido.
@@ -1344,14 +1426,22 @@ async function escolherTrilha() {
   state.musicaFicheiro = f;
   state.musicaLigada = true;
   state.musicaDuracao = 0;
+  // O modo "até acabar a música" fica disponível assim que há música.
+  state.modoDuracao = 'trilha';
+  if (state.videoModo === 'narracao') state.videoModo = 'ambos';
   atualizarTrilha();
+  aoMudarTrilha();
 
   const dur = await medirTrilha(f);
   // Se entretanto o utilizador escolheu outra, não estragamos o estado novo.
   if (state.musicaFicheiro !== f) return;
   state.musicaDuracao = dur;
   atualizarTrilha();
-  resumoVideo();
+
+  // O tempo da música é lido aqui (o motor não descodifica só para medir).
+  state.musicaSegundos = dur;
+  guardar();
+  aoMudarTrilha();
 
   const mb = (f.size / 1048576).toFixed(1);
   toast(
@@ -1368,8 +1458,9 @@ function tirarTrilha() {
   state.musicaFicheiro = null;
   state.musicaDuracao = 0;
   state.musicaUrl = '';
+  state.musicaSegundos = 0;
   atualizarTrilha();
-  resumoVideo();
+  aoMudarTrilha();
   toast('Trilha tirada.', '');
 }
 
@@ -1417,6 +1508,12 @@ function estadoVideo(msg, tipo = '') {
 
 async function iniciarVideo() {
   const mod = await import('./video.mjs');
+  // O corte da narração em blocos de legenda vem do mesmo módulo do 2.0.
+  try {
+    Object.assign(leg, await import('./legendas-core.mjs'));
+  } catch {
+    /* sem legendas é melhor do que sem página */
+  }
 
   // Formato
   const sel = $('vid-formato');
@@ -1525,6 +1622,51 @@ async function iniciarVideo() {
   state.videoDuracaoCena = dc.id;
   [...cdc.children].forEach((x) => x.classList.toggle('on', Number(x.dataset.id) === dc.id));
 
+  // Legendas: só ligar ou desligar — o estilo é fixo, igual ao Hub 2.0.
+  const cl = $('vid-legendas');
+  cl.innerHTML = '';
+  [
+    { id: true, rotulo: '💬 Legendas', nota: 'narração em blocos curtos no fundo do vídeo, e um ficheiro .srt' },
+    { id: false, rotulo: 'Sem legendas', nota: 'só a imagem' },
+  ].forEach((o) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'chip';
+    b.dataset.id = String(o.id);
+    b.textContent = o.rotulo;
+    b.title = o.nota;
+    b.onclick = () => {
+      state.legendas = o.id;
+      [...cl.children].forEach((x) => x.classList.toggle('on', x === b));
+      guardar();
+      resumoVideo();
+    };
+    cl.append(b);
+  });
+  [...cl.children].forEach((x) => x.classList.toggle('on', x.dataset.id === String(Boolean(state.legendas))));
+
+  // Duração: as cenas, ou imagens em ciclo até a música acabar.
+  const cdm = $('vid-duracao-modo');
+  cdm.innerHTML = '';
+  mod.MODOS_DURACAO.forEach((m) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'chip';
+    b.dataset.id = m.id;
+    b.textContent = m.id === 'trilha' ? '🔁 Até acabar a música' : '🖼️ As imagens';
+    b.title = m.id === 'trilha'
+      ? 'as imagens repetem em ciclo enquanto a trilha toca'
+      : 'o vídeo dura o que durar a narração das cenas';
+    b.onclick = () => {
+      state.modoDuracao = m.id;
+      marcarModoDuracao();
+      guardar();
+      resumoVideo();
+    };
+    cdm.append(b);
+  });
+  marcarModoDuracao();
+
   atualizarTrilha();
 
   // Suporte do browser
@@ -1602,7 +1744,8 @@ async function gerarVideoFinal() {
         audio = null; // fica sem voz nesta cena, mas entra no vídeo
       }
     }
-    cenas.push({ imagem, audio });
+    // O texto vai com a legenda: é dele que saem os blocos do vídeo e do .srt.
+    cenas.push({ imagem, audio, texto: s.texto || '' });
   }
 
   if (!cenas.length) {
@@ -1628,6 +1771,9 @@ async function gerarVideoFinal() {
       duracaoTransicao: state.videoDuracao,
       musica,
       duracaoCena: state.videoDuracaoCena,
+      legendas: Boolean(state.legendas),
+      modoDuracao: state.modoDuracao,
+      musicaSegundos: state.musicaSegundos,
       // Desenha no canvas visível: vê-se a montagem enquanto grava.
       canvas: preview,
       aoProgredir: (p) => {
@@ -1657,16 +1803,32 @@ async function gerarVideoFinal() {
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 60000);
 
+    // O .srt sai dos MESMOS blocos que foram desenhados no vídeo.
+    if (r.srt) {
+      setTimeout(() => {
+        const srtUrl = URL.createObjectURL(new Blob([r.srt], { type: 'text/plain;charset=utf-8' }));
+        const s = document.createElement('a');
+        s.href = srtUrl;
+        s.download = 'rebeca-video.srt';
+        s.click();
+        setTimeout(() => URL.revokeObjectURL(srtUrl), 60000);
+      }, 700); // dois descarregamentos ao mesmo tempo confundem o browser
+    }
+
     estadoVideo(
       `✅ Vídeo pronto: ${Math.round(r.duracao)}s, ${(r.blob.size / 1048576).toFixed(1)} MB, ` +
         `formato ${r.formato}, transição "${r.transicao}", ${r.comVoz ? 'com narração' : 'sem voz'}` +
-        `${r.comMusica ? ' e com trilha' : musica ? ' e SEM trilha' : ''}. Descarregado como ${nome}.` +
+        `${r.comMusica ? ' e com trilha' : musica ? ' e SEM trilha' : ''}` +
+        `${r.repetido ? `, imagens repetidas ${r.passagens}×` : ''}` +
+        `${r.legendas ? `, ${r.legendas} bloco(s) de legenda` : ''}. ` +
+        `Descarregado como ${nome}${r.srt ? ' e rebeca-video.srt' : ''}.` +
         `${r.musicaAviso ? ` ⚠️ ${r.musicaAviso}` : ''}`,
       r.musicaAviso ? 'wait' : 'ok',
     );
     toast(
       `${r.comVoz ? 'Vídeo pronto' : 'Vídeo só com música'} (${Math.round(r.duracao)}s)` +
-        `${r.comMusica ? ', com trilha' : ''}.`,
+        `${r.comMusica ? ', com trilha' : ''}${r.repetido ? `, ${r.passagens}× em ciclo` : ''}` +
+        `${r.srt ? ' + legendas .srt' : ''}.`,
       'ok',
     );
   } catch (e) {
@@ -1706,6 +1868,8 @@ function guardar() {
         videoDuracao: state.videoDuracao,
         videoModo: state.videoModo,
         videoDuracaoCena: state.videoDuracaoCena,
+        legendas: state.legendas,
+        modoDuracao: state.modoDuracao,
         musicaLigada: state.musicaLigada,
       }),
     );
@@ -1927,6 +2091,8 @@ function init() {
   state.videoDuracao = Number(c.videoDuracao) || 0.6;
   state.videoModo = MODOS_VIDEO.some((m) => m.id === c.videoModo) ? c.videoModo : 'ambos';
   state.videoDuracaoCena = Number(c.videoDuracaoCena) || 3.5;
+  state.legendas = c.legendas !== false;
+  state.modoDuracao = c.modoDuracao === 'trilha' ? 'trilha' : 'natural';
   state.musicaLigada = c.musicaLigada !== false;
   marcarMotor();
   marcarTom();

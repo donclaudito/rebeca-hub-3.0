@@ -8,7 +8,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node testes/ligacoes.mjs && node testes/interface.mjs && node testes/video.mjs"
+    "test": "node testes/ligacoes.mjs && node testes/legendas.mjs && node testes/interface.mjs && node testes/video.mjs"
   },
   "dependencies": {
     "@base44/sdk": "^0.8.53"

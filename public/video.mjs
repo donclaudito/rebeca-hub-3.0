@@ -13,6 +13,8 @@
 //  de 2 minutos leva 2 minutos a gravar.
 // ============================================================
 
+import { blocoAtivo, legendasDasCenas, legendasParaSrt } from './legendas-core.mjs';
+
 export const FORMATOS = [
   { id: '1920x1080', rotulo: 'Horizontal 1920×1080 (YouTube)', w: 1920, h: 1080 },
   { id: '1280x720', rotulo: 'Horizontal 1280×720 (leve)', w: 1280, h: 720 },
@@ -47,9 +49,52 @@ export const DURACOES_CENA = [
 
 export const DURACAO_SEM_VOZ = 3.5;
 
-// Silêncio usado numa cena sem narração, quando as outras têm voz. Curto de
-// propósito: numa montagem narrada, uma cena sem fala não deve arrastar-se.
+// Modos de duração:
+//  - 'natural': o vídeo dura o que durar a narração das cenas;
+//  - 'trilha':  as cenas REPETEM em ciclo até a música acabar. É o que resolve
+//    o caso de um vídeo curto (poucas imagens) com uma música longa: em vez de
+//    a música ser cortada a meio, as imagens voltam a passar.
+export const MODOS_DURACAO = [
+  { id: 'natural', rotulo: 'As imagens' },
+  { id: 'trilha', rotulo: 'Até acabar a música' },
+];
+
+// Limite de segurança: 100 passagens. Sem isto, uma música de 3 horas com
+// imagens de 1 s gerava milhares de cenas e enchia a memória.
+const MAX_PASSAGENS = 100;
+
+//  Silêncio usado numa cena sem narração, quando as outras têm voz. Curto de
+//  propósito: numa montagem narrada, uma cena sem fala não deve arrastar-se.
 const SILENCIO_CURTO = 2;
+
+// Uma cena sem narração fica com o tempo escolhido, em vez da duração do
+// silêncio que lá foi posto, para não arrastar a montagem.
+function duracoesDasCenas(marcaSemFala, clipes, T, duracaoCena) {
+  const fixa = Math.max(2 * T + 0.2, Number(duracaoCena) || DURACAO_SEM_VOZ);
+  return clipes.map((c, i) => (marcaSemFala[i] ? fixa : Math.max(2 * T + 0.2, c.duration)));
+}
+
+// Repete a lista de cenas até chegar à duração pedida.
+//
+// Devolve os itens já com `_passagem` e `_texto` (o texto da cena original), que
+// é o que o desenho usa para saber qual passagem está no ecrã. A repetição é
+// INTEIRA: conta-se o número de passagens que cobre a música, por isso o vídeo
+// pode passar um pouco do fim da música — nunca fica cortado a meio de uma
+// imagem, e a última passagem é uma passagem certa.
+function repetirAte(itens, duracoes, alvo, maxPassagens = MAX_PASSAGENS) {
+  const natural = duracoes.reduce((a, d) => a + d, 0);
+  if (!itens.length || !natural || !(alvo > natural)) return { itens: [], duracoes: [], passagens: 1 };
+  const n = Math.min(maxPassagens, Math.max(2, Math.ceil(alvo / natural)));
+  const todos = [];
+  const todasDur = [];
+  for (let p = 0; p < n; p++) {
+    itens.forEach((item, i) => {
+      todos.push({ ...item, _passagem: p, _texto: item.texto || '' });
+      todasDur.push(duracoes[i]);
+    });
+  }
+  return { itens: todos, duracoes: todasDur, passagens: n };
+}
 
 // Escolhe o melhor formato de gravação que o browser aceita.
 export function escolherMime() {
@@ -149,9 +194,14 @@ function desenharTransicao(ctx, w, h, de, para, t, tipo) {
 // da cena k e os primeiros T segundos da cena k+1 — ou seja, é UMA passagem de
 // 2T segundos, desenhada ao meio por cada uma das duas cenas. Assim o valor de
 // `t` liga sem salto no meio (0,5 no fim de uma = 0,5 no início da outra).
-function criarDesenhador({ ctx, w, h, imagens, inicios, duracoes, T, transicao }) {
+//
+// A legenda é desenhada por cima, já depois de a imagem estar no sítio. Liga-se
+// e desliga-se por instante (nada de guardar estado), para que um bloco que
+// atravesse uma transição continue a aparecer.
+function criarDesenhador({ ctx, w, h, imagens, inicios, duracoes, T, transicao, legendas = [], desenharLegenda = null }) {
   const corte = transicao === 'corte';
   const n = imagens.length;
+  const querLegenda = Boolean(desenharLegenda && legendas.length);
 
   return (k, agora) => {
     const inicio = inicios[k];
@@ -161,21 +211,25 @@ function criarDesenhador({ ctx, w, h, imagens, inicios, duracoes, T, transicao }
     // Passagem de ENTRADA (ainda a acabar a da cena anterior).
     if (k > 0 && !corte && tLocal < T) {
       const t = 0.5 + (Math.max(0, tLocal) / T) * 0.5;
-      return desenharTransicao(ctx, w, h, imagens[k - 1], imagens[k], Math.min(1, t), transicao);
-    }
-
-    // Passagem de SAÍDA (começa o fim desta cena).
-    if (k < n - 1 && !corte && tLocal > dur - T) {
+      desenharTransicao(ctx, w, h, imagens[k - 1], imagens[k], Math.min(1, t), transicao);
+    } else if (k < n - 1 && !corte && tLocal > dur - T) {
+      // Passagem de SAÍDA (começa o fim desta cena).
       const t = Math.min(1, Math.max(0, (tLocal - (dur - T)) / T)) * 0.5;
-      return desenharTransicao(ctx, w, h, imagens[k], imagens[k + 1], t, transicao);
+      desenharTransicao(ctx, w, h, imagens[k], imagens[k + 1], t, transicao);
+    } else {
+      // Sem passagem: a imagem da cena, quieta.
+      ctx.save();
+      ctx.globalAlpha = 1;
+      if ('filter' in ctx) ctx.filter = 'none';
+      desenharCobrindo(ctx, imagens[k], w, h);
+      ctx.restore();
     }
 
-    // Sem passagem: a imagem da cena, quieta.
-    ctx.save();
-    ctx.globalAlpha = 1;
-    if ('filter' in ctx) ctx.filter = 'none';
-    desenharCobrindo(ctx, imagens[k], w, h);
-    ctx.restore();
+    // A legenda entra por cima de tudo, transição incluída.
+    if (querLegenda) {
+      const bloco = blocoAtivo(legendas, agora);
+      if (bloco) desenharLegenda(ctx, bloco.texto, w, h);
+    }
   };
 }
 
@@ -228,9 +282,18 @@ export async function gerarVideo({
   musica = null,
   // Duração de uma cena sem narração (o modo "só música" usa isto para todas).
   duracaoCena = DURACAO_SEM_VOZ,
+  // Legendas incrustadas no vídeo, com o texto de cada cena. Desligado por omissão.
+  legendas = false,
+  // 'natural' (duração das cenas) ou 'trilha' (repete as cenas até a música acabar).
+  modoDuracao = 'natural',
+  // Duração da música, para saber quantas passagens dar. Vem da página, que a
+  // mede ao escolher o ficheiro (medir aqui obrigava a descodificar antes).
+  musicaSegundos = 0,
   aoProgredir = () => {},
   deveParar = () => false,
 }) {
+  const querLegendas = Boolean(legendas);
+
   if (!suporta()) {
     return { ok: false, erro: 'Este browser não consegue gravar vídeo. Use o Chrome ou o Edge.' };
   }
@@ -287,21 +350,52 @@ export async function gerarVideo({
   // Há narração? Se não houver nenhuma, isto é uma montagem só com música:
   // cada imagem fica o tempo escolhido em vez de seguir uma voz que não existe.
   const temVoz = marcaSemFala.some((sem) => !sem);
-  const fixa = Math.max(2 * T + 0.2, Number(duracaoCena) || DURACAO_SEM_VOZ);
 
-  // Duração de cada cena = duração do seu áudio; nunca menos do que a passagem
+  // Duração natural de cada cena: a do seu áudio, nunca menos do que a passagem
   // precisa (senão as duas passagens sobrepunham-se). Sem voz, é a duração fixa.
-  const duracoes = clipes.map((c, i) => {
-    if (marcaSemFala[i]) return fixa;
-    return Math.max(2 * T + 0.2, c.duration);
-  });
+  const duracoes = duracoesDasCenas(marcaSemFala, clipes, T, duracaoCena);
+  const natural = duracoes.reduce((a, d) => a + d, 0);
+
+  // O vídeo é curto e a música é longa? Em vez de cortar a música, as imagens
+  // repetem-se em ciclo até a música acabar (é o que o modo 'trilha' faz).
+  const alvoMusica = modoDuracao === 'trilha' ? Number(musicaSegundos) || 0 : 0;
+  const repetido = repetirAte(cenas, duracoes, alvoMusica);
+
+  const passagens = repetido.passagens;
+  const ciclos = repetido.itens.length ? repetido.itens : cenas.map((c) => ({ ...c, _passagem: 0, _texto: c.texto || '' }));
+  const durFinal = repetido.itens.length ? repetido.duracoes : duracoes;
+  const clipesFinal = ciclos.map((c, i) => clipes[i % cenas.length]);
+  const marcaFinal = ciclos.map((c, i) => marcaSemFala[i % cenas.length]);
+
   const inicios = [];
   let soma = 0;
-  for (const d of duracoes) {
+  for (const d of durFinal) {
     inicios.push(soma);
     soma += d;
   }
   const total = soma;
+  const cortado = Boolean(repetido.itens.length) && total > alvoMusica;
+
+  // 2c) legendas: corte da narração em blocos curtos, temporizados dentro da
+  // cena. Sai da MESMA lista que é desenhada, para o vídeo e o .srt dizerem
+  // exatamente o mesmo texto. A fonte é carregada antes de gravar (se a rede
+  // falhar, há alternativas locais e o vídeo segue na mesma).
+  let listaCues = [];
+  let desenharLegenda = null;
+  if (querLegendas) {
+    listaCues = legendasDasCenas(ciclos.map((c) => c._texto || ''), durFinal, inicios);
+    if (listaCues.length) {
+      try {
+        const mod = await import('./legendas.mjs');
+        await mod.carregarFontesLegenda();
+        desenharLegenda = (ctxDestino, texto, largura, altura) =>
+          mod.desenharLegenda(ctxDestino, texto, largura, altura, { cor: mod.CAPT_COR, contorno: mod.CAPT_CONTORNO });
+      } catch (e) {
+        listaCues = [];
+        console.warn('legendas desligadas:', e && e.message);
+      }
+    }
+  }
 
   // 3) começar a gravar
   const fluxoVideo = canvas.captureStream(fps);
@@ -311,8 +405,15 @@ export async function gerarVideo({
   gravador.ondataavailable = (e) => { if (e.data && e.data.size) pedacos.push(e.data); };
   const parado = new Promise((r) => { gravador.onstop = r; });
 
+  // Repete as imagens na mesma ordem da primeira passagem (a imagem de cada
+  // cena vem do ficheiro original; `ciclos` só diz qual toca em cada momento).
+  const imagensFinal = ciclos.map((c, i) => imagens[i % imagens.length]);
+
   // O primeiro fotograma tem de existir antes de gravar, senão o vídeo começa preto.
-  const desenhar = criarDesenhador({ ctx, w: alvo.w, h: alvo.h, imagens, inicios, duracoes, T, transicao });
+  const desenhar = criarDesenhador({
+    ctx, w: alvo.w, h: alvo.h, imagens: imagensFinal, inicios, duracoes: durFinal, T, transicao,
+    legendas: listaCues, desenharLegenda,
+  });
   desenhar(0, 0);
 
   try { await seq.ctx.resume(); } catch { /* já a correr */ }
@@ -323,17 +424,18 @@ export async function gerarVideo({
   const relogio = () => (performance.now() - inicio) / 1000;
   const agoraCtx = () => seq.ctx.currentTime;
   let acumulado = 0;
+  const totalCenas = ciclos.length;
 
   try {
-    for (let i = 0; i < cenas.length; i++) {
+    for (let i = 0; i < totalCenas; i++) {
       if (deveParar()) break;
 
       // Sem voz nenhuma não há clipe de narração para tocar — quem enche o
       // áudio é a trilha, em ciclo. Também não se toca o silêncio das cenas
       // sem fala numa montagem narrada.
-      if (!marcaSemFala[i]) {
+      if (!marcaFinal[i]) {
         const fonte = seq.ctx.createBufferSource();
-        fonte.buffer = clipes[i];
+        fonte.buffer = clipesFinal[i];
         fonte.connect(seq.ganho);
         // Cada clipe entra no seu lugar exato da linha do tempo.
         try { fonte.start(agoraCtx() + Math.max(0, inicios[i] - relogio())); } catch { /* já tocou */ }
@@ -345,7 +447,7 @@ export async function gerarVideo({
           const agora = relogio();
           // O "Parar" é ouvido a cada fotograma, não só entre cenas.
           const pedido = deveParar();
-          if (agora >= inicios[i] + duracoes[i] || pedido) {
+          if (agora >= inicios[i] + durFinal[i] || pedido) {
             interrompido = pedido;
             resolve();
             return;
@@ -353,8 +455,10 @@ export async function gerarVideo({
           desenhar(i, agora);
           aoProgredir({
             fase: 'a gravar',
-            atual: i + 1,
+            atual: (i % cenas.length) + 1,
             total: cenas.length,
+            passagem: (ciclos[i]._passagem || 0) + 1,
+            passagens,
             segundos: agora,
             totalSegundos: total,
           });
@@ -393,5 +497,12 @@ export async function gerarVideo({
     transicao,
     comMusica: Boolean(trilha && trilha.comecou),
     musicaAviso,
+    legendas: listaCues.length,
+    srt: listaCues.length ? legendasParaSrt(listaCues) : '',
+    passagens,
+    cenasPorPassagem: cenas.length,
+    repetido: Boolean(repetido.itens.length),
+    cortado,
+    duracaoNatural: natural,
   };
 }

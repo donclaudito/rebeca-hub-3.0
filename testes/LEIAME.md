@@ -14,8 +14,9 @@ npm test
 
 | Ficheiro | O que cobre |
 |---|---|
-| `video.mjs` | A montagem do vídeo: transições sem saltos, tempo de cada cena, entrada do áudio, botão Parar, e a trilha em ciclo a 16%. |
-| `interface.mjs` | A página: controlos que aparecem e desaparecem, guardar escolhas, avisos quando falta narração ou áudio, e o painel da trilha. |
+| `legendas.mjs` | O corte da narração em blocos, a temporização, o `.srt` e o caber em 2 linhas sem perder palavras. |
+| `video.mjs` | A montagem do vídeo: transições sem saltos, tempo de cada cena, entrada do áudio, botão Parar, a trilha em ciclo a 16 %, as legendas desenhadas e a repetição das imagens até a música acabar. |
+| `interface.mjs` | A página: controlos que aparecem e desaparecem, guardar escolhas, avisos quando falta narração ou áudio, e os painéis da trilha, das legendas e da duração. |
 | `ligacoes.mjs` | Todos os `id` que o `app.js` procura existem no `index.html`, e os `<div>` estão equilibrados. |
 
 ## Notas

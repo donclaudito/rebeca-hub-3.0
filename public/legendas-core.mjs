@@ -1,0 +1,201 @@
+// ============================================================
+//  Legendas — lógica pura (sem canvas, sem browser)
+//
+//  Trazida do Rebeca Hub 2.0 (src/lib/subtitles.js). A regra que justifica este
+//  ficheiro existir é a legibilidade: a narração vira legenda, e uma frase longa
+//  — ou poucas cenas com muito texto — virava uma parede de texto impossível de
+//  ler no ritmo do vídeo. Então:
+//    1. cada bloco de legenda tem no máximo CAPT_MOSTRAS palavras, quebrando
+//       antes numa vírgula/travessão quando dá, para não cortar a ideia;
+//    2. cada bloco é desenhado em no máximo CAPT_LINHAS linhas — se não couber,
+//       a fonte encolhe um pouco, mas NENHUMA palavra é descartada;
+//    3. o .srt sai da MESMA lista de blocos que o vídeo desenha, por isso os dois
+//       mostram exatamente o mesmo texto (no 2.0 o desenho cortava e o .srt
+//       entregava a frase inteira: o vídeo perdia palavras que o YouTube tinha).
+//
+//  Este ficheiro não desenha nada: as contas ficam aqui para poderem ser
+//  testadas sem browser. O desenho está em legendas.mjs.
+// ============================================================
+
+export const CAPT_MOSTRAS = 9; // palavras por bloco
+export const CAPT_CHARS = 42; // caracteres por bloco (frase longa em palavras curtas também corta)
+export const CAPT_LINHAS = 2; // linhas por bloco no ecrã
+export const CAPT_ESCALA_MIN = 0.55; // limite do encolhimento da fonte
+export const CAPT_PISO = 0.8; // segundos mínimos que um bloco fica no ecrã
+
+// Fonte fixa, a mesma que o 2.0 usava por omissão. A família tem alternativas
+// para o caso de a fonte do Google não chegar (ver legendas.mjs).
+export const CAPT_FONTE = {
+  id: 'luckiest_guy',
+  label: 'Luckiest Guy',
+  family: '"Luckiest Guy", "Komika Axis", "Comic Sans MS", cursive',
+  google: 'Luckiest+Guy',
+  weight: '400',
+};
+
+export const CAPT_COR = '#FBBF24'; // amarelo
+export const CAPT_CONTORNO = 4;
+
+// Corta a narração em frases (pela pontuação final).
+export function dividirFrases(texto) {
+  return String(texto || '')
+    .replace(/\s+/g, ' ')
+    .split(/(?<=[.!?…])\s+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+// Quebra um trecho em blocos curtos. Três limites, e o que chegar primeiro:
+//   • no máximo `maxPalavras` palavras;
+//   • no máximo `maxChars` caracteres (pega o caso de palavras curtas, em que a
+//     contagem de palavras sozinha deixaria a linha comprida demais);
+//   • preferência por quebrar logo depois de uma vírgula/dois-pontos/travessão
+//     quando ela aparece na metade final do bloco — corta na pausa da fala.
+// Nunca perde nem altera palavra: juntar os blocos devolve o texto original.
+export function dividirBlocos(texto, maxPalavras = CAPT_MOSTRAS, maxChars = CAPT_CHARS) {
+  const pBruto = Math.floor(Number(maxPalavras));
+  const limite = Number.isFinite(pBruto) && pBruto >= 2 ? pBruto : CAPT_MOSTRAS;
+  const cBruto = Math.floor(Number(maxChars));
+  const limiteChars = Number.isFinite(cBruto) && cBruto >= 12 ? cBruto : CAPT_CHARS;
+  const minimo = Math.max(4, Math.ceil(limite / 2));
+  const fecha = (palavra) => /[,;:—–-]$/.test(palavra) || /[.!?…]$/.test(palavra);
+  const palavras = String(texto || '').trim().split(/\s+/).filter(Boolean);
+  const blocos = [];
+  let atual = [];
+  for (const palavra of palavras) {
+    // O teto de caracteres é conferido ANTES de entrar a palavra: se ela fizesse
+    // o bloco passar do limite, o bloco fecha primeiro (senão estouraria sempre
+    // pelo tamanho da última palavra).
+    const candidato = atual.length ? `${atual.join(' ')} ${palavra}` : palavra;
+    if (atual.length >= 2 && candidato.length > limiteChars) {
+      blocos.push(atual.join(' '));
+      atual = [];
+    }
+    atual.push(palavra);
+    const cheio = atual.length >= limite;
+    const natural = atual.length >= minimo && fecha(palavra);
+    if (cheio || natural) {
+      blocos.push(atual.join(' '));
+      atual = [];
+    }
+  }
+  if (atual.length) blocos.push(atual.join(' '));
+  return blocos;
+}
+
+// Todos os blocos de uma narração, sem temporização: é exatamente o texto que
+// aparece no ecrã, bloco por bloco.
+export function blocosDaNarracao(narracao) {
+  return dividirFrases(narracao).flatMap((frase) => dividirBlocos(frase));
+}
+
+// Blocos temporizados dentro de uma janela de fala.
+//
+// A duração de cada bloco é proporcional ao número de palavras dele: quem fala
+// mais tempo recebe mais tempo no ecrã. O piso de 0,8 s é COMPENSADO nos blocos
+// longos — o que os curtos ganham sai da folga dos longos, por isso a soma
+// continua a ser exatamente a janela. No 2.0 o piso era somado por cima, o
+// excedente acumulava-se e a legenda invadia a cena seguinte.
+export function blocosTemporizados(narracao, janelaSegundos, avanco = 0) {
+  const blocos = blocosDaNarracao(narracao);
+  const janela = Math.max(0, Number(janelaSegundos) || 0);
+  if (!janela || !blocos.length) return [];
+  const pesos = blocos.map((b) => b.split(/\s+/).filter(Boolean).length || 1);
+  const total = pesos.reduce((a, b) => a + b, 0);
+  const proporcionais = blocos.map((_, j) => (janela * pesos[j]) / total);
+  let duracoes = proporcionais;
+  for (let passo = 0; passo < 8; passo++) {
+    const falta = duracoes.reduce((a, d) => a + Math.max(0, CAPT_PISO - d), 0);
+    if (falta < 0.001) break;
+    const folga = duracoes.reduce((a, d) => a + Math.max(0, d - CAPT_PISO), 0);
+    if (folga < falta) {
+      duracoes = proporcionais; // não cabe: proporcional puro (a janela manda)
+      break;
+    }
+    const fator = (folga - falta) / folga;
+    duracoes = duracoes.map((d) => (d > CAPT_PISO ? CAPT_PISO + (d - CAPT_PISO) * fator : CAPT_PISO));
+  }
+  let t = Math.max(0, Number(avanco) || 0);
+  return blocos.map((text, j) => {
+    const bloco = { texto: text, inicio: t, fim: t + duracoes[j] };
+    t += duracoes[j];
+    return bloco;
+  });
+}
+
+// Legendas de todas as cenas, na linha do tempo do vídeo.
+// `textos[i]` é a narração da cena i e `janelas[i]` o tempo que ela ocupa.
+export function legendasDasCenas(textos, janelas, inicios) {
+  const todas = [];
+  (textos || []).forEach((texto, i) => {
+    const base = Number(inicios?.[i]) || 0;
+    blocosTemporizados(texto, janelas?.[i], 0).forEach((b) => {
+      todas.push({ texto: b.texto, inicio: b.inicio + base, fim: b.fim + base });
+    });
+  });
+  return todas;
+}
+
+// Bloco visível num dado instante (null entre a fala e o bloco seguinte).
+export function blocoAtivo(legendas, t) {
+  for (let i = legendas.length - 1; i >= 0; i--) {
+    if (t >= legendas[i].inicio) return t < legendas[i].fim ? legendas[i] : null;
+  }
+  return null;
+}
+
+// ---- ficheiro .srt ----
+const tempoSrt = (seg) => {
+  const ms = Math.max(0, Math.round(seg * 1000));
+  const h = String(Math.floor(ms / 3600000)).padStart(2, '0');
+  const m = String(Math.floor((ms % 3600000) / 60000)).padStart(2, '0');
+  const s = String(Math.floor((ms % 60000) / 1000)).padStart(2, '0');
+  return `${h}:${m}:${s},${String(ms % 1000).padStart(3, '0')}`;
+};
+
+// Um bloco por legenda — o mesmo bloco que aparece desenhado no vídeo.
+export function legendasParaSrt(legendas) {
+  if (!legendas || !legendas.length) return '';
+  return (
+    legendas
+      .map((b, i) => `${i + 1}\n${tempoSrt(b.inicio)} --> ${tempoSrt(Math.max(b.fim, b.inicio + CAPT_PISO))}\n${b.texto}`)
+      .join('\n\n') + '\n'
+  );
+}
+
+// ---- caber no ecrã ----
+// Quebra o texto em linhas medindo a largura real; a função de medida entra por
+// parâmetro para as contas poderem ser testadas fora do canvas.
+export function quebrarLinhas(medir, texto, larguraMax) {
+  const palavras = String(texto || '').split(/\s+/).filter(Boolean);
+  const linhas = [];
+  let linha = '';
+  for (const palavra of palavras) {
+    const proxima = linha ? `${linha} ${palavra}` : palavra;
+    if (linha && medir(proxima) > larguraMax) {
+      linhas.push(linha);
+      linha = palavra;
+    } else {
+      linha = proxima;
+    }
+  }
+  if (linha) linhas.push(linha);
+  return linhas;
+}
+
+// Tamanho de fonte que faz o bloco caber em `maxLinhas`, encolhendo no máximo até
+// `escalaMin`. Devolve as linhas prontas e `cabe` a dizer se o alvo foi atingido:
+// quando não couber nem no menor tamanho, o desenho mostra TODAS as linhas (nunca
+// descarta palavra) — vê-se o bloco inteiro, e não um texto cortado.
+export function ajustarTamanho(medirEm, texto, larguraMax, tamanhoBase, maxLinhas = CAPT_LINHAS, escalaMin = CAPT_ESCALA_MIN) {
+  const base = Math.max(1, Math.round(Number(tamanhoBase) || 1));
+  let escala = 1;
+  let tamanho = base;
+  let linhas = quebrarLinhas(medirEm(tamanho), texto, larguraMax);
+  while (linhas.length > maxLinhas && escala > escalaMin) {
+    escala = Math.max(escalaMin, Number((escala - 0.05).toFixed(2)));
+    tamanho = Math.max(1, Math.round(base * escala));
+    linhas = quebrarLinhas(medirEm(tamanho), texto, larguraMax);
+  }
+  return { tamanho, linhas, escala: Number((tamanho / base).toFixed(3)), cabe: linhas.length <= maxLinhas };
+}

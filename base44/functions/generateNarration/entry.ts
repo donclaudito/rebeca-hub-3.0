@@ -142,6 +142,22 @@ export default async function (req) {
     const nomeServico = String(campos.servico || 'deepseek').toLowerCase();
     const servico = SERVICOS[nomeServico] || SERVICOS.deepseek;
     const chave = secrets.get(servico.segredo) || secrets.get('VISION_API_KEY');
+
+    // ---- escolher o modelo ----
+    // DEFESA: o campo "modelo" é escrito pelo utilizador, e uma chave colada ali
+    // por engano chega ao serviço como NOME DE MODELO. A DeepSeek responde
+    // "you passed sk-..." com HTTP 502 — e isso parece um erro de chave, quando
+    // é um campo trocado. Um valor que pareça chave é ignorado.
+    const modeloPedido = String(campos.modelo || '').trim();
+    const modeloPareceChave =
+      /^(sk-|sk_|gsk_|AIza|Bearer)/i.test(modeloPedido) || modeloPedido.length > 60;
+    const modelo = modeloPareceChave ? servico.modelo : modeloPedido || servico.modelo;
+    if (modeloPareceChave) {
+      console.warn(
+        `[generateNarration] o campo "modelo" recebeu algo que parece uma chave ` +
+          `(${modeloPedido.slice(0, 6)}…, ${modeloPedido.length} caracteres). Usei "${servico.modelo}".`,
+      );
+    }
     if (!chave) {
       return json(
         {
@@ -195,7 +211,7 @@ export default async function (req) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${chave}` },
       body: JSON.stringify({
-        model: campos.modelo || servico.modelo,
+        model: modelo,
         messages: [{ role: 'user', content: conteudo }],
         temperature: 0.8,
         response_format: { type: 'json_object' },
@@ -249,7 +265,7 @@ export default async function (req) {
       ok: true,
       titulo: obj?.titulo || obj?.title || '',
       scenes: cenas,
-      modelo: campos.modelo || servico.modelo,
+      modelo,
       servico: nomeServico,
       ms: Date.now() - inicio,
     });

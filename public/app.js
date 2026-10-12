@@ -977,7 +977,16 @@ function init() {
   $('cfg-guardar').onclick = (e) => {
     e.preventDefault();
     state.servico = $('cfg-servico').value;
-    state.modelo = $('cfg-modelo').value.trim();
+    const escrito = $('cfg-modelo').value.trim();
+    // DEFESA: uma chave colada aqui chegaria ao serviço como NOME DE MODELO
+    // ("you passed sk-...") e pareceria um erro de chave. Foi o que aconteceu.
+    if (/^(sk-|sk_|gsk_|AIza|Bearer)/i.test(escrito) || escrito.length > 60) {
+      $('cfg-modelo').value = '';
+      state.modelo = '';
+      toast('Isso parece uma chave de API, não um modelo. Ficou o modelo predefinido.', 'err');
+    } else {
+      state.modelo = escrito;
+    }
     guardar();
     $('dlg').close();
     toast('Configurações guardadas.', 'ok');
@@ -986,7 +995,13 @@ function init() {
   // preferências guardadas
   const c = lerConfig();
   state.servico = c.servico || 'deepseek';
-  state.modelo = c.modelo || '';
+  // Limpa um valor inválido guardado antes desta defesa existir: quem colou a
+  // chave no campo do modelo ficaria preso com o erro "you passed sk-...".
+  const guardado = String(c.modelo || '').trim();
+  state.modelo = /^(sk-|sk_|gsk_|AIza|Bearer)/i.test(guardado) || guardado.length > 60 ? '' : guardado;
+  if (guardado && !state.modelo) {
+    toast('O campo "modelo" tinha um valor que parecia uma chave — limpei-o.', 'err');
+  }
   state.velocidade = c.velocidade || 1;
   state.modo = c.modo || 'mic';
   state.voz = c.voz || '';

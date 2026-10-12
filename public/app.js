@@ -194,7 +194,30 @@ function renderThumbs() {
 }
 
 // ---------------------------------------------------------------- cenas
+// Sincroniza a lista de cenas com as imagens. Faltava isto: sem ele, a lista
+// de cenas só aparecia DEPOIS de gerar a narração — e antes disso não havia
+// onde escrever texto nem onde ouvir, o que tornava a app inutilizável.
+// Preserva o texto e o áudio já feitos quando as imagens mudam de ordem.
+function sincronizarCenas() {
+  const porNome = new Map(state.scenes.map((s) => [s.filename, s]));
+  state.scenes = state.images.map((img) => {
+    const antes = porNome.get(img.name);
+    return (
+      antes || {
+        filename: img.name,
+        texto: '',
+        audioUrl: null,
+        audioB64: null,
+        audioExt: '',
+        previaUrl: null,
+        previaVoz: '',
+      }
+    );
+  });
+}
+
 function renderScenes() {
+  sincronizarCenas();
   const ol = $('scenes');
   ol.innerHTML = '';
   $('empty-scenes').hidden = state.scenes.length > 0;
@@ -274,6 +297,37 @@ function renderScenes() {
     btnOuvir.onclick = async () => {
       const t = ta.value.trim();
       if (!t) return toast('Escreva ou gere a narração primeiro.', 'err');
+      // O botão tem de respeitar o MOTOR escolhido. Antes chamava sempre a voz
+      // do browser, por isso ouvia-se a mesma voz mesmo com a ElevenLabs
+      // selecionada — o defeito de que o utilizador se queixou.
+      if (state.motor === 'eleven') {
+        if (btnOuvir.dataset.on === '1') {
+          stopSpeak();
+          return;
+        }
+        btnOuvir.dataset.on = '1';
+        btnOuvir.textContent = '⏹ Parar';
+        const voz = state.vozesEleven.find((v) => v.id === state.vozEleven);
+        marcar(`ElevenLabs${voz ? ` (${voz.nome})` : ''}…`, 'busy');
+        try {
+          // Reaproveita a pré-escuta já gerada (não gasta caracteres duas vezes).
+          if (!cena.previaUrl) {
+            const r = await audioDaEleven(t);
+            cena.previaUrl = URL.createObjectURL(r.blob);
+            cena.previaVoz = r.nomeVoz || voz?.nome || '';
+          }
+          await tocarUrl(cena.previaUrl);
+          marcar(cena.previaVoz ? `pré-escuta · ${cena.previaVoz}` : 'pré-escuta pronta', 'ok');
+        } catch (e) {
+          marcar(e.message, 'err');
+        } finally {
+          btnOuvir.dataset.on = '0';
+          btnOuvir.textContent = '▶️ Ouvir';
+        }
+        return;
+      }
+
+      // Motor do browser: síntese local, sem ficheiro e sem custo.
       stopSpeak();
       btnOuvir.textContent = '⏹ Parar';
       marcar('a falar…', 'busy');
@@ -402,6 +456,16 @@ function falar(texto) {
 }
 function stopSpeak() {
   if (window.speechSynthesis) speechSynthesis.cancel();
+  if (audioAtual) {
+    const a = audioAtual;
+    audioAtual = null;
+    try {
+      a.pause();
+    } catch {
+      /* já parou */
+    }
+    if (typeof a.onended === 'function') a.onended(); // solta a promessa
+  }
   if (gravadorAtual) {
     try {
       gravadorAtual.stop();
@@ -409,6 +473,24 @@ function stopSpeak() {
       /* já parou */
     }
   }
+}
+
+// Toca um ficheiro de áudio (MP3 da ElevenLabs ou a gravação do browser) e só
+// resolve quando acaba — ou quando o dono manda parar. Sem o fim garantido, o
+// botão ficava preso em "Parar" e o clique seguinte não fazia nada.
+let audioAtual = null;
+function tocarUrl(url) {
+  return new Promise((resolve) => {
+    const a = new Audio(url);
+    audioAtual = a;
+    const fim = () => {
+      if (audioAtual === a) audioAtual = null;
+      resolve();
+    };
+    a.onended = fim;
+    a.onerror = fim;
+    a.play().catch(fim);
+  });
 }
 
 let gravadorAtual = null;
@@ -639,10 +721,24 @@ function marcarTom() {
   guardar();
 }
 
+// A pré-escuta guardada pertence à voz que a gerou. Ao mudar de voz, tem de ser
+// deitada fora — senão o botão "Ouvir" continuava a tocar a voz antiga e
+// parecia que a escolha não tinha efeito.
+function limparPrevias() {
+  state.scenes.forEach((s) => {
+    if (s.previaUrl) {
+      URL.revokeObjectURL(s.previaUrl);
+      s.previaUrl = null;
+      s.previaVoz = '';
+    }
+  });
+}
+
 // Marca a voz escolhida em AMBAS as listas (app e conta) e atualiza o estado.
 // Antes isto só limpava os botões da mesma secção: escolher uma voz da conta
 // deixava uma do app marcada ao mesmo tempo, e parecia que a escolha não pegava.
 function marcarVozEleven(id) {
+  if (state.vozEleven !== id) limparPrevias();
   state.vozEleven = id || '';
   const v = state.vozesEleven.find((x) => x.id === id);
   ['vozes-app', 'vozes-conta'].forEach((qual) => {
@@ -913,18 +1009,34 @@ async function gerarTodoAudioEleven(alvo) {
   }
 }
 
+// Ouve todas as cenas em sequência, com o MOTOR escolhido: a voz do browser
+// (síntese local) ou a voz da ElevenLabs (pré-escuta gerada e guardada).
 async function ouvirTudo() {
   state.parar = false;
-  for (const cena of state.scenes) {
+  const comTexto = state.scenes.filter((s) => (s.texto || '').trim());
+  if (!comTexto.length) return toast('Gere a narração primeiro.', 'err');
+
+  for (const [i, cena] of comTexto.entries()) {
     if (state.parar) break;
-    if (!(cena.texto || '').trim()) continue;
+    progress(true, Math.round((i / comTexto.length) * 100), `a ouvir ${i + 1} de ${comTexto.length}…`);
     try {
-      await falar(cena.texto);
-    } catch {
-      /* segue para a próxima */
+      if (state.motor === 'eleven') {
+        if (!cena.previaUrl) {
+          const r = await audioDaEleven(cena.texto);
+          cena.previaUrl = URL.createObjectURL(r.blob);
+          cena.previaVoz = r.nomeVoz || '';
+        }
+        await tocarUrl(cena.previaUrl);
+      } else {
+        await falar(cena.texto);
+      }
+    } catch (e) {
+      toast(`Imagem ${state.scenes.indexOf(cena) + 1}: ${e.message}`, 'err');
+      break; // erro de plano/chave não melhora na cena seguinte
     }
   }
   state.parar = false;
+  progress(false);
 }
 
 // ZIP montado no browser, sem bibliotecas: formato "store" (sem compressão),

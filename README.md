@@ -15,11 +15,12 @@ e o problema do `spawn EPERM` desaparece: não há processos locais envolvidos.
 | Narração (texto) | servidor local → DeepSeek | **função de nuvem** → DeepSeek |
 | Voz (áudio) | PowerShell + ffmpeg (SAPI) | **no próprio browser** (Web Speech) |
 | Formato do áudio | MP3 | WebM/Opus |
-| Vídeo com transições | **sim** (ffmpeg) | não — continua na versão local |
+| Vídeo com transições | **sim** (ffmpeg) | **sim, montado no browser** (WebM) |
+| Trilha sonora | ficheiro do computador | ficheiro do computador |
 | Funciona offline | sim | não (precisa de internet) |
 
-**Resumindo:** ganha independência do seu computador; perde o MP3 e o vídeo.
-A versão local continua a existir para essas duas coisas.
+**Resumindo:** ganha independência do seu computador; perde o MP3 e o MP4
+(o vídeo daqui sai em WebM). A versão local continua a existir para essas duas coisas.
 
 ---
 
@@ -123,6 +124,20 @@ node TESTAR-FUNCAO.mjs sk_a_sua_chave deepseek
 Ele mostra o que o modelo respondeu, cena por cena. Assim sabe se a chave e o
 modelo funcionam **antes** de gastar tempo com deploy.
 
+## Testes automáticos (sem browser, sem chave)
+
+Há uma bateria que corre o código real da pasta `public/` contra um browser falso
+(canvas, MediaRecorder, AudioContext, DOM e relógio controlado) e apanha defeitos
+antes de publicar:
+
+```powershell
+npm test
+```
+
+Cobre as transições sem saltos, o tempo de cada cena, a entrada do áudio, o botão
+Parar, a trilha em ciclo a 16 %, o painel da página e a ligação entre os `id` do
+HTML e o JavaScript. Detalhes em `testes/LEIAME.md`.
+
 ---
 
 ## Como funciona
@@ -130,12 +145,15 @@ modelo funcionam **antes** de gastar tempo com deploy.
 ```
 public/index.html      A página (sem framework, sem build)
 public/app.js          Importar, reordenar, gerar, gravar áudio, ZIP
+public/video.mjs       Montagem do vídeo no browser: transições + gravação WebM
+public/musica.mjs      Trilha sonora: lê o ficheiro do utilizador, toca em ciclo
 public/style.css       Estilo
 src/base44Client.js    Cliente do SDK da Base44
 base44/functions/generateNarration/entry.ts
                        A FUNÇÃO DE NUVEM: recebe as imagens, fala com o modelo
                        de visão e devolve a narração. É aqui que vive a chave.
 TESTAR-FUNCAO.mjs      Testa a lógica da função localmente
+testes/                Testes automáticos (npm test) — ver testes/LEIAME.md
 ```
 
 ### O percurso de uma imagem
@@ -150,17 +168,39 @@ TESTAR-FUNCAO.mjs      Testa a lógica da função localmente
 
 **A chave nunca chega ao browser.** É a razão de existir a função de nuvem.
 
+### O vídeo e a trilha (aba 🎬 Vídeo)
+
+Não há ffmpeg na nuvem, por isso o vídeo é montado **no próprio browser**: as
+imagens são desenhadas num canvas com as transições escolhidas, a narração de cada
+cena é tocada por cima e tudo é gravado em tempo real com `MediaRecorder`.
+
+- **Grava em tempo real** — um vídeo de 2 minutos leva 2 minutos.
+- **Sai em WebM** (VP9/VP8 + Opus). Para MP4, use a versão local com ffmpeg.
+- Não mude de janela enquanto grava; o botão **⏹ Parar** responde logo.
+
+A **trilha sonora** vem de um ficheiro do seu computador (MP3, WAV, M4A, OGG…),
+tal como as imagens. A app **não traz música dentro dela**, de propósito: trazer
+faixas obrigaria a alguns MB por faixa e à contabilidade de licença de cada uma.
+A música toca **em ciclo, a 16 % do volume**, por baixo da voz — o mesmo valor que
+o Hub 2.0 usava. Ficheiros com mais de 15 minutos são cortados (a música repete de
+qualquer forma) e um ficheiro ilegível nunca estraga o vídeo: ele sai sem música e
+a página diz porquê.
+
 ---
 
 ## Limites desta versão
 
 - **Sem MP3.** O áudio sai em **WebM/Opus**, porque converter para MP3 exige ffmpeg.
   O Chrome, o Edge, o Firefox, o VLC e o DaVinci leem WebM sem problema.
-- **Sem vídeo.** A montagem com transições precisa do ffmpeg — use a versão local.
-- **Precisa de internet** para gerar a narração (o áudio funciona offline, porque
-  é o browser que o faz).
+- **Sem MP4.** O vídeo é gravado no browser, e o browser só grava WebM. Para MP4,
+  use a versão local (que tem ffmpeg).
+- **A gravação demora o tempo do vídeo**, porque é feita em tempo real.
+- **Precisa de internet** para gerar a narração (o áudio e o vídeo funcionam
+  offline, porque é o browser que os faz).
 - **A voz é a do sistema** onde estiver a usar a app. Num telemóvel, as vozes são
   as do telemóvel.
+- **A trilha não fica guardada** entre sessões: um ficheiro de música não cabe no
+  armazenamento do browser sem o encher. Escolhe-se de novo a cada sessão.
 
 ---
 

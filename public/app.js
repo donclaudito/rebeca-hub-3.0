@@ -16,6 +16,10 @@ const state = {
   voz: '',
   velocidade: 1,
   modo: 'mic',
+  motor: 'browser', // 'browser' | 'eleven'
+  tom: 'acolhedora',
+  vozEleven: '',
+  vozesEleven: [],
   servico: 'deepseek',
   modelo: '',
   busy: false,
@@ -618,11 +622,140 @@ async function gerar() {
   }
 }
 
+// ---------------------------------------------------------------- ElevenLabs
+// A chave vive como segredo na Base44; esta página só pede a lista de vozes e o
+// áudio. No plano gratuito a ElevenLabs recusa as vozes da biblioteca (402) —
+// por isso a lista mostra primeiro as vozes da CONTA, que são as que servem.
+
+function marcarMotor() {
+  [...$('motores').children].forEach((b) => b.classList.toggle('on', b.dataset.motor === state.motor));
+  $('grupo-browser').hidden = state.motor !== 'browser';
+  $('grupo-eleven').hidden = state.motor !== 'eleven';
+  guardar();
+}
+
+function marcarTom() {
+  [...$('tons-eleven').children].forEach((b) => b.classList.toggle('on', b.dataset.tom === state.tom));
+  guardar();
+}
+
+function desenharVozesEleven(dados) {
+  const app = $('vozes-app');
+  const conta = $('vozes-conta');
+  app.innerHTML = '';
+  conta.innerHTML = '';
+  state.vozesEleven = dados.vozes || [];
+
+  const doApp = state.vozesEleven.filter((v) => v.doApp);
+  const daConta = state.vozesEleven.filter((v) => !v.doApp);
+  $('linha-vozes-app').hidden = doApp.length === 0;
+  $('linha-vozes-conta').hidden = daConta.length === 0;
+
+  const criar = (v, caixa) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'chip';
+    b.dataset.id = v.id;
+    b.textContent = v.rotuloDoApp || v.nome;
+    b.title = `${v.nome}${v.categoria ? ` [${v.categoria}]` : ''}${v.descricao ? ` — ${v.descricao}` : ''}\nid: ${v.id}`;
+    b.onclick = () => {
+      state.vozEleven = v.id;
+      [...caixa.parentElement.querySelectorAll('.chip')].forEach((x) => x.classList.toggle('on', x === b));
+      $('voz-estado').textContent = `ElevenLabs · ${v.rotuloDoApp || v.nome}`;
+      guardar();
+    };
+    caixa.append(b);
+  };
+
+  doApp.forEach((v) => criar(v, app));
+  daConta.forEach((v) => criar(v, conta));
+
+  // Escolhe uma por omissão: a primeira da CONTA (o plano gratuito aceita-a);
+  // se não houver, a primeira do app.
+  const preferida = state.vozesEleven.find((v) => v.id === state.vozEleven) || daConta[0] || doApp[0];
+  if (preferida) {
+    state.vozEleven = preferida.id;
+    const caixa = preferida.doApp ? app : conta;
+    [...caixa.children].forEach((x) => x.classList.toggle('on', x.dataset.id === preferida.id));
+    $('voz-estado').textContent = `ElevenLabs · ${preferida.rotuloDoApp || preferida.nome}`;
+  }
+}
+
+function estadoEleven(msg, tipo = '') {
+  const el = $('eleven-estado');
+  if (!msg) {
+    el.hidden = true;
+    return;
+  }
+  el.hidden = false;
+  el.className = `cfg-result ${tipo}`;
+  el.textContent = msg;
+}
+
+async function carregarVozesEleven() {
+  const btn = $('btn-carregar-vozes');
+  btn.disabled = true;
+  estadoEleven('a pedir as vozes à ElevenLabs…', 'wait');
+  try {
+    const { base44 } = await import('@/base44Client.js');
+    let d;
+    try {
+      const r = await base44.functions.invoke('listElevenVoices', {});
+      d = r?.data && !r.ok ? r.data : r;
+    } catch (e) {
+      d = e?.response?.data || { ok: false, error: e?.message };
+    }
+    if (!d?.ok) {
+      estadoEleven(`❌ ${d?.error || 'não consegui obter as vozes'}`, 'err');
+      return;
+    }
+    if (!d.vozes?.length) {
+      estadoEleven('⚠️ A sua conta não tem vozes. Crie uma em elevenlabs.io e tente de novo.', 'err');
+      return;
+    }
+    desenharVozesEleven(d);
+    const quantasConta = d.vozes.filter((v) => !v.doApp).length;
+    estadoEleven(
+      `✅ ${d.total} voz(es) na sua conta (${quantasConta} suas, ${d.total - quantasConta} do app).` +
+        (d.biblioteca ? ' As do app podem ser recusadas se o plano for gratuito.' : ''),
+      'ok',
+    );
+  } catch (e) {
+    estadoEleven(`❌ ${e.message}`, 'err');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// Gera o áudio de UMA cena pela ElevenLabs e devolve o blob.
+async function audioDaEleven(texto) {
+  if (!state.vozEleven) throw new Error('escolha uma voz da ElevenLabs (clique em "Carregar as minhas vozes")');
+  const { base44 } = await import('@/base44Client.js');
+  let d;
+  try {
+    const r = await base44.functions.invoke('narrateEleven', {
+      texto,
+      voz: state.vozEleven,
+      tom: state.tom,
+    });
+    d = r?.data && !r.ok ? r.data : r;
+  } catch (e) {
+    d = e?.response?.data || { ok: false, error: e?.message };
+  }
+  if (!d?.ok) throw new Error(d?.error || 'a ElevenLabs não gerou o áudio');
+  const bin = atob(d.audioB64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return { blob: new Blob([bytes], { type: d.tipo || 'audio/mpeg' }), ext: 'mp3', caracteres: d.caracteres };
+}
+
 // ---------------------------------------------------------------- ações
 async function gerarTodoAudio() {
   const alvo = state.scenes.filter((s) => (s.texto || '').trim());
   if (!alvo.length) return toast('Gere a narração primeiro.', 'err');
   if (state.busy) return;
+  if (state.motor === 'eleven') return gerarTodoAudioEleven(alvo);
+
   state.busy = true;
   state.parar = false;
   $('btn-gerar-audio').disabled = true;
@@ -687,6 +820,72 @@ async function gerarTodoAudio() {
     atualizarContador();
   }
   toast(falhas.length ? `${feitos} pronto(s); falharam: imagem ${falhas.join(', ')}.` : `${feitos} áudio(s) pronto(s).`, falhas.length ? '' : 'ok');
+}
+
+// Gera o áudio de todas as cenas pela ElevenLabs. Vai cena a cena para o
+// progresso ser visível e para uma falha não estragar o trabalho já feito.
+async function gerarTodoAudioEleven(alvo) {
+  state.busy = true;
+  state.parar = false;
+  $('btn-gerar-audio').disabled = true;
+
+  let feitos = 0;
+  const falhas = [];
+  let primeiroErro = '';
+  try {
+    for (const [i, cena] of alvo.entries()) {
+      if (state.parar) break;
+      const idx = state.scenes.indexOf(cena);
+      const li = $('scenes').children[idx];
+      const badge = li?.querySelector('.badge');
+      const audio = li?.querySelector('audio');
+      const marcar = (t, tipo = '') => {
+        if (!badge) return;
+        badge.hidden = !t;
+        badge.textContent = t;
+        badge.className = `badge ${tipo}`;
+      };
+
+      marcar('a gerar…', 'busy');
+      progress(true, Math.round((i / alvo.length) * 100), `ElevenLabs — imagem ${i + 1} de ${alvo.length}…`);
+      try {
+        const r = await audioDaEleven(cena.texto);
+        if (cena.audioUrl) URL.revokeObjectURL(cena.audioUrl);
+        cena.audioUrl = URL.createObjectURL(r.blob);
+        cena.audioB64 = await paraBase64(r.blob);
+        cena.audioExt = r.ext;
+        if (audio) {
+          audio.src = cena.audioUrl;
+          audio.hidden = false;
+        }
+        marcar('MP3 pronto', 'ok');
+        feitos++;
+      } catch (e) {
+        falhas.push(idx + 1);
+        marcar(e.message, 'err');
+        if (!primeiroErro) primeiroErro = e.message;
+        // Um problema de plano/chave não melhora na cena seguinte: parar evita
+        // gastar caracteres e encher o ecrã com o mesmo erro.
+        if (/plano gratuito|402|recusada|Falta o segredo|não existe na sua conta/i.test(e.message)) break;
+      }
+    }
+  } finally {
+    state.busy = false;
+    state.parar = false;
+    $('btn-gerar-audio').disabled = false;
+    progress(false);
+    atualizarContador();
+  }
+
+  if (!feitos && primeiroErro) {
+    toast(`Nenhum áudio gerado. ${primeiroErro}`, 'err');
+    estadoEleven(`❌ ${primeiroErro}`, 'err');
+  } else {
+    toast(
+      falhas.length ? `${feitos} áudio(s) pronto(s); falharam: imagem ${falhas.join(', ')}.` : `${feitos} áudio(s) gerado(s) pela ElevenLabs.`,
+      falhas.length ? '' : 'ok',
+    );
+  }
 }
 
 async function ouvirTudo() {
@@ -809,7 +1008,16 @@ function guardar() {
   try {
     localStorage.setItem(
       'rh3nuvem',
-      JSON.stringify({ servico: state.servico, modelo: state.modelo, voz: state.voz, velocidade: state.velocidade, modo: state.modo }),
+      JSON.stringify({
+        servico: state.servico,
+        modelo: state.modelo,
+        voz: state.voz,
+        velocidade: state.velocidade,
+        modo: state.modo,
+        motor: state.motor,
+        tom: state.tom,
+        vozEleven: state.vozEleven,
+      }),
     );
   } catch {
     /* modo privado */
@@ -925,6 +1133,22 @@ function init() {
     cv.append(b);
   });
 
+  // motores de voz (browser / ElevenLabs)
+  [...$('motores').children].forEach((b) => {
+    b.onclick = () => {
+      state.motor = b.dataset.motor;
+      marcarMotor();
+      if (state.motor === 'eleven' && !state.vozesEleven.length) carregarVozesEleven();
+    };
+  });
+  [...$('tons-eleven').children].forEach((b) => {
+    b.onclick = () => {
+      state.tom = b.dataset.tom;
+      marcarTom();
+    };
+  });
+  $('btn-carregar-vozes').onclick = carregarVozesEleven;
+
   // modos de gravação
   [...$('modos').children].forEach((b) => {
     b.onclick = () => {
@@ -1005,6 +1229,11 @@ function init() {
   state.velocidade = c.velocidade || 1;
   state.modo = c.modo || 'mic';
   state.voz = c.voz || '';
+  state.motor = c.motor === 'eleven' ? 'eleven' : 'browser';
+  state.tom = ['acolhedora', 'animada', 'misteriosa', 'dramatica'].includes(c.tom) ? c.tom : 'acolhedora';
+  state.vozEleven = c.vozEleven || '';
+  marcarMotor();
+  marcarTom();
   $('cfg-servico').value = state.servico;
   $('cfg-modelo').value = state.modelo;
   [...cv.children].forEach((x) => x.classList.toggle('on', Number(x.dataset.r) === state.velocidade));

@@ -100,24 +100,67 @@
             </header>
             <div class="voice-panel">
               <div class="vp-group">
-                <span class="vp-label">Voz</span>
-                <div id="vozes" class="chips"></div>
+                <span class="vp-label">Motor</span>
+                <div id="motores" class="chips">
+                  <button type="button" class="chip on" data-motor="browser">🌐 Voz do browser</button>
+                  <button type="button" class="chip" data-motor="eleven">✦ ElevenLabs</button>
+                </div>
               </div>
+
+              <!-- Voz do browser -->
+              <div id="grupo-browser">
+                <div class="vp-group">
+                  <span class="vp-label">Voz</span>
+                  <div id="vozes" class="chips"></div>
+                </div>
+                <div class="vp-group">
+                  <span class="vp-label">Gravar</span>
+                  <div id="modos" class="chips">
+                    <button type="button" class="chip on" data-modo="mic">🎤 Microfone</button>
+                    <button type="button" class="chip" data-modo="ecra">🖥 Partilha de ecrã</button>
+                  </div>
+                </div>
+                <p class="hint" style="margin:0">
+                  O áudio é gerado <b>no seu browser</b>, com as vozes do sistema — não passa por servidor
+                  nenhum e não precisa de chave. Autorize o microfone uma vez e deixe correr.
+                </p>
+              </div>
+
+              <!-- ElevenLabs -->
+              <div id="grupo-eleven" hidden>
+                <div class="vp-group">
+                  <span class="vp-label">Vozes</span>
+                  <button id="btn-carregar-vozes" class="ghost small" type="button">🔄 Carregar as minhas vozes</button>
+                </div>
+                <div id="eleven-estado" class="cfg-result" hidden></div>
+                <div class="vp-group" id="linha-vozes-app" hidden>
+                  <span class="vp-label">Do app</span>
+                  <div id="vozes-app" class="chips"></div>
+                </div>
+                <div class="vp-group" id="linha-vozes-conta" hidden>
+                  <span class="vp-label">Da sua conta</span>
+                  <div id="vozes-conta" class="chips"></div>
+                </div>
+                <div class="vp-group">
+                  <span class="vp-label">Tom</span>
+                  <div id="tons-eleven" class="chips">
+                    <button type="button" class="chip" data-tom="acolhedora">Acolhedora</button>
+                    <button type="button" class="chip" data-tom="animada">Animada</button>
+                    <button type="button" class="chip" data-tom="misteriosa">Misteriosa</button>
+                    <button type="button" class="chip" data-tom="dramatica">Dramática</button>
+                  </div>
+                </div>
+                <p class="hint" style="margin:0">
+                  A chave fica guardada como <b>segredo na Base44</b> — nunca chega a esta página.
+                  No <b>plano gratuito</b> a ElevenLabs recusa as vozes marcadas como "do app" (erro 402);
+                  as vozes da <b>sua conta</b> funcionam.
+                </p>
+              </div>
+
               <div class="vp-group">
                 <span class="vp-label">Velocidade</span>
                 <div id="velocidades" class="chips"></div>
               </div>
-              <div class="vp-group">
-                <span class="vp-label">Gravar</span>
-                <div id="modos" class="chips">
-                  <button type="button" class="chip on" data-modo="mic">🎤 Microfone</button>
-                  <button type="button" class="chip" data-modo="ecra">🖥 Partilha de ecrã</button>
-                </div>
-              </div>
-              <p class="hint" style="margin:0">
-                O áudio é gerado <b>no seu browser</b>, com as vozes do sistema — não passa por servidor
-                nenhum. Autorize o microfone uma vez e deixe correr.
-              </p>
             </div>
           </div>
         </div>

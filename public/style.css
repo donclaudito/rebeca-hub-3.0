@@ -169,6 +169,17 @@ main { padding: 18px 22px 60px; }
 .pane-hint { font-size: 11.5px; color: var(--txt-2); }
 .count { color: var(--txt-2); font-weight: 400; font-size: 13px; }
 
+/* ---------- video ---------- */
+.select-simples {
+  font: inherit; padding: 8px 10px; border-radius: 9px; min-width: 240px;
+  border: 1px solid var(--line); background: var(--bg-3); color: var(--txt);
+}
+.vid-preview {
+  width: 100%; max-height: 320px; border-radius: 10px; background: #000;
+  border: 1px solid var(--line); display: block;
+}
+.vid-preview[hidden] { display: none; }
+
 /* ---------- miniaturas ---------- */
 .thumbs { scrollbar-width: thin; scrollbar-color: #3d4453 transparent; }
 .thumbs::-webkit-scrollbar { width: 11px; }

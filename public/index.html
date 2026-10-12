@@ -83,6 +83,7 @@
           <div class="abas" id="abas-esq">
             <button type="button" class="aba on" data-tab="tab-imagens">🖼️ Imagens <span id="count" class="n">0</span></button>
             <button type="button" class="aba" data-tab="tab-voz">🎙️ Voz e áudio</button>
+            <button type="button" class="aba" data-tab="tab-video">🎬 Vídeo</button>
           </div>
 
           <div class="tab" id="tab-imagens">
@@ -161,6 +162,45 @@
                 <span class="vp-label">Velocidade</span>
                 <div id="velocidades" class="chips"></div>
               </div>
+            </div>
+          </div>
+
+          <!-- Aba: geração do vídeo -->
+          <div class="tab" id="tab-video" hidden>
+            <header class="pane-head">
+              <h2>Montagem do vídeo</h2>
+              <span class="pane-hint">imagens + narração → ficheiro de vídeo</span>
+            </header>
+            <div class="voice-panel">
+              <div class="vp-group">
+                <span class="vp-label">Formato</span>
+                <select id="vid-formato" class="select-simples"></select>
+              </div>
+              <div class="vp-group">
+                <span class="vp-label">Transição</span>
+                <div id="vid-transicoes" class="chips"></div>
+              </div>
+              <div class="vp-group">
+                <span class="vp-label">Duração</span>
+                <div id="vid-duracoes" class="chips"></div>
+              </div>
+
+              <div class="vp-group">
+                <button id="btn-video" class="primary" type="button">🎬 Gerar o vídeo</button>
+                <button id="btn-video-parar" class="ghost small" type="button" hidden>⏹ Parar</button>
+              </div>
+
+              <div id="vid-estado" class="cfg-result" hidden></div>
+
+              <canvas id="vid-preview" class="vid-preview" hidden></canvas>
+
+              <p class="hint" style="margin:0">
+                O vídeo é montado <b>no seu browser</b>: as imagens são desenhadas com as transições
+                e a narração é tocada por cima, gravando tudo em tempo real. Sai em <b>WebM</b>
+                (lê-se no Chrome, Edge, Firefox, YouTube e VLC). Para MP4, use a versão local com ffmpeg.
+                <br /><b>Demora o tempo do vídeo</b> — um vídeo de 2 minutos leva 2 minutos.
+                Não mude de janela durante a gravação.
+              </p>
             </div>
           </div>
         </div>

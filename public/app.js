@@ -20,6 +20,10 @@ const state = {
   tom: 'acolhedora',
   vozEleven: '',
   vozesEleven: [],
+  videoFormato: '1920x1080',
+  videoTransicao: 'fade',
+  videoDuracao: 0.6,
+  pararVideo: false,
   servico: 'deepseek',
   modelo: '',
   busy: false,
@@ -1151,6 +1155,204 @@ function criarZip(ficheiros) {
   return new Blob([...locais, ...centrais, fim]);
 }
 
+// ---------------------------------------------------------------- vídeo
+// O vídeo é montado no browser (não há ffmpeg na nuvem). Ver public/video.mjs.
+function estadoVideo(msg, tipo = '') {
+  const el = $('vid-estado');
+  if (!msg) {
+    el.hidden = true;
+    return;
+  }
+  el.hidden = false;
+  el.className = `cfg-result ${tipo}`;
+  el.textContent = msg;
+}
+
+async function iniciarVideo() {
+  const mod = await import('./video.mjs');
+
+  // Formato
+  const sel = $('vid-formato');
+  sel.innerHTML = '';
+  mod.FORMATOS.forEach((f) => {
+    const o = document.createElement('option');
+    o.value = f.id;
+    o.textContent = f.rotulo;
+    sel.append(o);
+  });
+  sel.value = state.videoFormato || '1920x1080';
+  sel.onchange = () => {
+    state.videoFormato = sel.value;
+    guardar();
+  };
+
+  // Transições
+  const ct = $('vid-transicoes');
+  ct.innerHTML = '';
+  mod.TRANSICOES.forEach((t) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'chip';
+    b.dataset.id = t.id;
+    b.textContent = t.rotulo;
+    b.title = t.nota;
+    b.onclick = () => {
+      state.videoTransicao = t.id;
+      [...ct.children].forEach((x) => x.classList.toggle('on', x === b));
+      guardar();
+    };
+    ct.append(b);
+  });
+  const escolhida = mod.TRANSICOES.find((t) => t.id === state.videoTransicao) || mod.TRANSICOES[0];
+  state.videoTransicao = escolhida.id;
+  [...ct.children].forEach((x) => x.classList.toggle('on', x.dataset.id === escolhida.id));
+
+  // Durações
+  const cd = $('vid-duracoes');
+  cd.innerHTML = '';
+  mod.DURACOES.forEach((d) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'chip';
+    b.dataset.id = String(d.id);
+    b.textContent = d.rotulo;
+    b.onclick = () => {
+      state.videoDuracao = d.id;
+      [...cd.children].forEach((x) => x.classList.toggle('on', x === b));
+      guardar();
+    };
+    cd.append(b);
+  });
+  const dur = mod.DURACOES.find((d) => d.id === state.videoDuracao) || mod.DURACOES[1];
+  state.videoDuracao = dur.id;
+  [...cd.children].forEach((x) => x.classList.toggle('on', Number(x.dataset.id) === dur.id));
+
+  // Suporte do browser
+  if (!mod.suporta()) {
+    $('btn-video').disabled = true;
+    estadoVideo('⚠️ Este browser não consegue gravar vídeo. Use o Chrome ou o Edge.', 'err');
+  } else {
+    estadoVideo(
+      `Pronto para montar. Formato ${state.videoFormato}, transição "${escolhida.rotulo}". ` +
+        'A gravação demora o tempo do vídeo.',
+      '',
+    );
+  }
+
+  $('btn-video').onclick = gerarVideoFinal;
+  $('btn-video-parar').onclick = () => {
+    state.pararVideo = true;
+  };
+}
+
+async function gerarVideoFinal() {
+  if (state.busy) return;
+  const comAudio = state.scenes.filter((s) => (s.texto || '').trim());
+  if (!comAudio.length) {
+    return estadoVideo('❌ Gere a narração primeiro (aba ⚡ Ações).', 'err');
+  }
+
+  // O vídeo precisa do ÁUDIO de cada cena. Se ainda não existe, dizemos o que fazer.
+  const semAudio = comAudio.filter((s) => !s.audioUrl && !s.previaUrl);
+  if (semAudio.length === comAudio.length) {
+    return estadoVideo(
+      '❌ Ainda não há áudio. Vá à aba ⚡ Ações e clique em "🎧 Gerar o áudio de todas as cenas" — ' +
+        'o vídeo usa esse áudio. (A pré-escuta de cada cena também serve.)',
+      'err',
+    );
+  }
+  if (semAudio.length) {
+    estadoVideo(`⚠️ ${semAudio.length} cena(s) sem áudio — o vídeo fica sem voz nessas.`, 'wait');
+  }
+
+  const mod = await import('./video.mjs');
+  state.busy = true;
+  state.pararVideo = false;
+  $('btn-video').disabled = true;
+  $('btn-video-parar').hidden = false;
+
+  // Busca o blob de cada cena (do áudio gerado ou da pré-escuta).
+  const cenas = [];
+  for (const s of comAudio) {
+    const url = s.audioUrl || s.previaUrl;
+    if (!url) continue;
+    try {
+      const blob = await (await fetch(url)).blob();
+      cenas.push({ imagem: imagemDaCena(s), audio: blob });
+    } catch {
+      /* cena sem áudio legível: salta */
+    }
+  }
+
+  if (!cenas.length) {
+    state.busy = false;
+    $('btn-video').disabled = false;
+    $('btn-video-parar').hidden = true;
+    return estadoVideo('❌ Não consegui ler o áudio de nenhuma cena.', 'err');
+  }
+
+  const preview = $('vid-preview');
+  preview.hidden = false;
+
+  try {
+    const r = await mod.gerarVideo({
+      cenas,
+      formato: state.videoFormato,
+      transicao: state.videoTransicao,
+      duracaoTransicao: state.videoDuracao,
+      // Desenha no canvas visível: vê-se a montagem enquanto grava.
+      canvas: preview,
+      aoProgredir: (p) => {
+        if (p.fase === 'a gravar') {
+          const pct = p.totalSegundos ? Math.round((p.segundos / p.totalSegundos) * 100) : 0;
+          progress(true, pct, `a gravar imagem ${p.atual} de ${p.total} — ${Math.round(p.segundos)}s de ${Math.round(p.totalSegundos)}s`);
+          estadoVideo(
+            `a gravar… imagem ${p.atual} de ${p.total}. Não mude de janela. ` +
+              `${Math.round(p.segundos)}s de ${Math.round(p.totalSegundos)}s.`,
+            'wait',
+          );
+        } else {
+          progress(true, 2, `${p.fase}…`);
+          estadoVideo(`${p.fase}…`, 'wait');
+        }
+      },
+      deveParar: () => state.pararVideo,
+    });
+
+    if (!r.ok) throw new Error(r.erro);
+
+    const nome = `rebeca-video.${r.extensao}`;
+    const url = URL.createObjectURL(r.blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = nome;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+
+    estadoVideo(
+      `✅ Vídeo pronto: ${Math.round(r.duracao)}s, ${(r.blob.size / 1048576).toFixed(1)} MB, ` +
+        `formato ${r.formato}, transição "${r.transicao}". Descarregado como ${nome}.`,
+      'ok',
+    );
+    toast(`Vídeo pronto (${Math.round(r.duracao)}s).`, 'ok');
+  } catch (e) {
+    estadoVideo(`❌ ${e.message}`, 'err');
+    toast(e.message, 'err');
+  } finally {
+    state.busy = false;
+    state.pararVideo = false;
+    $('btn-video').disabled = false;
+    $('btn-video-parar').hidden = true;
+    setTimeout(() => progress(false), 1500);
+  }
+}
+
+// A imagem de uma cena, pelo nome do ficheiro.
+function imagemDaCena(cena) {
+  const i = state.images.find((x) => x.name === cena.filename);
+  return i ? i.url : '';
+}
+
 // ---------------------------------------------------------------- configuração
 function guardar() {
   try {
@@ -1165,6 +1367,9 @@ function guardar() {
         motor: state.motor,
         tom: state.tom,
         vozEleven: state.vozEleven,
+        videoFormato: state.videoFormato,
+        videoTransicao: state.videoTransicao,
+        videoDuracao: state.videoDuracao,
       }),
     );
   } catch {
@@ -1380,8 +1585,12 @@ function init() {
   state.motor = c.motor === 'eleven' ? 'eleven' : 'browser';
   state.tom = ['acolhedora', 'animada', 'misteriosa', 'dramatica'].includes(c.tom) ? c.tom : 'acolhedora';
   state.vozEleven = c.vozEleven || '';
+  state.videoFormato = c.videoFormato || '1920x1080';
+  state.videoTransicao = c.videoTransicao || 'fade';
+  state.videoDuracao = Number(c.videoDuracao) || 0.6;
   marcarMotor();
   marcarTom();
+  iniciarVideo();
   // A voz escolhida só se pode marcar depois de a lista chegar do servidor;
   // o botão "Carregar as minhas vozes" trata disso e repõe a escolha guardada.
   if (state.vozEleven) $('voz-estado').textContent = `ElevenLabs · ${state.vozEleven.slice(0, 8)}… (por confirmar)`;

@@ -79,6 +79,13 @@ export default async function (req) {
     if (req.method !== 'POST') return json({ ok: false, error: 'Use POST.' }, 405);
 
     // ---- ler as imagens e as opções ----
+    // A FUNÇÃO ACEITA TRÊS FORMATOS, porque o SDK da Base44 escolhe entre eles
+    // conforme o conteúdo:
+    //   - multipart/form-data, quando há ficheiros File (o SDK converte sozinho);
+    //   - JSON com { imagens: [...] };
+    //   - JSON com { data: { imagens: [...] } } (o SDK pode embrulhar o payload).
+    // Ler só um deles foi um defeito real: a função respondia 400 "Nenhuma
+    // imagem recebida" quando o formato não era o esperado.
     let imagens = [];
     let campos = {};
     const tipo = req.headers.get('content-type') || '';
@@ -93,13 +100,40 @@ export default async function (req) {
         }
       }
     } else {
-      // Alternativa em JSON: imagens em data URL (base64).
-      const corpo = await req.json().catch(() => ({}));
+      const bruto = await req.json().catch(() => ({}));
+      // Desembrulha camadas: { data: {...} }, { body: {...} } ou o próprio objeto.
+      const corpo =
+        bruto && typeof bruto === 'object' && !Array.isArray(bruto) && bruto.data && typeof bruto.data === 'object'
+          ? { ...bruto, ...bruto.data }
+          : bruto && typeof bruto === 'object' && !Array.isArray(bruto) && bruto.body && typeof bruto.body === 'object'
+            ? { ...bruto, ...bruto.body }
+            : bruto || {};
+
       campos = corpo;
-      imagens = (corpo.imagens || []).map((i, n) => ({ nome: i.nome || `imagem-${n + 1}`, dataUrl: i.dataUrl }));
+      // As imagens podem vir como lista direta, ou dentro de `imagens`/`images`.
+      const lista = Array.isArray(corpo) ? corpo : corpo.imagens || corpo.images || [];
+      imagens = (Array.isArray(lista) ? lista : []).map((i, n) => ({
+        nome: i?.nome || i?.name || `imagem-${n + 1}`,
+        dataUrl: i?.dataUrl || i?.data_url || i?.url || (typeof i === 'string' ? i : ''),
+      }));
+      // Uma imagem sem data URL não serve: descarta-se em vez de rebentar depois.
+      imagens = imagens.filter((i) => typeof i.dataUrl === 'string' && i.dataUrl.startsWith('data:'));
     }
 
-    if (!imagens.length) return json({ ok: false, error: 'Nenhuma imagem recebida.' }, 400);
+    if (!imagens.length) {
+      // Diagnóstico útil em vez de uma mensagem seca: diz o que chegou.
+      const recebido = tipo.includes('multipart') ? 'multipart sem ficheiros' : `JSON com as chaves: ${Object.keys(campos).join(', ') || '(nenhuma)'}`;
+      return json(
+        {
+          ok: false,
+          error:
+            'Nenhuma imagem recebida. A função aceita imagens em multipart (ficheiros) ou em JSON, ' +
+            'no campo "imagens" como lista de { nome, dataUrl }. ' +
+            `Recebi: ${recebido}.`,
+        },
+        400,
+      );
+    }
     if (imagens.length > MAX_IMAGENS) {
       return json({ ok: false, error: `Máximo de ${MAX_IMAGENS} imagens por geração (recebi ${imagens.length}).` }, 400);
     }

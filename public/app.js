@@ -558,13 +558,18 @@ async function gerar() {
       dados = await r.json();
     } else {
       const { base44 } = await import('@/base44Client.js');
+
+      // As imagens vão em JSON com data URL (base64). O SDK da Base44 envia
+      // JSON quando não há ficheiros — e o JSON é mais simples de diagnosticar
+      // do que um multipart, porque o erro diz logo o que chegou.
       const imagens = await Promise.all(
         prontas.map(async (p, i) => {
           const b64 = await paraBase64(p.file);
-          return { nome: state.images[i].name, dataUrl: `data:${p.file.type};base64,${b64}` };
+          return { nome: state.images[i].name, dataUrl: `data:${p.file.type || 'image/jpeg'};base64,${b64}` };
         }),
       );
-      dados = await base44.functions.invoke('generateNarration', {
+
+      const pedido = {
         servico: state.servico,
         modelo: state.modelo,
         imagens,
@@ -573,13 +578,27 @@ async function gerar() {
         minWords: $('minWords').value,
         maxWords: $('maxWords').value,
         idioma: 'português do Brasil',
-      });
-      // A função devolve os dados embrulhados; desembrulha se for preciso.
-      if (dados && dados.data && !dados.ok) dados = dados.data;
+      };
+
+      let resposta;
+      try {
+        resposta = await base44.functions.invoke('generateNarration', pedido);
+      } catch (e) {
+        // O SDK lança em erro HTTP; o corpo com a explicação vem em response.data.
+        const corpo = e?.response?.data;
+        const detalhe = corpo?.error || e?.message || 'a chamada falhou';
+        const status = e?.response?.status ? ` (HTTP ${e.response.status})` : '';
+        throw new Error(`${detalhe}${status}`);
+      }
+
+      // Desembrulha: o SDK pode devolver { data: {...} } ou o próprio objeto.
+      dados = resposta?.data && typeof resposta.data === 'object' && !resposta.ok ? resposta.data : resposta;
+      if (dados?.data && typeof dados.data === 'object' && dados.data.scenes) dados = dados.data;
+      if (dados?.body && typeof dados.body === 'object' && dados.body.scenes) dados = dados.body;
     }
 
     progress(true, 85, 'a receber o texto…');
-    if (!dados || !dados.ok) throw new Error(dados?.error || 'a geração falhou');
+    if (!dados || !dados.ok) throw new Error(dados?.error || 'a geração falhou sem explicação');
 
     state.scenes = dados.scenes.map((s) => {
       const antes = state.scenes.find((p) => p.filename === s.filename);
@@ -821,11 +840,30 @@ async function testarLigacao() {
       return;
     }
     const { base44 } = await import('@/base44Client.js');
-    const r = await base44.functions.invoke('generateNarration', { servico, texto: 'teste' });
-    const d = r?.data && !r.ok ? r.data : r;
+    // Teste propositado: sem imagens, a função responde 400 com a explicação.
+    // Se essa explicação chegar, então a função está viva e a falar com o SDK.
+    let d;
+    try {
+      const r = await base44.functions.invoke('generateNarration', { servico, imagens: [] });
+      d = r?.data && !r.ok ? r.data : r;
+    } catch (e) {
+      d = e?.response?.data || { ok: false, error: e?.message };
+      if (e?.response?.status) d.http = e.response.status;
+    }
     if (d?.ok) {
       caixa.className = 'cfg-result ok';
       caixa.textContent = '✅ A função de nuvem respondeu.';
+    } else if (/Nenhuma imagem recebida/i.test(d?.error || '')) {
+      // É a resposta CERTA para um teste sem imagens: a função está a funcionar.
+      caixa.className = 'cfg-result ok';
+      caixa.textContent =
+        '✅ A função de nuvem está a responder' +
+        (d.http ? ` (HTTP ${d.http})` : '') +
+        '. O teste não envia imagens, por isso ela pede imagens — é o esperado.';
+    } else if (/Falta o segredo/i.test(d?.error || '')) {
+      caixa.className = 'cfg-result err';
+      caixa.textContent =
+        `⚠️ A função responde, mas falta o segredo. Corra:  base44 secrets set DEEPSEEK_API_KEY=sk_...\n\n${d.error}`;
     } else {
       caixa.className = 'cfg-result err';
       caixa.textContent = `❌ ${d?.error || 'a função respondeu de forma inesperada'}`;

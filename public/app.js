@@ -348,6 +348,43 @@ function renderScenes() {
     btnGravar.onclick = async () => {
       const t = ta.value.trim();
       if (!t) return toast('Escreva ou gere a narração primeiro.', 'err');
+      // O botão respeita o MOTOR: com a ElevenLabs escolhida, o áudio vem dela
+      // (a gravação pelo microfone seria sempre a voz do browser, nunca a voz
+      // da ElevenLabs — era aqui que a escolha "não pegava").
+      if (state.motor === 'eleven') {
+        btnGravar.disabled = true;
+        marcar('a gerar com a ElevenLabs…', 'busy');
+        try {
+          // Reaproveita a pré-escuta da MESMA voz, para não gastar caracteres
+          // outra vez numa cena que já foi ouvida.
+          let blob;
+          let nomeVoz;
+          if (cena.previaUrl) {
+            blob = await (await fetch(cena.previaUrl)).blob();
+            nomeVoz = cena.previaVoz || state.vozesEleven.find((v) => v.id === state.vozEleven)?.nome || '';
+          } else {
+            const r = await audioDaEleven(t);
+            blob = r.blob;
+            nomeVoz = r.nomeVoz || '';
+            cena.previaUrl = URL.createObjectURL(blob);
+            cena.previaVoz = nomeVoz;
+          }
+          if (cena.audioUrl) URL.revokeObjectURL(cena.audioUrl);
+          cena.audioUrl = URL.createObjectURL(blob);
+          cena.audioB64 = await paraBase64(blob);
+          cena.audioExt = 'mp3';
+          cena.vozUsada = nomeVoz;
+          audio.src = cena.audioUrl;
+          audio.hidden = false;
+          marcar(nomeVoz ? `MP3 · ${nomeVoz}` : 'MP3 pronto', 'ok');
+          atualizarContador();
+        } catch (e) {
+          marcar(e.message, 'err');
+        } finally {
+          btnGravar.disabled = false;
+        }
+        return;
+      }
       btnGravar.disabled = true;
       marcar('a preparar…', 'busy');
       try {

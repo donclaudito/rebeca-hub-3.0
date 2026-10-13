@@ -24,6 +24,28 @@ e o problema do `spawn EPERM` desaparece: não há processos locais envolvidos.
 
 ---
 
+## Quem está a usar a app (conta Base44)
+
+No canto superior direito aparece **quem está a usar** a app: o nome (ou o email,
+se não houver nome), com o email e o perfil no detalhe do rato.
+
+- **Entrar é opcional.** A app funciona sem conta: importar imagens, gerar a
+  narração, montar o vídeo e guardar projetos no computador funcionam à mesma.
+  Isto é de propósito — obrigar a entrar fecharia a app a quem só a quer
+  experimentar.
+- **Entrar** abre um formulário de email e palavra-passe, com a opção de **criar
+  conta**. Ao criar conta, a Base44 manda um **código para o email**, que se
+  escreve no mesmo formulário para confirmar.
+- **Sair** termina a sessão e o topo volta a dizer *sem conta*.
+- Se a Base44 não responder (por exemplo, a app ainda não está publicada), o topo
+  diz *sem conta* e **a app continua a funcionar** — nunca fica presa à espera da
+  conta.
+
+A autenticação é a do SDK da Base44 (`base44.auth`), por isso a palavra-passe
+nunca passa por código nosso.
+
+---
+
 ## Antes de começar
 
 Precisa de:

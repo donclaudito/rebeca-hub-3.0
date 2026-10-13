@@ -155,7 +155,36 @@ function ambiente(reg, suportaVideo, duracaoMusica = 65) {
     if (s.startsWith('blob:')) return { ok: true, blob: async () => new Blob() };
     return { ok: true, json: async () => ({ ok: true }) };
   };
-  globalThis.__base44Falso = { functions: { invoke: async () => ({ ok: true }) } };
+  globalThis.__base44Falso = {
+    functions: { invoke: async () => ({ ok: true }) },
+    auth: {
+      // O teste troca isto antes de arrancar a página (__authFalso).
+      utilizador: globalThis.__authFalso ? globalThis.__authFalso.utilizador : null,
+      erro: globalThis.__authFalso ? globalThis.__authFalso.erro : null,
+      chamadas: [],
+      async me() {
+        if (this.erro) throw this.erro;
+        return this.utilizador;
+      },
+      async loginViaEmailPassword(email, senha) {
+        this.chamadas.push(['login', email, senha]);
+        if (this.erro) throw this.erro;
+        return { access_token: 'token-falso' };
+      },
+      async register(p) {
+        this.chamadas.push(['register', p.email]);
+        if (this.erro) throw this.erro;
+        return { ok: true };
+      },
+      async verifyOtp(p) {
+        this.chamadas.push(['otp', p.email, p.otpCode]);
+        if (this.erro) throw this.erro;
+        return { ok: true };
+      },
+      setToken(t) { this.chamadas.push(['setToken', t]); },
+      logout() { this.chamadas.push(['logout']); this.utilizador = null; },
+    },
+  };
   return store;
 }
 
@@ -599,7 +628,117 @@ console.log('\n[16] Guardar o vídeo: escolher onde, ou descarregar');
   check(semApi === false, 'sem a API, devolve false e usa a descarga', `ok=${semApi}`);
 }
 
-console.log('\n[17] Sem erros de JavaScript');
+console.log('\n[17] Utilizador no topo: quem está a usar a app');
+{
+  // (a) COM sessão: mostra o nome e dá para sair.
+  globalThis.__authFalso = { utilizador: { id: 'u1', email: 'rebeca@exemplo.pt', full_name: 'Rebeca Silva', role: 'user' }, erro: null };
+  const reg = await arrancar(true);
+  await new Promise((r) => setTimeout(r, 60));
+  const estado = reg.get('user-estado');
+  check(/Rebeca Silva/.test(estado.textContent), `mostra o nome de quem entrou ("${estado.textContent}")`, estado.textContent);
+  check(estado.classList.contains('dentro'), 'e fica marcado como "dentro"', 'não marcou');
+  check(/rebeca@exemplo\.pt/.test(estado.title), `o detalhe tem o email ("${estado.title}")`, estado.title);
+  check(reg.get('btn-user-entrar').hidden === true, 'o botão "Entrar" desaparece', 'continua visível');
+  check(reg.get('btn-user-sair').hidden === false, 'e o "Sair" aparece', 'continua escondido');
+
+  // Sair limpa a sessão.
+  globalThis.window.confirm = () => true;
+  reg.get('btn-user-sair').click();
+  await new Promise((r) => setTimeout(r, 80));
+  check(/sem conta/.test(reg.get('user-estado').textContent), `depois de sair, fica "sem conta" ("${reg.get('user-estado').textContent}")`, reg.get('user-estado').textContent);
+  check(reg.get('btn-user-entrar').hidden === false, 'e o "Entrar" volta', 'ficou escondido');
+
+  // (b) SEM sessão (a Base44 recusa): a app continua utilizável.
+  globalThis.__authFalso = { utilizador: null, erro: Object.assign(new Error('Unauthorized'), { response: { status: 401 } }) };
+  const reg2 = await arrancar(true);
+  await new Promise((r) => setTimeout(r, 60));
+  check(/sem conta/.test(reg2.get('user-estado').textContent), `sem sessão, diz "sem conta" ("${reg2.get('user-estado').textContent}")`, reg2.get('user-estado').textContent);
+  check(reg2.get('btn-user-entrar').hidden === false, 'e oferece entrar', 'não oferece');
+  check(/sem conta/.test(reg2.get('user-estado').title), 'o detalhe explica que entrar é opcional', reg2.get('user-estado').title);
+  check(reg2.get('workspace') !== undefined, 'a página arrancou na mesma (a app não depende da conta)', 'a página não arrancou');
+}
+
+console.log('\n[18] Entrar, criar conta e confirmar o código');
+{
+  globalThis.__authFalso = { utilizador: null, erro: null };
+  const reg = await arrancar(true);
+  await new Promise((r) => setTimeout(r, 60));
+
+  // Abre o formulário de entrar.
+  reg.get('btn-user-entrar').click();
+  check(reg.get('user-titulo').textContent === 'Entrar', `o formulário abre em "Entrar" ("${reg.get('user-titulo').textContent}")`, reg.get('user-titulo').textContent);
+  check(reg.get('campo-nome').hidden === true, 'sem campo de nome no modo entrar', 'mostrou o nome');
+  check(reg.get('campo-otp').hidden === true, 'sem campo de código no modo entrar', 'mostrou o código');
+
+  // Entrar sem dados avisa.
+  reg.get('user-email').value = '';
+  reg.get('form-user').dispatchEvent({ type: 'submit' });
+  await new Promise((r) => setTimeout(r, 40));
+  check(/Escreva o seu email/i.test(reg.get('user-erro').textContent), `sem email, avisa ("${reg.get('user-erro').textContent}")`, reg.get('user-erro').textContent);
+
+  // Palavra-passe curta avisa.
+  reg.get('user-email').value = 'rebeca@exemplo.pt';
+  reg.get('user-senha').value = '123';
+  reg.get('form-user').dispatchEvent({ type: 'submit' });
+  await new Promise((r) => setTimeout(r, 40));
+  check(/6 caracteres/i.test(reg.get('user-erro').textContent), `senha curta, avisa ("${reg.get('user-erro').textContent}")`, reg.get('user-erro').textContent);
+
+  // Entrar a sério: chama o login e passa a mostrar o nome.
+  globalThis.__base44Falso.auth.utilizador = { id: 'u1', email: 'rebeca@exemplo.pt', full_name: 'Rebeca Silva' };
+  reg.get('user-senha').value = 'segredo-bom';
+  reg.get('form-user').dispatchEvent({ type: 'submit' });
+  await new Promise((r) => setTimeout(r, 120));
+  const chamadas = globalThis.__base44Falso.auth.chamadas.map((c) => c[0]);
+  check(chamadas.includes('login'), `chamou o login (${chamadas.join(', ')})`, chamadas.join(', '));
+  check(chamadas.includes('setToken'), 'guardou o token devolvido', chamadas.join(', '));
+  check(/Rebeca Silva/.test(reg.get('user-estado').textContent), `passou a mostrar quem entrou ("${reg.get('user-estado').textContent}")`, reg.get('user-estado').textContent);
+
+  // Credenciais erradas: mensagem em português, não o erro cru.
+  globalThis.__base44Falso.auth.chamadas.length = 0;
+  globalThis.__authFalsoErro = true;
+  globalThis.__base44Falso.auth.erro = Object.assign(new Error('Invalid login credentials'), { response: { status: 401 } });
+  reg.get('user-senha').value = 'errada-mas-longa';
+  reg.get('form-user').dispatchEvent({ type: 'submit' });
+  await new Promise((r) => setTimeout(r, 120));
+  check(/não conferem/i.test(reg.get('user-erro').textContent), `credenciais erradas: "${reg.get('user-erro').textContent}"`, reg.get('user-erro').textContent);
+  globalThis.__base44Falso.auth.erro = null;
+}
+
+console.log('\n[19] Criar conta e confirmar o código do email');
+{
+  globalThis.__authFalso = { utilizador: null, erro: null };
+  const reg = await arrancar(true);
+  await new Promise((r) => setTimeout(r, 60));
+
+  // Passa para o modo criar conta.
+  reg.get('btn-user-entrar').click();
+  reg.get('link-user-trocar').onclick({ preventDefault() {} });
+  check(reg.get('user-titulo').textContent === 'Criar conta', `muda para "Criar conta" ("${reg.get('user-titulo').textContent}")`, reg.get('user-titulo').textContent);
+  check(reg.get('campo-nome').hidden === false, 'e aparece o campo do nome', 'não apareceu');
+
+  // Cria a conta: tem de pedir o código do email.
+  reg.get('user-email').value = 'nova@exemplo.pt';
+  reg.get('user-senha').value = 'segredo-bom';
+  reg.get('user-nome').value = 'Ana';
+  reg.get('form-user').dispatchEvent({ type: 'submit' });
+  await new Promise((r) => setTimeout(r, 120));
+  const c1 = globalThis.__base44Falso.auth.chamadas.map((c) => c[0]);
+  check(c1.includes('register'), `chamou o registo (${c1.join(', ')})`, c1.join(', '));
+  check(reg.get('campo-otp').hidden === false, 'e pede o código recebido por email', 'não pediu o código');
+  check(reg.get('campo-senha').hidden === true, 'a palavra-passe sai do formulário', 'continua a pedir a senha');
+  check(/Enviámos um código/i.test(reg.get('toast').textContent), `avisa que enviou o código ("${reg.get('toast').textContent}")`, reg.get('toast').textContent);
+
+  // Confirma o código: passa a haver sessão.
+  globalThis.__base44Falso.auth.utilizador = { id: 'u2', email: 'nova@exemplo.pt', full_name: 'Ana' };
+  reg.get('user-otp').value = '123456';
+  reg.get('form-user').dispatchEvent({ type: 'submit' });
+  await new Promise((r) => setTimeout(r, 150));
+  const c2 = globalThis.__base44Falso.auth.chamadas.map((c) => c[0]);
+  check(c2.includes('otp'), `confirmou o código (${c2.join(', ')})`, c2.join(', '));
+  check(/Ana/.test(reg.get('user-estado').textContent), `ficou com sessão ("${reg.get('user-estado').textContent}")`, reg.get('user-estado').textContent);
+}
+
+console.log('\n[20] Sem erros de JavaScript');
 if (erros.length) erros.slice(0, 5).forEach((e) => fail(e));
 else ok('nenhum erro não tratado');
 

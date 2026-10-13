@@ -19,9 +19,57 @@
       <div class="top-actions">
         <span id="status" class="pill">a ligar…</span>
         <span id="versao" class="pill tiny-pill" title="versão do motor de vídeo que está a correr neste browser">v…</span>
+
+        <!-- Utilizador: quem está a usar a app -->
+        <div id="user-caixa" class="user-caixa">
+          <span id="user-estado" class="pill tiny-pill">a ver quem está…</span>
+          <button id="btn-user-entrar" class="ghost small" type="button" hidden>Entrar</button>
+          <button id="btn-user-sair" class="ghost small" type="button" hidden>Sair</button>
+        </div>
+
         <button id="btn-config" class="ghost" type="button">⚙️ Configurações</button>
       </div>
     </header>
+
+    <!-- Entrar / criar conta -->
+    <dialog id="dlg-user" class="dlg">
+      <form id="form-user" method="dialog" class="dlg-form">
+        <h2 id="user-titulo">Entrar</h2>
+        <p class="hint" style="margin:0 0 10px">
+          A conta serve para identificar quem trabalha na app. Sem entrar, a app funciona na mesma —
+          os projetos ficam guardados neste computador.
+        </p>
+
+        <label class="field">
+          <span>Email</span>
+          <input id="user-email" type="email" autocomplete="username" placeholder="o.seu@email.com" />
+        </label>
+        <label class="field" id="campo-senha">
+          <span>Palavra-passe</span>
+          <input id="user-senha" type="password" autocomplete="current-password" />
+        </label>
+        <label class="field" id="campo-nome" hidden>
+          <span>Nome (opcional)</span>
+          <input id="user-nome" type="text" autocomplete="name" placeholder="Como quer ser tratado" />
+        </label>
+
+        <div id="campo-otp" class="field" hidden>
+          <span>Código recebido por email</span>
+          <input id="user-otp" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="123456" />
+          <p class="hint" style="margin:6px 0 0">Escreva aqui o código que enviámos para o seu email.</p>
+        </div>
+
+        <div id="user-erro" class="cfg-result err" hidden></div>
+
+        <div class="dlg-acoes">
+          <button id="btn-user-confirmar" class="primary" type="submit">Entrar</button>
+          <button id="btn-user-fechar" class="ghost" type="button">Fechar</button>
+        </div>
+        <p class="hint" style="margin:8px 0 0">
+          <a href="#" id="link-user-trocar">Ainda não tem conta? Criar uma</a>
+        </p>
+      </form>
+    </dialog>
 
     <!-- Avisos -->
     <div id="aviso" class="aviso" hidden></div>
@@ -93,6 +141,28 @@
               <h2>Ordem das imagens</h2>
               <span class="pane-hint">Arraste, ou use ▲ ▼</span>
             </header>
+
+            <!-- Projetos: guardar e voltar a um trabalho anterior -->
+            <section id="projetos" class="projetos">
+              <div class="projetos-topo">
+                <input id="projeto-nome" type="text" class="projeto-nome" maxlength="60"
+                  placeholder="Nome do projeto (ex.: A Borboleta)" />
+                <button id="btn-projeto-guardar" class="primary small" type="button">💾 Guardar projeto</button>
+                <button id="btn-projeto-atualizar" class="ghost small" type="button" hidden>🔁 Atualizar</button>
+                <button id="btn-projetos-ver" class="ghost small" type="button">📂 Os meus projetos</button>
+              </div>
+              <p id="projeto-estado" class="hint">Guarde o trabalho para o voltar a abrir noutro dia.</p>
+
+              <div id="projetos-lista" class="projetos-lista" hidden>
+                <div class="projetos-cabeca">
+                  <span id="projetos-resumo" class="hint">—</span>
+                  <button id="btn-projetos-fechar" class="ghost small" type="button">Fechar</button>
+                </div>
+                <ul id="projetos-ul" class="projetos-ul"></ul>
+                <p id="projetos-vazio" class="hint" hidden>Ainda não guardou nenhum projeto.</p>
+              </div>
+            </section>
+
             <ul id="thumbs" class="thumbs"></ul>
           </div>
 

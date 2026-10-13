@@ -209,6 +209,45 @@ main { padding: 18px 22px 60px; }
 /* O verso que está a tocar na pré-escuta. */
 .letra-passo.on { color: #fff; background: rgba(124, 92, 255, 0.22); border-radius: 6px; padding: 1px 6px; }
 
+/* ---------- projetos guardados ---------- */
+.projetos { padding: 12px 12px 0; }
+.projetos-topo { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.projeto-nome {
+  flex: 1; min-width: 150px; font: inherit; font-size: 13px; padding: 7px 10px;
+  border-radius: 9px; border: 1px solid var(--line); background: var(--bg-3); color: var(--txt);
+}
+.projeto-nome:focus { outline: none; border-color: var(--accent); }
+.projetos .hint { margin: 8px 0 0; max-width: none; }
+.projetos-lista {
+  margin-top: 11px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--bg-3); padding: 10px;
+}
+.projetos-cabeca { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.projetos-cabeca .hint { margin: 0; }
+.projetos-ul {
+  list-style: none; margin: 9px 0 0; padding: 0; display: flex; flex-direction: column; gap: 7px;
+  max-height: 46vh; overflow-y: auto;
+}
+.projeto {
+  display: flex; align-items: center; gap: 10px; padding: 8px;
+  border: 1px solid transparent; border-radius: 9px; background: var(--bg-2);
+}
+.projeto:hover { border-color: var(--line); }
+.projeto.atual { border-color: var(--accent); }
+.projeto img {
+  width: 54px; height: 54px; object-fit: cover; border-radius: 7px;
+  background: #000; flex: none; border: 1px solid var(--line);
+}
+.projeto .sem-miniatura {
+  width: 54px; height: 54px; border-radius: 7px; background: #000;
+  border: 1px solid var(--line); flex: none; display: grid; place-items: center;
+  color: var(--txt-2); font-size: 18px;
+}
+.projeto .info { flex: 1; min-width: 0; }
+.projeto .titulo { font-size: 13.5px; color: var(--txt); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.projeto .meta { font-size: 11.5px; color: var(--txt-2); margin-top: 2px; }
+.projeto .acoes { display: flex; gap: 6px; flex: none; }
+
 /* ---------- miniaturas ---------- */
 .thumbs { scrollbar-width: thin; scrollbar-color: #3d4453 transparent; }
 .thumbs::-webkit-scrollbar { width: 11px; }
@@ -279,6 +318,21 @@ main { padding: 18px 22px 60px; }
 .audio-actions.vertical button { width: 100%; text-align: left; }
 
 .empty { padding: 34px 20px; text-align: center; color: var(--txt-2); font-size: 13.5px; }
+
+/* ---------- utilizador ---------- */
+.user-caixa { display: flex; align-items: center; gap: 7px; }
+#user-estado { max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#user-estado.dentro { color: var(--txt); border-color: var(--accent); }
+.dlg-form { padding: 20px; display: flex; flex-direction: column; gap: 13px; }
+.dlg-acoes { display: flex; justify-content: flex-end; gap: 9px; flex-wrap: wrap; }
+.dlg a { color: var(--accent); }
+.dlg .field { display: flex; flex-direction: column; gap: 5px; }
+.dlg .field span { font-size: 11.5px; color: var(--txt-2); text-transform: uppercase; letter-spacing: .4px; }
+.dlg .field input {
+  font: inherit; font-size: 13.5px; padding: 9px 11px; border-radius: 9px;
+  border: 1px solid var(--line); background: var(--bg-3); color: var(--txt);
+}
+.dlg .field input:focus { outline: none; border-color: var(--accent); }
 
 /* ---------- dialogo ---------- */
 .dlg { border: 1px solid var(--line); border-radius: 14px; background: var(--bg-2); color: var(--txt); padding: 0; width: min(560px, 92vw); }

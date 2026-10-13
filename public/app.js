@@ -1623,6 +1623,510 @@ function verResultado() {
   });
 }
 
+// ---------------------------------------------------------------- projetos
+// Cada projeto é guardado no IndexedDB com as imagens, o texto e o áudio. Fica
+// no computador do utilizador; não vai para servidor nenhum.
+let projetos = {
+  mod: null, // o módulo projetos.mjs, carregado à primeira utilização
+  idAtual: null,
+  lista: [],
+};
+
+async function modProjetos() {
+  if (!projetos.mod) projetos.mod = await import('./projetos.mjs');
+  return projetos.mod;
+}
+
+function estadoProjeto(msg, tipo = '') {
+  const el = $('projeto-estado');
+  if (!el) return;
+  el.className = tipo === 'err' ? 'hint err' : 'hint';
+  el.textContent = msg;
+}
+
+// Junta tudo o que é preciso para voltar a abrir o trabalho mais tarde.
+async function recolherProjeto(nome) {
+  const cenas = [];
+  for (const [i, img] of state.images.entries()) {
+    const cena = state.scenes[i] || {};
+    let imagem = null;
+    try {
+      // Guarda a versão REDUZIDA quando ela existe: é a que a app usa, e a
+      // original pode ter 20 MB por imagem.
+      const p = await preparar(img);
+      imagem = p.file;
+    } catch {
+      imagem = img.file || null;
+    }
+    let audio = null;
+    if (cena.audioB64) {
+      try {
+        audio = new Blob([binarioDeBase64(cena.audioB64)], { type: cena.audioExt || 'audio/webm' });
+      } catch {
+        audio = null;
+      }
+    }
+    cenas.push({
+      nome: img.name,
+      imagem,
+      texto: cena.texto || '',
+      audio,
+      audioExt: cena.audioExt || '',
+      previaVoz: cena.previaVoz || '',
+    });
+  }
+  return {
+    id: projetos.idAtual || crypto.randomUUID(),
+    nome: String(nome || '').trim() || 'Projeto sem nome',
+    criadoEm: projetos.criadoEm || Date.now(),
+    cenas,
+    config: {
+      servico: state.servico,
+      modelo: state.modelo,
+      voz: state.voz,
+      velocidade: state.velocidade,
+      motor: state.motor,
+      tom: state.tom,
+      vozEleven: state.vozEleven,
+      videoFormato: state.videoFormato,
+      videoTransicao: state.videoTransicao,
+      videoDuracao: state.videoDuracao,
+      videoModo: state.videoModo,
+      videoDuracaoCena: state.videoDuracaoCena,
+      legendas: state.legendas,
+      modoDuracao: state.modoDuracao,
+      codec: state.codec,
+      letra: state.letra,
+      letraLigada: state.letraLigada,
+      texto: { tone: $('tone').value, extra: $('extra').value, minWords: $('minWords').value, maxWords: $('maxWords').value },
+    },
+  };
+}
+
+function binarioDeBase64(b64) {
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+}
+
+async function guardarProjetoAgora() {
+  if (!state.images.length) return toast('Importe as imagens primeiro.', 'err');
+  const btn = $('btn-projeto-guardar');
+  const nome = $('projeto-nome').value;
+  btn.disabled = true;
+  estadoProjeto(state.images.length > 20 ? 'a guardar… (são muitas imagens, isto demora um pouco)' : 'a guardar…');
+  try {
+    const mod = await modProjetos();
+    const dados = await recolherProjeto(nome);
+    await mod.guardarProjeto(dados);
+    projetos.idAtual = dados.id;
+    projetos.criadoEm = dados.criadoEm;
+    $('projeto-nome').value = dados.nome;
+    estadoProjeto(`Projeto "${dados.nome}" guardado · ${dados.cenas.length} imagem(ns) · ${mod.tamanhoLegivel(mod.tamanhoDe(dados))}`, 'ok');
+    toast(`Projeto "${dados.nome}" guardado.`, 'ok');
+    await desenharProjetos();
+  } catch (e) {
+    estadoProjeto(`❌ ${e.message}`, 'err');
+    toast(e.message, 'err');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function desenharProjetos() {
+  const lista = $('projetos-ul');
+  if (!lista) return;
+  try {
+    const mod = await modProjetos();
+    projetos.lista = await mod.listarProjetos();
+  } catch (e) {
+    estadoProjeto(`❌ ${e.message}`, 'err');
+    return;
+  }
+  lista.innerHTML = '';
+  const vazio = $('projetos-vazio');
+  if (vazio) vazio.hidden = projetos.lista.length > 0;
+
+  // O botão "Atualizar" só faz sentido depois de haver um projeto aberto.
+  const btnAtualizar = $('btn-projeto-atualizar');
+  if (btnAtualizar) btnAtualizar.hidden = !projetos.idAtual;
+
+  const total = projetos.lista.reduce((s, p) => s + (p.bytes || 0), 0);
+  const resumo = $('projetos-resumo');
+  if (resumo) {
+    resumo.textContent = projetos.lista.length
+      ? `${projetos.lista.length} projeto(s) · ${(await modProjetos()).tamanhoLegivel(total)} no seu computador`
+      : 'Ainda não guardou nenhum projeto.';
+  }
+
+  for (const p of projetos.lista) {
+    const li = document.createElement('li');
+    li.className = `projeto${p.id === projetos.idAtual ? ' atual' : ''}`;
+
+    if (p.miniatura instanceof Blob || p.miniatura) {
+      const img = document.createElement('img');
+      img.alt = '';
+      img.src = URL.createObjectURL(p.miniatura);
+      img.onload = () => URL.revokeObjectURL(img.src);
+      li.append(img);
+    } else {
+      const sem = document.createElement('span');
+      sem.className = 'sem-miniatura';
+      sem.textContent = '🖼️';
+      li.append(sem);
+    }
+
+    const info = document.createElement('div');
+    info.className = 'info';
+    const titulo = document.createElement('div');
+    titulo.className = 'titulo';
+    titulo.textContent = p.nome;
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    const mod = await modProjetos();
+    meta.textContent =
+      `${p.imagens} imagem(ns) · ${p.comTexto} com texto · ${p.comAudio} com áudio · ` +
+      `${mod.tamanhoLegivel(p.bytes)} · ${mod.quandoFoi(p.guardadoEm)}`;
+    info.append(titulo, meta);
+    li.append(info);
+
+    const acoes = document.createElement('div');
+    acoes.className = 'acoes';
+    const abrir = document.createElement('button');
+    abrir.type = 'button';
+    abrir.className = 'primary small';
+    abrir.textContent = '📂 Abrir';
+    abrir.onclick = () => abrirProjeto(p.id);
+    const apagar = document.createElement('button');
+    apagar.type = 'button';
+    apagar.className = 'ghost small danger';
+    apagar.textContent = '🗑';
+    apagar.title = 'apagar este projeto';
+    apagar.onclick = () => apagarProjeto(p.id, p.nome);
+    acoes.append(abrir, apagar);
+    li.append(acoes);
+
+    lista.append(li);
+  }
+}
+
+async function abrirProjeto(id) {
+  try {
+    const mod = await modProjetos();
+    const p = await mod.lerProjeto(id);
+    if (!p) return toast('Esse projeto já não existe.', 'err');
+
+    // Fecha o que estava aberto antes de trocar de trabalho.
+    pararPreviaTrilha();
+    pararPreviaLetra();
+    for (const img of state.images) if (img.url) URL.revokeObjectURL(img.url);
+    for (const s of state.scenes) {
+      if (s.audioUrl) URL.revokeObjectURL(s.audioUrl);
+      if (s.previaUrl) URL.revokeObjectURL(s.previaUrl);
+    }
+
+    state.images = (p.cenas || [])
+      .filter((c) => c.imagem)
+      .map((c) => ({
+        id: crypto.randomUUID(),
+        file: c.imagem,
+        name: c.nome || 'imagem',
+        url: URL.createObjectURL(c.imagem),
+      }));
+    state.scenes = (p.cenas || [])
+      .filter((c) => c.imagem)
+      .map((c) => ({
+        filename: c.nome || 'imagem',
+        texto: c.texto || '',
+        audioUrl: c.audio ? URL.createObjectURL(c.audio) : null,
+        audioB64: null, // volta a ser calculado quando for preciso (ZIP)
+        audioExt: c.audioExt || '',
+        previaUrl: null,
+        previaVoz: c.previaVoz || '',
+      }));
+    // O base64 do áudio é derivado do Blob, para o ZIP continuar a funcionar.
+    for (const s of state.scenes) {
+      if (s.audioUrl) {
+        try {
+          s.audioB64 = await paraBase64(await (await fetch(s.audioUrl)).blob());
+        } catch {
+          s.audioB64 = null;
+        }
+      }
+    }
+
+    // Preferências do projeto.
+    const c = p.config || {};
+    for (const [k, v] of Object.entries(c)) {
+      if (k === 'texto') continue;
+      if (v !== undefined && v !== null) state[k] = v;
+    }
+    if (c.texto) {
+      if (c.texto.tone !== undefined) $('tone').value = c.texto.tone;
+      if (c.texto.extra !== undefined) $('extra').value = c.texto.extra;
+      if (c.texto.minWords) $('minWords').value = c.texto.minWords;
+      if (c.texto.maxWords) $('maxWords').value = c.texto.maxWords;
+    }
+
+    projetos.idAtual = p.id;
+    projetos.criadoEm = p.criadoEm;
+    $('projeto-nome').value = p.nome;
+
+    // Volta a desenhar tudo com o projeto carregado.
+    renderThumbs();
+    renderScenes();
+    updateLayout();
+    atualizarContador();
+    const lt = $('letra-texto');
+    if (lt) lt.value = state.letra || '';
+    atualizarLetra();
+    marcarMotor();
+    marcarTom();
+    resumoVideo();
+
+    await desenharProjetos();
+    estadoProjeto(`Projeto "${p.nome}" aberto · ${state.images.length} imagem(ns)`, 'ok');
+    toast(`Projeto "${p.nome}" aberto.`, 'ok');
+  } catch (e) {
+    toast(`Não consegui abrir esse projeto: ${e.message}`, 'err');
+  }
+}
+
+async function apagarProjeto(id, nome) {
+  if (!window.confirm(`Apagar o projeto "${nome}"? Isto não se pode desfazer.`)) return;
+  try {
+    const mod = await modProjetos();
+    await mod.apagarProjeto(id);
+    if (projetos.idAtual === id) {
+      projetos.idAtual = null;
+      projetos.criadoEm = null;
+    }
+    await desenharProjetos();
+    toast('Projeto apagado.', '');
+  } catch (e) {
+    toast(`Não consegui apagar: ${e.message}`, 'err');
+  }
+}
+
+function iniciarProjetos() {
+  const ver = $('projetos-lista');
+  $('btn-projeto-guardar').onclick = guardarProjetoAgora;
+  $('btn-projeto-atualizar').onclick = guardarProjetoAgora;
+  $('btn-projetos-ver').onclick = async () => {
+    const aberto = ver.hidden;
+    ver.hidden = !aberto;
+    $('btn-projetos-ver').textContent = aberto ? '📂 Fechar os projetos' : '📂 Os meus projetos';
+    if (aberto) await desenharProjetos();
+  };
+  $('btn-projetos-fechar').onclick = () => {
+    ver.hidden = true;
+    $('btn-projetos-ver').textContent = '📂 Os meus projetos';
+  };
+  // O nome escrito à mão fica guardado nas preferências, para não se perder.
+  $('projeto-nome').addEventListener('input', () => guardar());
+  const cfg = lerConfig();
+  if (cfg.projetoNome) $('projeto-nome').value = cfg.projetoNome;
+}
+
+// ---------------------------------------------------------------- utilizador
+// Quem está a usar a app, no canto superior direito.
+//
+// A app NÃO obriga a entrar: tudo o que é essencial (imagens, narração, vídeo e
+// projetos guardados no computador) funciona sem conta. A conta serve para a app
+// saber quem está a trabalhar e para o trabalho poder ficar associado a uma
+// pessoa na Base44. Por isso não há redirecionamento para um ecrã de login
+// obrigatório — isso fecharia a app a quem só a quer experimentar.
+
+let utilizadorAtual = null;
+
+function mostrarEstadoUser(texto, dentro = false) {
+  const el = $('user-estado');
+  if (!el) return;
+  el.textContent = texto;
+  el.classList.toggle('dentro', dentro);
+}
+
+function nomeDoUtilizador(u) {
+  if (!u) return '';
+  const nome = (u.full_name || '').trim();
+  if (nome) return nome;
+  return String(u.email || '').split('@')[0] || u.email || 'utilizador';
+}
+
+async function clienteBase44() {
+  const { base44 } = await import('@/base44Client.js');
+  return base44;
+}
+
+// Vê quem está a usar. Nunca deixa a página em baixo se a Base44 responder mal:
+// sem sessão, a app continua a funcionar sem conta.
+async function verQuemEsta() {
+  const entrar = $('btn-user-entrar');
+  const sair = $('btn-user-sair');
+  mostrarEstadoUser('a ver quem está…');
+  try {
+    const base44 = await clienteBase44();
+    const u = await base44.auth.me();
+    if (u && (u.email || u.full_name)) {
+      utilizadorAtual = u;
+      mostrarEstadoUser(`👤 ${nomeDoUtilizador(u)}`, true);
+      const el = $('user-estado');
+      if (el) el.title = [u.full_name, u.email, u.role ? `perfil: ${u.role}` : ''].filter(Boolean).join(' · ');
+      if (entrar) entrar.hidden = true;
+      if (sair) sair.hidden = false;
+      return u;
+    }
+    throw new Error('sem sessão');
+  } catch {
+    utilizadorAtual = null;
+    mostrarEstadoUser('sem conta');
+    const el = $('user-estado');
+    if (el) el.title = 'a app funciona sem conta; entrar é opcional';
+    if (entrar) entrar.hidden = false;
+    if (sair) sair.hidden = true;
+    return null;
+  }
+}
+
+function erroUser(msg) {
+  const el = $('user-erro');
+  if (!el) return;
+  if (!msg) {
+    el.hidden = true;
+    return;
+  }
+  el.hidden = false;
+  el.textContent = msg;
+}
+
+// Passa o formulário de "Entrar" para "Criar conta" e ao contrário.
+function modoFormUser(modo) {
+  const criar = modo === 'criar';
+  $('user-titulo').textContent = criar ? 'Criar conta' : 'Entrar';
+  $('campo-nome').hidden = !criar;
+  $('campo-senha').hidden = false;
+  $('campo-otp').hidden = true;
+  $('link-user-trocar').textContent = criar ? 'Já tem conta? Entrar' : 'Ainda não tem conta? Criar uma';
+  $('btn-user-confirmar').textContent = criar ? 'Criar conta' : 'Entrar';
+  $('dlg-user').dataset.modo = criar ? 'criar' : 'entrar';
+  erroUser('');
+}
+
+function abrirDlgUser(modo = 'entrar') {
+  modoFormUser(modo);
+  const d = $('dlg-user');
+  if (d && typeof d.showModal === 'function') d.showModal();
+}
+
+async function submeterUser(ev) {
+  if (ev && ev.preventDefault) ev.preventDefault();
+  const modo = $('dlg-user').dataset.modo || 'entrar';
+  const email = $('user-email').value.trim();
+  const senha = $('user-senha').value;
+  const btn = $('btn-user-confirmar');
+
+  if (!email) return erroUser('Escreva o seu email.');
+  if (modo !== 'otp' && senha.length < 6) return erroUser('A palavra-passe precisa de pelo menos 6 caracteres.');
+
+  btn.disabled = true;
+  erroUser('');
+  btn.textContent = modo === 'criar' ? 'a criar…' : modo === 'otp' ? 'a confirmar…' : 'a entrar…';
+  try {
+    const base44 = await clienteBase44();
+
+    if (modo === 'criar') {
+      const params = { email, password: senha };
+      const nome = $('user-nome').value.trim();
+      if (nome) params.full_name = nome;
+      await base44.auth.register(params);
+      // O registo manda um código para o email: é preciso confirmá-lo.
+      $('campo-senha').hidden = true;
+      $('campo-nome').hidden = true;
+      $('campo-otp').hidden = false;
+      $('user-titulo').textContent = 'Confirmar o email';
+      $('dlg-user').dataset.modo = 'otp';
+      erroUser('');
+      toast('Enviámos um código para o seu email. Escreva-o para confirmar a conta.', 'ok');
+      return;
+    }
+
+    if (modo === 'otp') {
+      await base44.auth.verifyOtp({ email, otpCode: $('user-otp').value.trim() });
+      const u = await verQuemEsta();
+      if (u) {
+        if (typeof $('dlg-user').close === 'function') $('dlg-user').close();
+        toast(`Bem-vindo, ${nomeDoUtilizador(u)}!`, 'ok');
+      } else {
+        erroUser('A conta foi confirmada, mas não consegui abrir a sessão. Tente entrar.');
+        modoFormUser('entrar');
+      }
+      return;
+    }
+
+    const r = await base44.auth.loginViaEmailPassword(email, senha);
+    // O token pode vir no corpo ou já ter ficado no cliente; guarda-se se vier.
+    const token = r?.access_token || r?.data?.access_token;
+    if (token) base44.auth.setToken(token);
+    const u = await verQuemEsta();
+    if (u) {
+      if (typeof $('dlg-user').close === 'function') $('dlg-user').close();
+      toast(`Bem-vindo, ${nomeDoUtilizador(u)}!`, 'ok');
+    } else {
+      erroUser('Entrei, mas não consegui confirmar a sessão. Tente outra vez.');
+    }
+  } catch (e) {
+    const corpo = e?.response?.data;
+    const msg = String(corpo?.message || corpo?.error || e?.message || 'não consegui completar o pedido');
+    const estado = e?.response?.status ? ` (HTTP ${e.response.status})` : '';
+    if (/invalid|incorrect|credential|password/i.test(msg)) erroUser('Email ou palavra-passe não conferem.');
+    else if (/not found|404/i.test(msg)) erroUser('A app não está a responder na Base44 (404). Publique a app primeiro — ver o README.');
+    else if (/already|exists/i.test(msg)) erroUser('Já existe uma conta com este email. Use "Já tem conta? Entrar".');
+    else erroUser(`${msg}${estado}`);
+  } finally {
+    btn.disabled = false;
+    const m = $('dlg-user').dataset.modo || 'entrar';
+    btn.textContent = m === 'criar' ? 'Criar conta' : m === 'otp' ? 'Confirmar' : 'Entrar';
+  }
+}
+
+function sairUser() {
+  if (utilizadorAtual && !window.confirm(`Sair da conta de ${nomeDoUtilizador(utilizadorAtual)}?`)) return;
+  clienteBase44()
+    .then((base44) => {
+      try {
+        base44.auth.logout();
+      } catch {
+        /* segue */
+      }
+      utilizadorAtual = null;
+      verQuemEsta();
+      toast('Saiu da conta.', '');
+    })
+    .catch(() => {
+      utilizadorAtual = null;
+      verQuemEsta();
+    });
+}
+
+function iniciarUtilizador() {
+  $('btn-user-entrar').onclick = () => abrirDlgUser('entrar');
+  $('btn-user-sair').onclick = sairUser;
+  $('btn-user-fechar').onclick = () => {
+    if (typeof $('dlg-user').close === 'function') $('dlg-user').close();
+  };
+  $('form-user').addEventListener('submit', submeterUser);
+  $('link-user-trocar').onclick = (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    modoFormUser($('dlg-user').dataset.modo === 'criar' ? 'entrar' : 'criar');
+  };
+  // "sem conta" no arranque; a resposta da Base44 substitui isto.
+  mostrarEstadoUser('sem conta');
+  $('btn-user-entrar').hidden = false;
+  // Pergunta quem está, mas sem segurar o arranque da app.
+  verQuemEsta();
+}
+
 // ---------------------------------------------------------------- trilha sonora
 // A música vem do computador do utilizador (não há faixas dentro da app, para
 // ela continuar leve e sem licenças). Fica só nesta sessão — um ficheiro de
@@ -2265,6 +2769,7 @@ function guardar() {
         modoDuracao: state.modoDuracao,
         codec: state.codec,
         musicaLigada: state.musicaLigada,
+        projetoNome: $('projeto-nome') ? $('projeto-nome').value : '',
       }),
     );
   } catch {
@@ -2338,12 +2843,25 @@ function init() {
   $('btn-generate').onclick = gerar;
   $('btn-clear').onclick = () => {
     stopSpeak();
+    pararPreviaTrilha();
+    pararPreviaLetra();
     state.images.forEach((i) => URL.revokeObjectURL(i.url));
-    state.scenes.forEach((s) => s.audioUrl && URL.revokeObjectURL(s.audioUrl));
+    state.scenes.forEach((s) => {
+      if (s.audioUrl) URL.revokeObjectURL(s.audioUrl);
+      if (s.previaUrl) URL.revokeObjectURL(s.previaUrl);
+    });
     state.images = [];
     state.scenes = [];
+    // Limpar é começar de novo: o próximo "Guardar" cria um projeto novo em vez
+    // de escrever por cima do que estava aberto.
+    projetos.idAtual = null;
+    projetos.criadoEm = null;
+    const btnAtualizar = $('btn-projeto-atualizar');
+    if (btnAtualizar) btnAtualizar.hidden = true;
+    estadoProjeto('Guarde o trabalho para o voltar a abrir noutro dia.');
     renderThumbs();
     renderScenes();
+    updateLayout();
     progress(false);
     toast('Tudo limpo.', '');
   };
@@ -2408,6 +2926,12 @@ function init() {
 
   // separadores
   iniciarAbas();
+
+  // projetos guardados (histórico)
+  iniciarProjetos();
+
+  // utilizador (quem está a usar)
+  iniciarUtilizador();
 
   // arrastar para a página (ficheiros ou pastas)
   const drop = $('drop');

@@ -18,7 +18,7 @@ import { blocoAtivo, legendasDasCenas, legendasParaSrt } from './legendas-core.m
 // Versão do motor. Aparece no resumo da página: serve para saber, sem dúvidas,
 // qual build está a correr no browser (um build antigo em cache foi uma das
 // causas de "não funcionou" que já apanhei).
-export const VERSAO_VIDEO = '3.5.0';
+export const VERSAO_VIDEO = '3.5.1';
 
 export const FORMATOS = [
   { id: '1920x1080', rotulo: 'Horizontal 1920×1080 (YouTube)', w: 1920, h: 1080 },
@@ -361,6 +361,33 @@ export async function gerarVideo({
 
   // 2) preparar o áudio
   const seq = criarSequenciaAudio();
+
+  // O CONTEXTO DE ÁUDIO TEM DE ESTAR A CORRER. Se o browser o deixar SUSPENSO
+  // (bloqueio de reprodução automática, página incorporada sem permissão), o
+  // gravador capta SILÊNCIO: o vídeo sai mudo e ninguém sabe porquê. Por isso
+  // se tenta acordar com um prazo curto (alguns browsers deixam o resume()
+  // pendente para sempre) e, se não correr, falha AGORA com instruções — em
+  // vez de gravar minutos de vídeo mudo.
+  const ctxACorrer = () =>
+    Promise.race([
+      seq.ctx.resume().then(
+        () => !seq.ctx.state || seq.ctx.state === 'running',
+        () => false,
+      ),
+      new Promise((r) => setTimeout(() => r(false), 1200)),
+    ]);
+  if (!(await ctxACorrer())) {
+    try { await seq.ctx.close(); } catch { /* já fechado */ }
+    return {
+      ok: false,
+      erro:
+        'O browser BLOQUEOU o som antes de o vídeo começar — a gravação sairia muda. ' +
+        'Clique em qualquer lugar da página e clique outra vez em "🎬 Gerar o vídeo". ' +
+        'Se estiver a ver o Rebeca Hub dentro de outra página (janela incorporada), ' +
+        'abra-o num separador próprio: ' + (window.location?.origin || ''),
+    };
+  }
+
   const marcaSemFala = cenas.map((c) => Boolean(c.semFala) || !c.audio);
   let clipes;
   try {
@@ -496,7 +523,6 @@ export async function gerarVideo({
   });
   desenhar(0, 0);
 
-  try { await seq.ctx.resume(); } catch { /* já a correr */ }
   gravador.start(250);
 
   // 4) desenhar e tocar, cena a cena, em tempo real

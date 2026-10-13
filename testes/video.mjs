@@ -920,5 +920,25 @@ console.log('\n[23] Codec: VP8 por omissão, porque o Windows recusa o VP9');
   check(mod.CODECS.every((c) => c.ordem[c.ordem.length - 1] === 'video/webm'), 'todos terminam no WebM puro, como último recurso', 'falta o recurso final');
 }
 
+console.log('\n[24] Browser com o som bloqueado: falha cedo, em vez de gravar mudo');
+{
+  instalarAmbiente([2.0, 2.0]);
+  ultimoCtx.state = 'suspended';
+  ultimoCtx.resume = () => new Promise(() => {}); // pendente para sempre
+  ultimoGravador = null;
+  const t0 = Date.now();
+  const r = await correrCom(mod.gerarVideo({ cenas: cenasDe(2), transicao: 'fade', duracaoTransicao: 0.4 }));
+  check(r.ok === false, 'recusa gravar sem motor de áudio', JSON.stringify(r).slice(0, 120));
+  check(/BLOQUEOU o som/i.test(r.erro || ''), `explica o que fazer: "${(r.erro || '').slice(0, 90)}"`, r.erro);
+  check(Date.now() - t0 < 8000, `falhou rápido (${((Date.now() - t0) / 1000).toFixed(1)}s), sem ficar pendente`, String(Date.now() - t0));
+  check(ultimoGravador === null, 'nenhuma gravação começou', 'chegou a gravar');
+
+  // Com o som a correr, grava na mesma.
+  instalarAmbiente([2.0]);
+  ultimoCtx.state = 'running';
+  const r2 = await correrCom(mod.gerarVideo({ cenas: cenasDe(1), transicao: 'fade', duracaoTransicao: 0.4 }));
+  check(r2.ok === true, 'com o som a correr, grava normalmente', JSON.stringify(r2).slice(0, 90));
+}
+
 console.log(falhas.length ? `\n=== ${falhas.length} FALHA(S) ===` : '\n=== GERAÇÃO DE VÍDEO OK ===');
 process.exit(falhas.length ? 1 : 0);

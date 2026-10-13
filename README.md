@@ -136,8 +136,9 @@ npm test
 
 Cobre as transições sem saltos, o tempo de cada cena, a entrada do áudio, o botão
 Parar, a trilha em ciclo a 16 %, o corte da narração em blocos de legenda e o
-ficheiro `.srt`, a repetição das imagens até a música acabar, o painel da página e
-a ligação entre os `id` do HTML e o JavaScript. Detalhes em `testes/LEIAME.md`.
+ficheiro `.srt`, a letra da música distribuída pelo tempo, a repetição das imagens
+até a música acabar, o painel da página e a ligação entre os `id` do HTML e o
+JavaScript. Detalhes em `testes/LEIAME.md`.
 
 ---
 
@@ -218,6 +219,31 @@ Rebeca Hub 2.0:
 
 O resumo por baixo dos controlos diz quantos blocos vão sair e mostra o primeiro,
 para se ver como a fala foi cortada antes de gravar dois minutos de vídeo.
+
+### A letra da música como legenda (aba 🎬 Vídeo)
+
+No painel **Letra da música** cola-se a letra, **uma linha por verso**, e o botão
+**💬 Usar a letra como legenda** passa a letra a ser a legenda do vídeo — em vez
+da narração (as duas juntas enchiam o ecrã).
+
+- O tempo é dividido **igualmente** pelos versos: uma música de 3:00 com 20 versos
+  dá 9 s a cada um. O painel diz o tempo de cada verso, para se ver logo se a
+  divisão faz sentido.
+- **▶️ Ver a letra a passar** toca a música e mostra os versos um a um, para
+  confirmar o sincronismo antes de gravar.
+- A letra sai também no ficheiro **`.srt`**, com os mesmos versos.
+- **A letra não precisa de narração nenhuma.** Se colar a letra e escolher a
+  música, o vídeo é montado como um vídeo de letra: uma imagem de cada vez, ao
+  ritmo escolhido em “Cada imagem”.
+- Para acertar o tempo, o caminho é juntar ou separar linhas da letra (a divisão
+  é igual entre versos).
+
+**Porque não há transcrição automática:** transcrever música cantada com
+instrumentos por cima é notoriamente pouco fiável, e a app não tem nenhuma chave
+que aceite áudio — a da DeepSeek é só de texto e visão. Colar a letra dá um
+resultado certo, custa zero e o utilizador pode corrigir o que quiser. Um dia,
+com uma chave da OpenAI, o Whisper (~0,006 dólares por minuto) pode alimentar
+este mesmo painel: a parte de temporizar e legendar já está feita.
 
 - **Grava em tempo real** — um vídeo de 2 minutos leva 2 minutos.
 - **Sai em WebM** (VP9/VP8 + Opus). Para MP4, use a versão local com ffmpeg.

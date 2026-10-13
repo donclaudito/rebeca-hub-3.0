@@ -208,5 +208,49 @@ console.log('\n[9] Estilo fixo, igual ao Hub 2.0');
   check(/cursive|sans-serif/.test(core.CAPT_FONTE.family), 'tem alternativa local se a fonte não carregar', core.CAPT_FONTE.family);
 }
 
+console.log('\n[10] Letra da música: versos e distribuição do tempo');
+{
+  // Versos saem de copiar e colar: espaços a mais e linhas vazias não contam.
+  const colado = '  Primeira linha  \n\n   Segunda   linha com   espaços \nTerceira\n\n';
+  const versos = core.versosDaLetra(colado);
+  check(versos.length === 3, `3 versos de um texto colado com linhas vazias (${versos.length})`, JSON.stringify(versos));
+  check(versos[1] === 'Segunda linha com espaços', `os espaços a mais são limpos ("${versos[1]}")`, versos[1]);
+  check(core.versosDaLetra('').length === 0 && core.versosDaLetra(null).length === 0, 'letra vazia não dá versos', 'deu versos');
+
+  // 4 versos numa música de 120s: 30s cada, encaixados sem buracos.
+  const cues = core.legendasDaLetra(versos.concat('Quarta'), 120);
+  check(cues.length === 4, `4 versos temporizados (${cues.length})`, String(cues.length));
+  check(perto(cues[0].inicio, 0), 'o primeiro verso entra no segundo 0', String(cues[0].inicio));
+  check(perto(cues[0].fim, 30), `cada verso leva 120/4 = 30s (${cues[0].fim})`, String(cues[0].fim));
+  check(perto(cues[3].fim, 120), `o último verso acaba no fim da música (${cues[3].fim})`, String(cues[3].fim));
+  const encadeados = cues.every((c, i) => i === 0 || perto(c.inicio, cues[i - 1].fim, 0.001));
+  check(encadeados, 'os versos encaixam sem buracos', 'há buracos');
+  // O texto de cada verso é o que foi colado, sem alterações.
+  check(cues[1].texto === 'Segunda linha com espaços', `o texto do verso passa intacto ("${cues[1].texto}")`, cues[1].texto);
+
+  // A letra sai no .srt e o número de legendas bate com o número de versos.
+  const srt = core.legendasParaSrt(cues);
+  const numeros = srt.split('\n\n').map((b) => b.split('\n')[0]).filter((x) => /^\d+$/.test(x));
+  check(numeros.length === 4, `o .srt tem os 4 versos (${numeros.length})`, String(numeros.length));
+  check(srt.includes('Primeira linha'), 'e o texto da letra aparece no .srt', srt.slice(0, 80));
+
+  // Um só verso cobre a música toda.
+  const um = core.legendasDaLetra(['Único verso'], 45);
+  check(um.length === 1 && perto(um[0].fim, 45), `um verso só cobre os 45s (${um[0].fim})`, String(um[0].fim));
+
+  // Versos muito curtos: o piso não deixa a legenda piscar, nem passa do fim.
+  const muitos = core.legendasDaLetra(Array.from({ length: 60 }, (_, i) => `verso ${i}`), 20);
+  check(muitos.length === 60, '60 versos em 20s são aceites', String(muitos.length));
+  check(perto(muitos[muitos.length - 1].fim, 20, 0.01), `o último continua a acabar nos 20s (${muitos[muitos.length - 1].fim})`, String(muitos[muitos.length - 1].fim));
+  const encavalitados = muitos.filter((c, i) => i > 0 && c.inicio < muitos[i - 1].inicio);
+  check(encavalitados.length === 0, 'nunca anda para trás', `${encavalitados.length}`);
+
+  // Casos degenerados.
+  check(core.legendasDaLetra([], 100).length === 0, 'sem versos não há legendas', 'gerou legendas');
+  check(core.legendasDaLetra(['Um'], 0).length === 0, 'sem duração de música não há legendas', 'gerou legendas');
+  check(core.legendasDaLetra(null, 100).length === 0, 'letra nula não rebenta', 'rebentou');
+  check(core.legendasDaLetra(['Um'], 'abc').length === 0, 'duração inválida não rebenta', 'rebentou');
+}
+
 console.log(falhas.length ? `\n=== ${falhas.length} FALHA(S) ===` : '\n=== LEGENDAS OK ===');
 process.exit(falhas.length ? 1 : 0);

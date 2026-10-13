@@ -32,6 +32,9 @@ const state = {
   modoDuracao: 'natural',
   // A duração da música foi lida? Se não, o ciclo não pode ser calculado.
   musicaMedida: false,
+  // Letra da música: o texto colado e se está a ser usada como legenda.
+  letra: '',
+  letraLigada: false,
   pararVideo: false,
   // Trilha sonora: o ficheiro escolhido (fica só nesta sessão) e a duração lida.
   musicaFicheiro: null,
@@ -1236,12 +1239,21 @@ function marcarModoVideo() {
   if (grupo) grupo.hidden = querVoz();
 }
 
+// Nota da letra, para o resumo: diz quantos versos e quanto tempo cada um leva.
+function notaLetra() {
+  if (!state.letraLigada) return '';
+  const cues = cuesDaLetra();
+  if (!cues.length) return ' ⚠️ A letra está ligada, mas falta o texto ou a música — vão sair as legendas da narração.';
+  const cada = (cues[0].fim - cues[0].inicio).toFixed(1).replace('.', ',');
+  return ` 💬 Legenda: a LETRA da música, ${cues.length} verso(s) de ${cada}s cada (substitui a legenda da narração).`;
+}
+
 // O texto que fica por baixo dos controlos: diz exatamente o que vai sair.
 function resumoVideo() {
   const m = modoVideo();
   const n = state.scenes.filter((s) => (s.texto || '').trim()).length || state.images.length;
   const musica = state.musicaFicheiro && querMusica();
-  const nota = legendasNota();
+  const nota = state.letraLigada ? notaLetra() : legendasNota();
 
   if (state.videoModo === 'musica') {
     const seg = n * (Number(state.videoDuracaoCena) || 3.5);
@@ -1257,8 +1269,34 @@ function resumoVideo() {
     );
   }
 
+  // Com a LETRA em uso, a legenda já está resolvida — e a letra não precisa de
+  // narração nenhuma. É este caminho que faz o vídeo de letra funcionar sem
+  // gerar voz, por isso vem antes das exigências da narração.
+  const cuesLetra = state.letraLigada ? cuesDaLetra() : [];
+  if (cuesLetra.length) {
+    if (!state.images.length) return estadoVideo('❌ Importe as imagens primeiro (aba 🖼️ Imagens).', 'err');
+    if (!musica) {
+      return estadoVideo(
+        '❌ A letra precisa da música para saber o tempo de cada verso. Escolha a trilha aqui em cima.',
+        'err',
+      );
+    }
+    return estadoVideo(
+      `Pronto para o vídeo de letra: ${state.images.length} imagem(ns), transição "${transicaoRotulo()}", ` +
+        `trilha "${state.musicaFicheiro.name}".` +
+        `${nota}${notaCiclo()} A gravação demora o tempo do vídeo.`,
+      '',
+    );
+  }
+
   const semAudio = state.scenes.filter((s) => (s.texto || '').trim() && !s.audioUrl && !s.previaUrl).length;
-  if (!n) return estadoVideo('❌ Gere a narração primeiro (aba ⚡ Ações).', 'err');
+  if (!n) {
+    return estadoVideo(
+      '❌ Gere a narração primeiro (aba ⚡ Ações) — ou cole a letra da música aqui em baixo, ' +
+        'que não precisa de voz nenhuma.',
+      'err',
+    );
+  }
   if (semAudio === n) {
     return estadoVideo(
       '❌ Ainda não há áudio. Vá à aba ⚡ Ações e clique em "🎧 Gerar o áudio de todas as cenas". ' +
@@ -1346,6 +1384,144 @@ function duracaoNaturalPrevista() {
   }, 0);
 }
 
+// ---------------------------------------------------------------- letra da música
+// A letra vem colada pelo utilizador (uma linha por verso) e é distribuída pelo
+// tempo da música. NÃO há transcrição automática: a app não tem chave que
+// transcreva áudio, e transcrever música cantada com instrumentos por cima é
+// notoriamente pouco fiável. Colar a letra dá um resultado certo, custa zero e
+// o utilizador pode corrigir o que quiser.
+
+let letraTimer = null; // o relógio da pré-escuta da letra
+
+// A letra já temporizada: cada verso com o seu segundo de entrada e de saída.
+// Precisa da duração da música; sem ela não há como distribuir.
+function cuesDaLetra() {
+  const versos = leg.versosDaLetra ? leg.versosDaLetra(state.letra) : [];
+  const duracao = state.musicaSegundos || 0;
+  if (!versos.length || !duracao) return [];
+  return leg.legendasDaLetra(versos, duracao);
+}
+
+function estadoLetra(msg, tipo = '') {
+  const el = $('letra-estado');
+  if (!el) return;
+  el.className = tipo === 'err' ? 'hint err' : tipo === 'ok' ? 'letra-passo' : 'hint';
+  el.textContent = msg;
+}
+
+function atualizarLetra() {
+  const versos = leg.versosDaLetra ? leg.versosDaLetra(state.letra) : [];
+  const duracao = state.musicaSegundos || 0;
+  const btn = $('btn-letra-usar');
+  const previa = $('btn-letra-previa');
+  const limpar = $('btn-letra-limpar');
+  const tem = versos.length > 0;
+
+  if (limpar) limpar.hidden = !tem && !state.letra;
+  if (previa) previa.hidden = !tem || !state.musicaFicheiro;
+  if (btn) {
+    btn.disabled = !tem || !duracao;
+    btn.textContent = state.letraLigada ? '💬 Letra em uso (clique para tirar)' : '💬 Usar a letra como legenda';
+    btn.title = !duracao
+      ? 'escolha primeiro a música (é preciso saber quanto dura)'
+      : !tem
+        ? 'cole a letra, uma linha por verso'
+        : `legendar ${versos.length} verso(s) da música`;
+  }
+
+  if (!tem) {
+    estadoLetra('Cole a letra (uma linha por verso) para legendar a música.');
+    return;
+  }
+  if (!duracao) {
+    estadoLetra(`${versos.length} verso(s), mas ainda não sei quanto dura a música — escolha a trilha.`, 'err');
+    return;
+  }
+  const cada = duracao / versos.length;
+  const minutos = (s) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`;
+  estadoLetra(
+    `${versos.length} verso(s) · ${minutos(cada)} cada um · a letra cobre ${minutos(duracao)}` +
+      `${state.letraLigada ? ' · ✅ em uso como legenda' : ''}`,
+    'ok',
+  );
+}
+
+// Liga ou desliga a letra como legenda do vídeo.
+function alternarLetra() {
+  if (!state.letraLigada && !cuesDaLetra().length) {
+    return toast('Cole a letra e escolha a música primeiro.', 'err');
+  }
+  state.letraLigada = !state.letraLigada;
+  guardar();
+  atualizarLetra();
+  resumoVideo();
+  if (state.letraLigada) {
+    const cues = cuesDaLetra();
+    toast(`A letra passa a ser a legenda do vídeo (${cues.length} versos).`, 'ok');
+  }
+}
+
+// Pré-escuta: toca a música e mostra, verso a verso, o que vai aparecer no
+// vídeo. É a forma de confirmar o sincronismo antes de gravar dois minutos.
+function pararPreviaLetra() {
+  if (letraTimer) {
+    clearTimeout(letraTimer);
+    letraTimer = null;
+  }
+  const b = $('btn-letra-previa');
+  if (b) b.textContent = '▶️ Ver a letra a passar';
+  document.querySelectorAll?.('.letra-passo.on')?.forEach?.((el) => el.classList.remove('on'));
+}
+
+async function preverLetra() {
+  if (letraTimer) {
+    pararPreviaLetra();
+    return;
+  }
+  const cues = cuesDaLetra();
+  if (!cues.length) return toast('Cole a letra e escolha a música primeiro.', 'err');
+  if (!state.musicaFicheiro) return toast('Escolha a música primeiro.', 'err');
+
+  pararPreviaTrilha();
+  const url = URL.createObjectURL(state.musicaFicheiro);
+  trilhaAudio = new Audio(url);
+  trilhaAudio.volume = 0.5;
+  $('btn-letra-previa').textContent = '⏹ Parar';
+
+  // Em vez de esperar pelo fim, agenda cada verso no seu segundo: se a música
+  // for parada, os relógios são limpos todos de uma vez.
+  const caixa = $('letra-estado');
+  const passo = (i) => {
+    if (i >= cues.length) {
+      pararPreviaLetra();
+      return;
+    }
+    const c = cues[i];
+    caixa.className = 'letra-passo on';
+    caixa.textContent = `${i + 1}/${cues.length} · ${c.texto}`;
+    letraTimer = setTimeout(() => passo(i + 1), Math.max(250, (c.fim - c.inicio) * 1000));
+  };
+  try {
+    await trilhaAudio.play();
+  } catch {
+    pararPreviaLetra();
+    toast('Não consegui tocar essa música neste browser.', 'err');
+    return;
+  }
+  passo(0);
+}
+
+function limparLetra() {
+  pararPreviaLetra();
+  state.letra = '';
+  state.letraLigada = false;
+  const ta = $('letra-texto');
+  if (ta) ta.value = '';
+  guardar();
+  atualizarLetra();
+  resumoVideo();
+}
+
 // ---------------------------------------------------------------- trilha sonora
 // A música vem do computador do utilizador (não há faixas dentro da app, para
 // ela continuar leve e sem licenças). Fica só nesta sessão — um ficheiro de
@@ -1365,8 +1541,10 @@ function pararPreviaTrilha() {
 }
 
 // Sem música escolhida, "até acabar a música" não faz sentido: fica desativado.
+// A letra também depende da duração da música, por isso se atualiza aqui.
 function aoMudarTrilha() {
   marcarModoDuracao();
+  atualizarLetra();
   resumoVideo();
 }
 
@@ -1664,6 +1842,22 @@ async function iniciarVideo() {
   });
   [...cl.children].forEach((x) => x.classList.toggle('on', x.dataset.id === String(Boolean(state.legendas))));
 
+  // Letra da música
+  const ta = $('letra-texto');
+  if (ta) {
+    ta.value = state.letra || '';
+    ta.oninput = () => {
+      state.letra = ta.value;
+      guardar();
+      atualizarLetra();
+      resumoVideo();
+    };
+  }
+  $('btn-letra-usar').onclick = alternarLetra;
+  $('btn-letra-previa').onclick = preverLetra;
+  $('btn-letra-limpar').onclick = limparLetra;
+  atualizarLetra();
+
   // Duração: as cenas, ou imagens em ciclo até a música acabar.
   const cdm = $('vid-duracao-modo');
   cdm.innerHTML = '';
@@ -1708,17 +1902,26 @@ async function gerarVideoFinal() {
   const comTexto = state.scenes.filter((s) => (s.texto || '').trim());
   const semFala = comTexto.filter((s) => !s.audioUrl && !s.previaUrl);
   const musica = state.musicaFicheiro && querMusica() && state.musicaLigada ? state.musicaFicheiro : null;
-  const comVoz = querVoz();
+
+  // A letra, se estiver em uso, é calculada uma vez e reutilizada.
+  const cuesLetra = state.letraLigada ? cuesDaLetra() : [];
+
+  // Com a letra em uso e SEM narração gerada, o vídeo é de letra: vale o mesmo
+  // que o modo "só música" — uma imagem por vez, ao ritmo escolhido.
+  const comVoz = querVoz() && !(cuesLetra.length && semFala.length === comTexto.length);
 
   // --- O que é preciso para cada modo ---
-  // Só música: uma trilha e imagens. Narração nenhuma.
+  // Só música (ou vídeo de letra): uma trilha e imagens. Narração nenhuma.
   if (!comVoz) {
-    if (!musica) {
+    if (!musica && !cuesLetra.length) {
       return estadoVideo(
         '❌ O modo "só música" precisa de uma trilha. Escolha a música aqui em cima, ' +
           'ou mude "O que entra" para 🎙️🎵 Narração + música.',
         'err',
       );
+    }
+    if (cuesLetra.length && !musica) {
+      return estadoVideo('❌ A letra precisa da música para saber o tempo de cada verso.', 'err');
     }
     if (!state.images.length) {
       return estadoVideo('❌ Importe as imagens primeiro (aba 🖼️ Imagens).', 'err');
@@ -1782,6 +1985,9 @@ async function gerarVideoFinal() {
   const preview = $('vid-preview');
   preview.hidden = false;
 
+  // A letra é calculada uma vez: a lista é reutilizada na chamada e no resumo.
+  const comLegendas = Boolean(state.legendas) || cuesLetra.length > 0;
+
   try {
     const r = await mod.gerarVideo({
       cenas,
@@ -1790,7 +1996,9 @@ async function gerarVideoFinal() {
       duracaoTransicao: state.videoDuracao,
       musica,
       duracaoCena: state.videoDuracaoCena,
-      legendas: Boolean(state.legendas),
+      // Com a letra em uso, as legendas ficam ligadas (ela substitui a narração).
+      legendas: comLegendas,
+      legendasExternas: cuesLetra.length ? cuesLetra : null,
       modoDuracao: state.modoDuracao,
       musicaSegundos: state.musicaSegundos,
       // Desenha no canvas visível: vê-se a montagem enquanto grava.
@@ -1861,7 +2069,7 @@ async function gerarVideoFinal() {
           : state.modoDuracao === 'trilha'
             ? `ℹ️ Não repeti as imagens${r.semCiclo ? `: ${r.semCiclo}` : ''}.`
             : ''} ` +
-        `${r.legendas ? `${r.legendas} bloco(s) de legenda. ` : ''}` +
+        `${r.legendas ? `${r.legendas} bloco(s) de legenda${r.legendasDaLetra ? ' (da letra)' : ''}. ` : ''}` +
         `Descarregado como ${nome}${r.srt ? ' e rebeca-video.srt' : ''}.` +
         `${r.musicaAviso ? ` ⚠️ ${r.musicaAviso}` : ''} (motor v${r.versao})`,
       r.musicaAviso ? 'wait' : 'ok',
@@ -1910,6 +2118,8 @@ function guardar() {
         videoModo: state.videoModo,
         videoDuracaoCena: state.videoDuracaoCena,
         legendas: state.legendas,
+        letra: state.letra,
+        letraLigada: state.letraLigada,
         modoDuracao: state.modoDuracao,
         musicaLigada: state.musicaLigada,
       }),
@@ -2133,6 +2343,8 @@ function init() {
   state.videoModo = MODOS_VIDEO.some((m) => m.id === c.videoModo) ? c.videoModo : 'ambos';
   state.videoDuracaoCena = Number(c.videoDuracaoCena) || 3.5;
   state.legendas = c.legendas !== false;
+  state.letra = typeof c.letra === 'string' ? c.letra : '';
+  state.letraLigada = c.letraLigada === true && state.letra.trim().length > 0;
   state.modoDuracao = c.modoDuracao === 'trilha' ? 'trilha' : 'natural';
   state.musicaLigada = c.musicaLigada !== false;
   marcarMotor();

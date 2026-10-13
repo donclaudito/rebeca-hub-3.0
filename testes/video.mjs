@@ -795,5 +795,68 @@ console.log('\n[21] Explica porque não repetiu, em vez de ficar calado');
   check(r4.versao === mod.VERSAO_VIDEO, 'e é a versão exportada pelo módulo', `${r4.versao} ≠ ${mod.VERSAO_VIDEO}`);
 }
 
+console.log('\n[22] Legenda com a LETRA da música em vez da narração');
+{
+  const core = await import(BASE + 'legendas-core.mjs');
+  const musica = { name: 'tema.mp3', arrayBuffer: () => Promise.resolve(new ArrayBuffer(64)) };
+  const letra = ['Primeiro verso da canção', 'Segundo verso da canção', 'Terceiro e último verso'];
+  const cues = core.legendasDaLetra(letra, 12); // 3 versos em 12s → 4s cada
+
+  // (a) as cenas têm narração com texto; a letra tem de ganhar.
+  instalarAmbiente([4.0, 4.0, 4.0], { musicaSegundos: 12 });
+  const r = await correrCom(mod.gerarVideo({
+    cenas: [
+      { imagem: 'c1', audio: blobsDe(1)[0], texto: 'A narração da cena um.' },
+      { imagem: 'c2', audio: blobsDe(1)[0], texto: 'A narração da cena dois.' },
+      { imagem: 'c3', audio: blobsDe(1)[0], texto: 'A narração da cena três.' },
+    ],
+    transicao: 'fade', duracaoTransicao: 0.4, musica,
+    modoDuracao: 'trilha', musicaSegundos: 12,
+    legendas: true, legendasExternas: cues,
+  }));
+
+  check(r.ok === true, 'gera o vídeo com a letra', JSON.stringify(r).slice(0, 140));
+  check(r.legendasDaLetra === true, 'assinala que as legendas são da letra', `legendasDaLetra=${r.legendasDaLetra}`);
+  check(r.legendas === 3, `3 versos legendados (${r.legendas})`, String(r.legendas));
+  const desenhado = legendasDesenhadas.map((l) => l.texto).join(' ');
+  check(/Primeiro verso/.test(desenhado) && /último verso/.test(desenhado), 'os versos da letra são desenhados', desenhado.slice(0, 90));
+  check(!/narração da cena/.test(desenhado), 'a narração NÃO é legendada quando a letra está em uso', 'a narração apareceu');
+  // O desenho mostra LINHAS (o texto é quebrado), por isso conta-se por VERSO:
+  // cada verso da letra tem de estar coberto pelas linhas desenhadas.
+  const desenhoTodo = legendasDesenhadas.map((l) => l.texto).join(' ');
+  const versos = letra.filter((v) => desenhoTodo.includes(v.split(/\s+/)[0]));
+  check(versos.length === 3, `os 3 versos da letra apareceram (${versos.length})`, versos.join(' | '));
+  const todasPalavras = letra.join(' ').split(/\s+/);
+  const faltam = todasPalavras.filter((p) => !desenhoTodo.includes(p));
+  check(faltam.length === 0, 'nenhuma palavra da letra se perdeu', faltam.join(', '));
+  // O .srt e o desenho têm de mostrar os mesmos versos.
+  const blocosSrt = r.srt.split('\n\n').filter(Boolean).map((b) => b.split('\n').slice(2).join(' ').trim());
+  const iguais = blocosSrt.length === letra.length && blocosSrt.every((b, i) => b === letra[i]);
+  check(iguais, `o .srt tem exatamente os ${letra.length} versos pela ordem certa`, `${blocosSrt.length} blocos: ${blocosSrt.join(' | ')}`);
+  check(r.srt.includes('Primeiro verso'), 'a letra sai no .srt', r.srt.slice(0, 60).replace(/\n/g, ' | '));
+
+  // (b) sem a letra, volta a legendar a narração.
+  instalarAmbiente([4.0, 4.0, 4.0], { musicaSegundos: 12 });
+  const r2 = await correrCom(mod.gerarVideo({
+    cenas: [
+      { imagem: 'c1', audio: blobsDe(1)[0], texto: 'A narração da cena um.' },
+      { imagem: 'c2', audio: blobsDe(1)[0], texto: 'A narração da cena dois.' },
+    ],
+    transicao: 'fade', duracaoTransicao: 0.4, musica,
+    modoDuracao: 'trilha', musicaSegundos: 8, legendas: true, legendasExternas: null,
+  }));
+  check(r2.legendasDaLetra === false, 'sem letra, as legendas não são da letra', `legendasDaLetra=${r2.legendasDaLetra}`);
+  const d2 = legendasDesenhadas.map((l) => l.texto).join(' ');
+  check(/narração/.test(d2) && /cena um/.test(d2), 'e a narração volta a ser legendada', d2.slice(0, 80));
+
+  // (c) letra vazia não estraga nada: cai nas legendas da narração.
+  instalarAmbiente([2.0], { musicaSegundos: 4 });
+  const r3 = await correrCom(mod.gerarVideo({
+    cenas: [{ imagem: 'c1', audio: blobsDe(1)[0], texto: 'Uma narração.' }],
+    transicao: 'fade', duracaoTransicao: 0.4, legendas: true, legendasExternas: [],
+  }));
+  check(r3.ok === true && r3.legendasDaLetra === false, 'letra vazia cai nas legendas da narração', JSON.stringify(r3).slice(0, 90));
+}
+
 console.log(falhas.length ? `\n=== ${falhas.length} FALHA(S) ===` : '\n=== GERAÇÃO DE VÍDEO OK ===');
 process.exit(falhas.length ? 1 : 0);

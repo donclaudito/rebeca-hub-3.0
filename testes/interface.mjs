@@ -470,7 +470,82 @@ console.log('\n[13] Música com duração ilegível: avisa em vez de fingir');
   check(!/REPETE/.test(est), 'não promete repetições que não pode calcular', est);
 }
 
-console.log('\n[14] Sem erros de JavaScript');
+console.log('\n[14] Letra da música colada e distribuída pelo tempo');
+{
+  const reg = await arrancar(true);
+  const est = reg.get('letra-estado');
+  const ta = reg.get('letra-texto');
+  const btn = reg.get('btn-letra-usar');
+  check(/Cole a letra/i.test(est.textContent), `começa por pedir a letra: "${est.textContent.slice(0, 50)}…"`, est.textContent);
+  check(btn.disabled === true, 'sem letra nem música, o botão está desativado', 'está ativo');
+  check(reg.get('btn-letra-previa').hidden === true, 'sem letra não há pré-escuta', 'está visível');
+
+  // Cola a letra: o estado passa a contar os versos.
+  ta.value = 'Primeira linha da canção\nSegunda linha da canção\n\nTerceira linha da canção\n';
+  ta.oninput();
+  await new Promise((r) => setTimeout(r, 60));
+  check(/3 verso/i.test(est.textContent), `conta 3 versos (ignora a linha vazia): "${est.textContent}"`, est.textContent);
+  check(/escolha a trilha/i.test(est.textContent), 'e avisa que falta a música para saber o tempo', est.textContent);
+  check(btn.disabled === true, 'e o botão continua desativado sem música', 'ativou sem música');
+
+  // Escolhe a música: agora já sabe distribuir o tempo.
+  reg.get('input-trilha').files = [{ name: 'tema.mp3', size: 2_000_000, type: 'audio/mpeg' }];
+  reg.get('input-trilha').onchange();
+  await new Promise((r) => setTimeout(r, 400));
+  check(btn.disabled === false, 'com música, o botão fica utilizável', 'continuou desativado');
+  check(/0:21 cada um/.test(est.textContent) || /cada um/.test(est.textContent), `diz o tempo de cada verso: "${est.textContent}"`, est.textContent);
+  check(reg.get('btn-letra-previa').hidden === false, 'e a pré-escuta aparece', 'continua escondida');
+
+  // Usar a letra: passa a legenda e o resumo muda. Precisa de imagens, porque um
+  // vídeo precisa de imagens (a letra não substitui as imagens, só a voz).
+  reg.get('input-files').onchange({ target: { files: [{ name: 'a.jpg', type: 'image/jpeg', size: 900 }, { name: 'b.jpg', type: 'image/jpeg', size: 900 }], value: '' } });
+  await new Promise((r) => setTimeout(r, 350));
+  btn.click();
+  await new Promise((r) => setTimeout(r, 60));
+  check(/em uso como legenda/i.test(est.textContent), `fica marcada como em uso: "${est.textContent.slice(0, 70)}…"`, est.textContent);
+  const resumo = reg.get('vid-estado').textContent;
+  check(/LETRA da música/i.test(resumo), `o resumo diz que a legenda é a letra: "${resumo.slice(0, 80)}…"`, resumo);
+  check(/substitui a legenda da narração/i.test(resumo), 'e avisa que substitui a da narração', resumo);
+  check(/vídeo de letra/i.test(resumo), 'e reconhece que é um vídeo de letra (não pede narração)', resumo);
+  const g = JSON.parse(globalThis.localStorage.getItem('rh3nuvem') || '{}');
+  check(g.letraLigada === true && /Primeira linha/.test(g.letra), 'a letra fica guardada', JSON.stringify({ ligada: g.letraLigada, letra: (g.letra || '').slice(0, 20) }));
+
+  // Tirar a letra do uso: volta às legendas da narração.
+  btn.click();
+  await new Promise((r) => setTimeout(r, 60));
+  check(!/em uso como legenda/i.test(est.textContent), 'volta a ficar fora de uso', est.textContent);
+  check(!/LETRA da música/i.test(reg.get('vid-estado').textContent), 'e o resumo deixa de falar da letra', reg.get('vid-estado').textContent);
+
+  // Limpar apaga o texto.
+  reg.get('btn-letra-limpar').click();
+  await new Promise((r) => setTimeout(r, 40));
+  check(/Cole a letra/i.test(est.textContent), 'limpar volta ao início', est.textContent);
+  check(ta.value === '', 'e o campo fica vazio', ta.value);
+}
+
+console.log('\n[15] Pré-escuta da letra: vê os versos a passar');
+{
+  const reg = await arrancar(true);
+  const ta = reg.get('letra-texto');
+  ta.value = 'Verso um\nVerso dois';
+  ta.oninput();
+  reg.get('input-trilha').files = [{ name: 'tema.mp3', size: 1_000_000, type: 'audio/mpeg' }];
+  reg.get('input-trilha').onchange();
+  await new Promise((r) => setTimeout(r, 400));
+
+  reg.get('btn-letra-previa').click();
+  await new Promise((r) => setTimeout(r, 80));
+  const est = reg.get('letra-estado');
+  check(/Parar/.test(reg.get('btn-letra-previa').textContent), `a pré-escuta arranca: botão diz "${reg.get('btn-letra-previa').textContent}"`, reg.get('btn-letra-previa').textContent);
+  check(/1\/2|2\/2/.test(est.textContent), `e mostra o verso a passar: "${est.textContent}"`, est.textContent);
+  check(/Verso um|Verso dois/.test(est.textContent), 'com o texto do verso', est.textContent);
+
+  reg.get('btn-letra-previa').click();
+  await new Promise((r) => setTimeout(r, 40));
+  check(/Ver a letra a passar/.test(reg.get('btn-letra-previa').textContent), 'parar repõe o botão', reg.get('btn-letra-previa').textContent);
+}
+
+console.log('\n[16] Sem erros de JavaScript');
 if (erros.length) erros.slice(0, 5).forEach((e) => fail(e));
 else ok('nenhum erro não tratado');
 

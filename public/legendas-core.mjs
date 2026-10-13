@@ -144,6 +144,41 @@ export function blocoAtivo(legendas, t) {
   return null;
 }
 
+// ---- letra de música ----
+// Uma linha por verso. Linhas vazias são ignoradas (é o que sai de copiar e
+// colar com espaçamento), e espaços a mais são limpos.
+export function versosDaLetra(texto) {
+  return String(texto || '')
+    .split(/\r?\n/)
+    .map((l) => l.replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+}
+
+// Distribui os versos pelo tempo da música.
+//
+// Decisão: divisão IGUAL entre os versos. Não é perfeito — numa música com
+// refrão repetido e versos de durações diferentes, o tempo exato de cada verso
+// só se sabe a ouvir. Mas é previsível, o utilizador vê o tempo de cada verso
+// antes de gravar e pode corrigir a letra (juntar ou separar linhas) para
+// acertar. Prometer precisão que não temos seria pior.
+export function legendasDaLetra(versos, duracaoSegundos, { avanco = 0, piso = CAPT_PISO } = {}) {
+  const lista = Array.isArray(versos) ? versos.filter(Boolean) : versosDaLetra(versos);
+  const total = Math.max(0, Number(duracaoSegundos) || 0);
+  if (!lista.length || !total) return [];
+  const base = Math.max(0, Number(avanco) || 0);
+  const janela = Math.max(0, total - base);
+  if (!janela) return [];
+  const cada = janela / lista.length;
+  const minimo = Math.min(Math.max(0, Number(piso) || 0), cada);
+  return lista.map((texto, i) => ({
+    texto,
+    inicio: base + i * cada,
+    // O piso serve para o `.srt` não mostrar uma legenda a piscar: uma linha
+    // muito curta é esticada até ao mínimo, sem passar do fim do vídeo.
+    fim: Math.min(base + total, base + (i + 1) * cada + (minimo - cada > 0 ? minimo - cada : 0)),
+  }));
+}
+
 // ---- ficheiro .srt ----
 const tempoSrt = (seg) => {
   const ms = Math.max(0, Math.round(seg * 1000));

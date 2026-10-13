@@ -298,6 +298,9 @@ export async function gerarVideo({
   duracaoCena = DURACAO_SEM_VOZ,
   // Legendas incrustadas no vídeo, com o texto de cada cena. Desligado por omissão.
   legendas = false,
+  // Legendas já prontas (a letra da música, distribuída pelo tempo). Quando vêm,
+  // substituem as legendas tiradas da narração: as duas juntas enchiam o ecrã.
+  legendasExternas = null,
   // 'natural' (duração das cenas) ou 'trilha' (repete as cenas até a música acabar).
   modoDuracao = 'natural',
   // Duração da música, para saber quantas passagens dar. Vem da página, que a
@@ -401,24 +404,28 @@ export async function gerarVideo({
   const total = soma;
   const cortado = Boolean(repetido.itens.length) && total > alvoMusica;
 
-  // 2c) legendas: corte da narração em blocos curtos, temporizados dentro da
-  // cena. Sai da MESMA lista que é desenhada, para o vídeo e o .srt dizerem
-  // exatamente o mesmo texto. A fonte é carregada antes de gravar (se a rede
-  // falhar, há alternativas locais e o vídeo segue na mesma).
+  // 2c) legendas: ou a LETRA da música (já temporizada pela página), ou o corte
+  // da narração em blocos curtos, temporizados dentro da cena. O que for
+  // desenhado é o mesmo que sai no .srt.
   let listaCues = [];
   let desenharLegenda = null;
-  if (querLegendas) {
+  const externas = Array.isArray(legendasExternas) ? legendasExternas.filter((c) => c && c.texto) : [];
+  if (querLegendas && externas.length) {
+    // A letra repete com as imagens? Não: a letra acompanha a MÚSICA, que toca
+    // uma vez. Se o vídeo tem passagens, a letra fica só na primeira.
+    listaCues = externas.map((c) => ({ texto: c.texto, inicio: c.inicio, fim: c.fim }));
+  } else if (querLegendas) {
     listaCues = legendasDasCenas(ciclos.map((c) => c._texto || ''), durFinal, inicios);
-    if (listaCues.length) {
-      try {
-        const mod = await import('./legendas.mjs');
-        await mod.carregarFontesLegenda();
-        desenharLegenda = (ctxDestino, texto, largura, altura) =>
-          mod.desenharLegenda(ctxDestino, texto, largura, altura, { cor: mod.CAPT_COR, contorno: mod.CAPT_CONTORNO });
-      } catch (e) {
-        listaCues = [];
-        console.warn('legendas desligadas:', e && e.message);
-      }
+  }
+  if (listaCues.length) {
+    try {
+      const mod = await import('./legendas.mjs');
+      await mod.carregarFontesLegenda();
+      desenharLegenda = (ctxDestino, texto, largura, altura) =>
+        mod.desenharLegenda(ctxDestino, texto, largura, altura, { cor: mod.CAPT_COR, contorno: mod.CAPT_CONTORNO });
+    } catch (e) {
+      listaCues = [];
+      console.warn('legendas desligadas:', e && e.message);
     }
   }
 
@@ -524,6 +531,7 @@ export async function gerarVideo({
     musicaAviso,
     legendas: listaCues.length,
     srt: listaCues.length ? legendasParaSrt(listaCues) : '',
+    legendasDaLetra: Boolean(querLegendas && externas.length),
     passagens,
     cenasPorPassagem: cenas.length,
     repetido: Boolean(repetido.itens.length),

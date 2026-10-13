@@ -204,6 +204,29 @@
               </div>
 
               <div class="vp-group vp-trilha">
+                <span class="vp-label">Letra da música</span>
+                <div class="trilha-caixa">
+                  <div class="trilha-linha">
+                    <span id="letra-estado" class="hint">Cole a letra (uma linha por verso) para legendar a música.</span>
+                  </div>
+                  <textarea id="letra-texto" class="letra-texto" rows="5"
+                    placeholder="Primeira linha da letra&#10;Segunda linha da letra&#10;…"
+                    spellcheck="false"></textarea>
+                  <div class="trilha-linha">
+                    <button id="btn-letra-usar" class="ghost small" type="button">💬 Usar a letra como legenda</button>
+                    <button id="btn-letra-previa" class="ghost small" type="button">▶️ Ver a letra a passar</button>
+                    <button id="btn-letra-limpar" class="ghost small danger" type="button">🗑 Limpar</button>
+                  </div>
+                  <div class="trilha-linha">
+                    <span class="hint">
+                      O tempo é dividido igualmente pelos versos: uma música de 3:00 com 20 versos dá 9s a cada
+                      um. A letra passa a ser a legenda do vídeo e sai também no ficheiro .srt.
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="vp-group vp-trilha">
                 <span class="vp-label">Trilha sonora</span>
                 <div id="trilha-caixa" class="trilha-caixa">
                   <div class="trilha-linha">

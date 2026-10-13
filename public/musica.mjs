@@ -120,7 +120,9 @@ export function tocarTrilha({ ctx, destino, musica }) {
   fonte.connect(ganho);
 
   let comecou = false;
+  let comecouEm = 0;
   try {
+    comecouEm = ctx.currentTime;
     fonte.start();
     comecou = true;
   } catch {
@@ -129,6 +131,9 @@ export function tocarTrilha({ ctx, destino, musica }) {
 
   return {
     comecou,
+    // O instante (no relógio do AudioContext) em que a música começou. É o que
+    // permite ao motor saber o segundo EXATO em que ela vai acabar.
+    comecouEm,
     parar() {
       try {
         if (comecou) fonte.stop();

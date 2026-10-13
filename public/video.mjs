@@ -18,7 +18,7 @@ import { blocoAtivo, legendasDasCenas, legendasParaSrt } from './legendas-core.m
 // Versão do motor. Aparece no resumo da página: serve para saber, sem dúvidas,
 // qual build está a correr no browser (um build antigo em cache foi uma das
 // causas de "não funcionou" que já apanhei).
-export const VERSAO_VIDEO = '3.4.0';
+export const VERSAO_VIDEO = '3.5.0';
 
 export const FORMATOS = [
   { id: '1920x1080', rotulo: 'Horizontal 1920×1080 (YouTube)', w: 1920, h: 1080 },
@@ -92,9 +92,9 @@ function duracoesDasCenas(marcaSemFala, clipes, T, duracaoCena) {
 //
 // Devolve os itens já com `_passagem` e `_texto` (o texto da cena original), que
 // é o que o desenho usa para saber qual passagem está no ecrã. A repetição é
-// INTEIRA: conta-se o número de passagens que cobre a música, por isso o vídeo
-// pode passar um pouco do fim da música — nunca fica cortado a meio de uma
-// imagem, e a última passagem é uma passagem certa.
+// INTEIRA: conta-se o número de passagens que cobre a música. O corte final,
+// porém, é sempre o da MÚSICA: quando ela acaba, a gravação é encerrada naquele
+// instante (ver fimDaMusica em gerarVideo) — o vídeo dura exatamente a trilha.
 function repetirAte(itens, duracoes, alvo, maxPassagens = MAX_PASSAGENS) {
   const natural = duracoes.reduce((a, d) => a + d, 0);
   if (!itens.length || !natural || !(alvo > natural)) return { itens: [], duracoes: [], passagens: 1 };
@@ -462,6 +462,29 @@ export async function gerarVideo({
   gravador.ondataavailable = (e) => { if (e.data && e.data.size) pedacos.push(e.data); };
   const parado = new Promise((r) => { gravador.onstop = r; });
 
+  // O FIM DA MÚSICA MANDA NO FIM DO VÍDEO. A trilha começa com a gravação; o
+  // instante em que ela acaba, convertido para o relógio do vídeo, é o segundo
+  // exato em que a gravação para — a meio de uma cena, se precisar. Sem trilha
+  // (ou sem duração conhecida) não há corte: vale o comportamento de sempre.
+  const ctxNoComeco = seq.ctx.currentTime;
+  const fimDaMusica =
+    trilha && trilha.comecou && duracaoMusica > 0
+      ? trilha.comecouEm + duracaoMusica - ctxNoComeco
+      : 0;
+  const totalEfetivo = fimDaMusica > 0 ? Math.min(total, fimDaMusica) : total;
+
+  // A legenda não passa do fim: o bloco que atravessasse o fim da música é
+  // aparado, e o que começaria depois dele é deitado fora. O .srt sai igual
+  // ao que foi desenhado.
+  if (fimDaMusica > 0 && listaCues.length) {
+    const dentro = [];
+    for (const c of listaCues) {
+      if (c.inicio >= fimDaMusica) break;
+      dentro.push({ ...c, fim: Math.min(c.fim, fimDaMusica) });
+    }
+    listaCues = dentro;
+  }
+
   // Repete as imagens na mesma ordem da primeira passagem (a imagem de cada
   // cena vem do ficheiro original; `ciclos` só diz qual toca em cada momento).
   const imagensFinal = ciclos.map((c, i) => imagens[i % imagens.length]);
@@ -499,13 +522,18 @@ export async function gerarVideo({
       }
 
       let interrompido = false;
+      let acabouMusica = false;
       await new Promise((resolve) => {
         const quadro = () => {
           const agora = relogio();
           // O "Parar" é ouvido a cada fotograma, não só entre cenas.
           const pedido = deveParar();
-          if (agora >= inicios[i] + durFinal[i] || pedido) {
+          // A MÚSICA ACABOU: encerra no mesmo instante, a meio da cena se
+          // precisar. É o vídeo que segue a trilha, e não o contrário.
+          const fimMusicaAgora = fimDaMusica > 0 && agora >= fimDaMusica;
+          if (agora >= inicios[i] + durFinal[i] || pedido || fimMusicaAgora) {
             interrompido = pedido;
+            acabouMusica = fimMusicaAgora;
             resolve();
             return;
           }
@@ -517,7 +545,7 @@ export async function gerarVideo({
             passagem: (ciclos[i]._passagem || 0) + 1,
             passagens,
             segundos: agora,
-            totalSegundos: total,
+            totalSegundos: totalEfetivo,
           });
           requestAnimationFrame(quadro);
         };
@@ -525,13 +553,14 @@ export async function gerarVideo({
       });
 
       // Só conta o tempo que chegou a ser gravado.
-      acumulado = Math.min(total, Math.max(acumulado, relogio()));
-      if (interrompido) break;
+      acumulado = Math.min(totalEfetivo, Math.max(acumulado, relogio()));
+      if (interrompido || acabouMusica) break;
     }
   } finally {
     // Deixa o último fotograma entrar e fecha — mesmo que algo falhe a meio.
-    // Sem voz, este tempo extra é música a tocar por cima do último fotograma.
-    await new Promise((r) => setTimeout(r, 250));
+    // Quando o corte foi da MÚSICA, o fecho é quase imediato: não se grava
+    // música a tocar DEPOIS de ela já ter acabado.
+    await new Promise((r) => setTimeout(r, fimDaMusica > 0 ? 80 : 250));
     if (trilha) trilha.parar();
     if (gravador.state !== 'inactive') gravador.stop();
     await parado;
@@ -564,6 +593,9 @@ export async function gerarVideo({
     cenasPorPassagem: cenas.length,
     repetido: Boolean(repetido.itens.length),
     cortado,
+    // A gravação acabou NO SEGUNDO EM QUE A MÚSICA ACABOU, em vez de seguir
+    // até ao fim de uma imagem ou de um ciclo.
+    terminouComMusica: fimDaMusica > 0 && total > fimDaMusica,
     duracaoNatural: natural,
     versao: VERSAO_VIDEO,
     semCiclo,

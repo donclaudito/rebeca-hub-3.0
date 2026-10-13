@@ -20,7 +20,7 @@ const SERVICOS = {
   groq: { url: 'https://api.groq.com/openai/v1', modelo: 'meta-llama/llama-4-scout-17b-16e-instruct', segredo: 'GROQ_API_KEY' },
   gemini: {
     url: 'https://generativelanguage.googleapis.com/v1beta/openai/',
-    modelo: 'gemini-2.5-flash',
+    modelo: 'gemini-3.8-flash',
     segredo: 'GEMINI_API_KEY',
   },
 };
@@ -66,7 +66,10 @@ function explicarErro(status, detalhe) {
   if (status === 401 || status === 403 || /invalid api key|unauthorized|authentication fails/i.test(d)) {
     return 'A chave da API foi recusada. Confirme o segredo nas Configurações da app (nomes: DEEPSEEK_API_KEY, OPENAI_API_KEY, GROQ_API_KEY, GEMINI_API_KEY).';
   }
-  if (status === 429 || /rate limit/i.test(d)) return 'Demasiados pedidos em pouco tempo. Espere um pouco e tente outra vez.';
+  if (status === 429 || /rate limit|resource.?exhausted/i.test(d)) return 'Demasiados pedidos em pouco tempo. Espere um pouco e tente outra vez.';
+  if (status === 503 || /high demand|unavailable|overloaded/i.test(d)) {
+    return 'O serviço está sobrecarregado agora (demanda alta). Espere um minuto e tente de novo.';
+  }
   if (status === 404 || /model.*(not found|does not exist)|unknown model/i.test(d)) {
     return 'O modelo indicado não existe neste serviço. Confirme o nome do modelo nas Configurações da app.';
   }
@@ -141,7 +144,7 @@ export default async function (req) {
     // ---- escolher o serviço e a chave ----
     const nomeServico = String(campos.servico || 'deepseek').toLowerCase();
     const servico = SERVICOS[nomeServico] || SERVICOS.deepseek;
-    const chave = secrets.get(servico.segredo) || secrets.get('VISION_API_KEY');
+    const chave = secrets.get(servico.segredo);
 
     // ---- escolher o modelo ----
     // DEFESA: o campo "modelo" é escrito pelo utilizador, e uma chave colada ali
@@ -151,12 +154,27 @@ export default async function (req) {
     const modeloPedido = String(campos.modelo || '').trim();
     const modeloPareceChave =
       /^(sk-|sk_|gsk_|AIza|Bearer)/i.test(modeloPedido) || modeloPedido.length > 60;
-    const modelo = modeloPareceChave ? servico.modelo : modeloPedido || servico.modelo;
+    let modelo = modeloPareceChave ? servico.modelo : modeloPedido || servico.modelo;
     if (modeloPareceChave) {
       console.warn(
         `[generateNarration] o campo "modelo" recebeu algo que parece uma chave ` +
           `(${modeloPedido.slice(0, 6)}…, ${modeloPedido.length} caracteres). Usei "${servico.modelo}".`,
       );
+    }
+    // O nome do modelo tem de seguir o formato do serviço. Um valor mal formado
+    // ("gemini 2.5", "models/gemini-2.5-flash", texto solto) faz o Gemini recusar
+    // o pedido INTEIRO com "unexpected model name format". Normaliza o prefixo
+    // "models/" e, se o nome não seguir o formato do serviço, usa o predefinido —
+    // é melhor gerar com o modelo de sempre do que falhar por um nome trocado.
+    if (nomeServico === 'gemini') {
+      modelo = modelo.replace(/^models\//i, '');
+      if (!/^gemini-[a-z0-9._-]+$/i.test(modelo)) {
+        console.warn(`[generateNarration] modelo "${modeloPedido}" não é um nome Gemini válido; usei "${servico.modelo}".`);
+        modelo = servico.modelo;
+      }
+    } else if (nomeServico === 'deepseek' && !/^deepseek-[a-z0-9._-]+$/i.test(modelo)) {
+      console.warn(`[generateNarration] modelo "${modeloPedido}" não é um nome DeepSeek válido; usei "${servico.modelo}".`);
+      modelo = servico.modelo;
     }
     if (!chave) {
       return json(
@@ -207,18 +225,50 @@ export default async function (req) {
     }
 
     const inicio = Date.now();
-    const resposta = await fetch(`${servico.url.replace(/\/+$/, '')}/chat/completions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${chave}` },
-      body: JSON.stringify({
-        model: modelo,
-        messages: [{ role: 'user', content: conteudo }],
-        temperature: 0.8,
-        response_format: { type: 'json_object' },
-      }),
-    });
-
-    const texto = await resposta.text();
+    // Sobrecarga (503) e limite de ritmo (429) costumam passar em segundos:
+    // repete UMA vez antes de desistir, em vez de devolver o erro logo.
+    let resposta = null;
+    let texto = '';
+    for (let tentativa = 1; tentativa <= 2; tentativa++) {
+      try {
+        // Prazo na chamada: um serviço pendurado (sobrecarga) não pode segurar a
+        // função até o tempo dela estourar — falha antes, com mensagem clara.
+        resposta = await fetch(`${servico.url.replace(/\/+$/, '')}/chat/completions`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${chave}` },
+          body: JSON.stringify({
+            model: modelo,
+            messages: [{ role: 'user', content: conteudo }],
+            temperature: 0.8,
+            response_format: { type: 'json_object' },
+          }),
+          signal: AbortSignal.timeout(50_000),
+        });
+      } catch (e) {
+        if (e?.name === 'TimeoutError' || e?.name === 'AbortError') {
+          return json(
+            { ok: false, error: 'O serviço demorou demais a responder (sobrecarregado). Espere um minuto e tente de novo.' },
+            502,
+          );
+        }
+        throw e;
+      }
+      texto = await resposta.text();
+      // O modelo pedido já não existe (foi aposentado)? Cai para o predefinido
+      // do serviço e repete, em vez de devolver o erro logo.
+      if (
+        !resposta.ok &&
+        resposta.status === 404 &&
+        modelo !== servico.modelo &&
+        /no longer available|not found|does not exist|unsupported/i.test(texto)
+      ) {
+        console.warn(`[generateNarration] o modelo "${modelo}" já não está disponível; usei "${servico.modelo}".`);
+        modelo = servico.modelo;
+        continue;
+      }
+      if (resposta.ok || (resposta.status !== 503 && resposta.status !== 429) || tentativa === 2) break;
+      await new Promise((r) => setTimeout(r, 1500));
+    }
     if (!resposta.ok) {
       let detalhe = texto.slice(0, 400);
       try {

@@ -242,10 +242,11 @@ modo para fazer um vídeo de ambiente, uma capa animada ou uma montagem de fotos
 
 A segunda resolve o caso de um vídeo curto (poucas imagens) com uma música longa:
 em vez de a música ser cortada a meio, as imagens voltam a passar — pela mesma
-ordem, com a narração e as legendas a acompanhar cada passagem. A contagem é por
-passagens inteiras, por isso o vídeo pode passar um pouco do fim da música (nunca
-fica cortado a meio de uma imagem). Uma música enorme (5 horas) fica limitada a
-100 passagens, para não gerar milhares de cenas.
+ordem, com a narração e as legendas a acompanhar cada passagem.
+**Quando a música chega ao fim, a gravação é encerrada NAQUELE INSTANTE** — o
+vídeo dura exatamente a trilha, mesmo que isso corte a última imagem a meio.
+Uma música enorme (5 horas) fica limitada a 100 passagens, para não gerar
+milhares de cenas.
 
 **Legendas** (💬, ligadas por omissão) — a narração é cortada em blocos curtos e
 desenhada no fundo do vídeo, e sai também um ficheiro **`.srt`** com os mesmos

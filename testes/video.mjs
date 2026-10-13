@@ -1,6 +1,8 @@
 // Testa a geração do vídeo com um browser falso e um relógio controlado.
 // Verifica o que se desenha, o que se toca e se as passagens são contínuas.
-const BASE = 'file:///E:/youtube%20rebeca2/rebeca-hub-3.0-base44/public/';
+// Caminho dos módulos do site, relativo a ESTE ficheiro: funciona em qualquer
+// máquina. O caminho antigo apontava para E:\ e só corria no disco de origem.
+const BASE = new URL('../public/', import.meta.url).href;
 const mod = await import(BASE + 'video.mjs');
 
 const falhas = [];
@@ -684,12 +686,11 @@ console.log('\n[18] Vídeo curto com música longa: as imagens repetem em ciclo'
   check(perto(r.musicaSegundos, 20, 0.05), `o motor usou a duração do áudio descodificado (${r.musicaSegundos}s)`, String(r.musicaSegundos));
   check(r.passagens >= 3, `deu ${r.passagens} passagens às imagens`, String(r.passagens));
   check(r.duracao >= 20, `o vídeo chegou aos 20s da música (${r.duracao.toFixed(2)}s)`, `${r.duracao}`);
-  // Passagens INTEIRAS: o vídeo pode passar um pouco do fim da música (nunca
-  // fica cortado a meio de uma imagem), mas no máximo uma passagem a mais.
-  check(r.duracao < 20 + 7, `o excesso é menos de uma passagem (${r.duracao.toFixed(2)}s < 27s)`, `${r.duracao}`);
-  // O total é o número de passagens MAIS o resto do último fotograma (250 ms que
-  // o gravador deixa entrar antes de fechar) — daí a folga.
-  check(perto(r.duracao, r.passagens * r.duracaoNatural, 0.45), `são as ${r.passagens} passagens de ${r.duracaoNatural.toFixed(1)}s (${r.duracao.toFixed(2)}s)`, `${r.duracao} ≠ ${r.passagens}×${r.duracaoNatural}`);
+  check(r.duracao < 21, `não passa do fim da música: ${r.duracao.toFixed(2)}s < 21s`, `${r.duracao}`);
+  // Quando a música acaba, a gravação é encerrada NAQUELE INSTANTE: o vídeo
+  // dura exatamente a música, e não uma passagem inteira a mais.
+  check(perto(r.duracao, 20, 0.4), `acaba exatamente no fim da música (${r.duracao.toFixed(2)}s)`, `${r.duracao}`);
+  check(r.terminouComMusica === true, 'assinala que acabou com a música', `terminouComMusica=${r.terminouComMusica}`);
   check(r.cortado === true, 'avisa que a última passagem é cortada a meio', `cortado=${r.cortado}`);
 
   // As imagens têm de voltar pela mesma ordem, e a música continuar em ciclo.
@@ -719,15 +720,28 @@ console.log('\n[19] Sem modo de ciclo, a duração continua a ser a natural');
   check(perto(r.duracao, 7, 0.1), `ficou nos 7s das imagens (${r.duracao.toFixed(2)}s)`, `${r.duracao}`);
   check(r.cortado === false, 'não assinala corte', `cortado=${r.cortado}`);
 
-  // Música mais CURTA do que o vídeo: não há nada a repetir (a duração do
-  // áudio descodificado é a que manda, por isso é ela que se põe a 3s).
+  // Música mais CURTA do que o vídeo: não há nada a repetir, mas O VÍDEO
+  // ACABA QUANDO A MÚSICA ACABA — a trilha manda no fim da gravação.
   instalarAmbiente([], { musicaSegundos: 3 });
   const r2 = await correrCom(mod.gerarVideo({
     cenas: duasCenas, transicao: 'fade', duracaoTransicao: 0.6, duracaoCena: 3.5,
     musica, modoDuracao: 'trilha', musicaSegundos: 3,
   }));
-  check(r2.repetido === false && perto(r2.duracao, 7, 0.1), `música de 3s: fica nos 7s das imagens (${r2.duracao.toFixed(2)}s)`, `${r2.duracao}`);
-  check(r2.cortado === false, 'e não diz que cortou', `cortado=${r2.cortado}`);
+  check(r2.repetido === false && perto(r2.duracao, 3, 0.2), `música de 3s: o vídeo acaba nos 3s dela (${r2.duracao.toFixed(2)}s)`, `${r2.duracao}`);
+  check(r2.cortado === false, 'não é um corte de ciclo', `cortado=${r2.cortado}`);
+  check(r2.terminouComMusica === true, 'assinala que acabou com a música', `terminouComMusica=${r2.terminouComMusica}`);
+  const ultimoDesenho = desenhos.at(-1)?.t ?? 0;
+  check(ultimoDesenho <= 3.25, `deixou de desenhar no fim da música (último fotograma ${ultimoDesenho.toFixed(2)}s)`, `continuou até ${ultimoDesenho.toFixed(2)}s`);
+
+  // O mesmo vale no modo NATURAL: com trilha ativa e duração conhecida, o fim
+  // da gravação é o da música — em qualquer modo.
+  instalarAmbiente([], { musicaSegundos: 3 });
+  const r2b = await correrCom(mod.gerarVideo({
+    cenas: duasCenas, transicao: 'fade', duracaoTransicao: 0.6, duracaoCena: 3.5,
+    musica, modoDuracao: 'natural', musicaSegundos: 3,
+  }));
+  check(perto(r2b.duracao, 3, 0.2), `modo natural: música de 3s acaba o vídeo (${r2b.duracao.toFixed(2)}s)`, `${r2b.duracao}`);
+  check(r2b.terminouComMusica === true, 'e assinala o corte pela música', `terminouComMusica=${r2b.terminouComMusica}`);
 
   // Sem música escolhida, o modo de ciclo não faz nada de estranho.
   instalarAmbiente([]);
@@ -904,6 +918,26 @@ console.log('\n[23] Codec: VP8 por omissão, porque o Windows recusa o VP9');
   check(mod.CODECS[0].id === 'vp8' && mod.CODECS[1].id === 'vp9', 'VP8 primeiro, VP9 depois', mod.CODECS.map((c) => c.id).join(', '));
   check(mod.CODECS[0].ordem[0] === 'video/webm;codecs=vp8,opus', `o 1.º candidato do VP8 é o mais compatível (${mod.CODECS[0].ordem[0]})`, mod.CODECS[0].ordem[0]);
   check(mod.CODECS.every((c) => c.ordem[c.ordem.length - 1] === 'video/webm'), 'todos terminam no WebM puro, como último recurso', 'falta o recurso final');
+}
+
+console.log('\n[24] Browser com o som bloqueado: falha cedo, em vez de gravar mudo');
+{
+  instalarAmbiente([2.0, 2.0]);
+  ultimoCtx.state = 'suspended';
+  ultimoCtx.resume = () => new Promise(() => {}); // pendente para sempre
+  ultimoGravador = null;
+  const t0 = Date.now();
+  const r = await correrCom(mod.gerarVideo({ cenas: cenasDe(2), transicao: 'fade', duracaoTransicao: 0.4 }));
+  check(r.ok === false, 'recusa gravar sem motor de áudio', JSON.stringify(r).slice(0, 120));
+  check(/BLOQUEOU o som/i.test(r.erro || ''), `explica o que fazer: "${(r.erro || '').slice(0, 90)}"`, r.erro);
+  check(Date.now() - t0 < 8000, `falhou rápido (${((Date.now() - t0) / 1000).toFixed(1)}s), sem ficar pendente`, String(Date.now() - t0));
+  check(ultimoGravador === null, 'nenhuma gravação começou', 'chegou a gravar');
+
+  // Com o som a correr, grava na mesma.
+  instalarAmbiente([2.0]);
+  ultimoCtx.state = 'running';
+  const r2 = await correrCom(mod.gerarVideo({ cenas: cenasDe(1), transicao: 'fade', duracaoTransicao: 0.4 }));
+  check(r2.ok === true, 'com o som a correr, grava normalmente', JSON.stringify(r2).slice(0, 90));
 }
 
 console.log(falhas.length ? `\n=== ${falhas.length} FALHA(S) ===` : '\n=== GERAÇÃO DE VÍDEO OK ===');

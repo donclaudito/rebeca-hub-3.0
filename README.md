@@ -246,7 +246,17 @@ com uma chave da OpenAI, o Whisper (~0,006 dólares por minuto) pode alimentar
 este mesmo painel: a parte de temporizar e legendar já está feita.
 
 - **Grava em tempo real** — um vídeo de 2 minutos leva 2 minutos.
-- **Sai em WebM** (VP9/VP8 + Opus). Para MP4, use a versão local com ffmpeg.
+- **Sai em WebM, em VP8 por omissão.** O controlo **Ficheiro** tem duas opções:
+  **⬛ Compatível (VP8)**, que abre no Windows, no VLC, no YouTube e nos browsers, e
+  **🟪 Mais pequeno (VP9)**, que dá ficheiros menores mas **o Windows recusa abrir**
+  (erro `0xC00D36C4`). O VP8 vem primeiro porque foi ele que se provou legível em
+  todo o lado — o Rebeca Hub 2.0 também punha o VP8 primeiro. Se o browser não
+  souber o codec escolhido, cai no outro em vez de falhar.
+- Ao acabar, aparece uma caixa com o resultado e o botão **▶️ Ver o vídeo aqui**, que
+  o toca dentro da página: é o que distingue «o ficheiro está mau» de «o leitor do
+  Windows não o abre». Há também **⬇️ Descarregar outra vez** e **⬇️ Guardar o .srt**.
+- **Para abrir o ficheiro no Windows, use o VLC** — lê WebM sem instalar nada. O
+  leitor da Microsoft recusa WebM mesmo quando o ficheiro está bom.
 - Não mude de janela enquanto grava; o botão **⏹ Parar** responde logo.
 
 A **trilha sonora** vem de um ficheiro do seu computador (MP3, WAV, M4A, OGG…),
@@ -264,7 +274,7 @@ a página diz porquê.
 - **Sem MP3.** O áudio sai em **WebM/Opus**, porque converter para MP3 exige ffmpeg.
   O Chrome, o Edge, o Firefox, o VLC e o DaVinci leem WebM sem problema.
 - **Sem MP4.** O vídeo é gravado no browser, e o browser só grava WebM. Para MP4,
-  use a versão local (que tem ffmpeg).
+  use a versão local (que tem ffmpeg). Para ver o WebM no Windows, use o **VLC**.
 - **A gravação demora o tempo do vídeo**, porque é feita em tempo real.
 - **Precisa de internet** para gerar a narração (o áudio e o vídeo funcionam
   offline, porque é o browser que os faz).

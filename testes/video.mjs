@@ -14,6 +14,8 @@ let relogioMs = 0;               // milissegundos
 let fila = [];                   // requestAnimationFrame pendentes
 let desenhos = [];               // {t, img, escala, alpha, filtro}
 let legendasDesenhadas = [];     // {t, texto, tipo}
+let mimesUsados = [];            // mimeType pedido ao MediaRecorder em cada gravação
+let suportaCodecs = true;        // o browser falso sabe gravar WebM?
 let agendamentos = [];           // {clipe, quando}
 let fontesEmCiclo = [];          // fontes com loop (a trilha)
 let ganhosCriados = [];          // valores de ganho pedidos (narração=1, trilha=0.16)
@@ -110,10 +112,15 @@ class AudioCtxFalso {
 }
 
 class GravadorFalso {
-  static isTypeSupported(t) { return /vp9,opus/.test(t); }
+  static isTypeSupported(t) {
+    // O browser falso aceita VP8, VP9 e WebM puro — para se poder testar a
+    // escolha de codec.
+    return suportaCodecs && /webm/.test(t);
+  }
   constructor(fluxo, opcoes) {
     this.fluxo = fluxo; this.opcoes = opcoes; this.state = 'inactive';
     this.ondataavailable = null; this.onstop = null;
+    mimesUsados.push(opcoes && opcoes.mimeType);
     ultimoGravador = this;
   }
   start(ms) { this.state = 'recording'; this.intervalo = ms; }
@@ -129,6 +136,7 @@ class GravadorFalso {
 // nunca se misturam (misturá-los foi um erro meu que fez o ciclo parecer avariado).
 function instalarAmbiente(duracoes, { musicaSegundos = 65 } = {}) {
   desenhos = []; agendamentos = []; fontesEmCiclo = []; ganhosCriados = []; legendasDesenhadas = []; fila = []; relogioMs = 0;
+  mimesUsados = []; suportaCodecs = true;
   musicaDuracao = musicaSegundos;
   const ctx = new AudioCtxFalso(duracoes);
   ultimoCtx = ctx;
@@ -182,10 +190,14 @@ console.log('\n[1] Rejeita o que não pode fazer');
   check(semSuporte.ok === false && /não consegue gravar/i.test(semSuporte.erro), `sem MediaRecorder: "${semSuporte.erro}"`, JSON.stringify(semSuporte));
 
   instalarAmbiente([2]);
+  const isTypeOriginal = globalThis.MediaRecorder.isTypeSupported;
   globalThis.MediaRecorder.isTypeSupported = () => false;
   const semMime = await mod.gerarVideo({ cenas: cenasDe(1) });
   check(semMime.ok === false && /formato de vídeo/i.test(semMime.erro), `sem formato aceite: "${semMime.erro}"`, JSON.stringify(semMime));
-  globalThis.MediaRecorder.isTypeSupported = (t) => /vp9,opus/.test(t);
+  // REPOR o método original: antes esta linha ficava substituída para todo o
+  // ficheiro e os grupos seguintes escolhiam sempre VP9 — parecia um defeito do
+  // motor e era do teste.
+  globalThis.MediaRecorder.isTypeSupported = isTypeOriginal;
 }
 
 console.log('\n[2] 3 cenas: gravação, tempos e ficheiro final');
@@ -204,7 +216,7 @@ console.log('\n[2] 3 cenas: gravação, tempos e ficheiro final');
   }));
 
   check(r.ok === true, 'devolveu ok', JSON.stringify(r).slice(0, 200));
-  check(r.extensao === 'webm' && r.mime === 'video/webm;codecs=vp9,opus', `formato: ${r.mime}`, r.mime);
+  check(r.extensao === 'webm' && /vp8,opus/.test(r.mime), `formato: ${r.mime} (VP8, por compatibilidade)`, r.mime);
   check(canvas.width === 1280 && canvas.height === 720, `canvas no tamanho certo: ${canvas.width}×${canvas.height}`, `${canvas.width}×${canvas.height}`);
   check(canvas.fps === 30, 'captura a 30 fps', String(canvas.fps));
   check(perto(r.duracao, 6.0, 0.05), `duração total ≈ 6,0s (soma das cenas): ${r.duracao.toFixed(2)}s`, `${r.duracao}`);
@@ -856,6 +868,42 @@ console.log('\n[22] Legenda com a LETRA da música em vez da narração');
     transicao: 'fade', duracaoTransicao: 0.4, legendas: true, legendasExternas: [],
   }));
   check(r3.ok === true && r3.legendasDaLetra === false, 'letra vazia cai nas legendas da narração', JSON.stringify(r3).slice(0, 90));
+}
+
+console.log('\n[23] Codec: VP8 por omissão, porque o Windows recusa o VP9');
+{
+  const uma = [{ imagem: 'c1', audio: null, semFala: true, texto: 'Uma.' }];
+
+  // Por omissão tem de sair VP8 — foi o VP9 que o Windows recusou abrir.
+  instalarAmbiente([], { musicaSegundos: 4 });
+  const r = await correrCom(mod.gerarVideo({ cenas: uma, duracaoCena: 2 }));
+  check(r.codec === 'vp8', `por omissão grava em VP8 (${r.codec})`, `codec=${r.codec} mime=${r.mime}`);
+  check(/vp8/.test(r.mime), `e o mime é de VP8 (${r.mime})`, r.mime);
+  check(/vp8/.test(mimesUsados[0]), `foi mesmo isso que se pediu ao gravador (${mimesUsados[0]})`, String(mimesUsados[0]));
+
+  // Pedido explícito de VP9: respeitado, e assinalado no resultado.
+  instalarAmbiente([], { musicaSegundos: 4 });
+  const r9 = await correrCom(mod.gerarVideo({ cenas: uma, duracaoCena: 2, codec: 'vp9' }));
+  check(r9.codec === 'vp9', `com o codec escolhido, grava em VP9 (${r9.codec})`, `codec=${r9.codec}`);
+  check(/vp9/.test(mimesUsados[0]), `e pediu VP9 ao gravador (${mimesUsados[0]})`, String(mimesUsados[0]));
+
+  // Browser que só sabe VP8: mesmo pedindo VP9, cai no VP8 em vez de falhar.
+  instalarAmbiente([], { musicaSegundos: 4 });
+  const GravadorReal = globalThis.MediaRecorder;
+  globalThis.MediaRecorder = class extends GravadorReal {
+    static isTypeSupported(t) { return /vp8/.test(t) || t === 'video/webm'; }
+  };
+  globalThis.window.MediaRecorder = globalThis.MediaRecorder;
+  const rFallback = await correrCom(mod.gerarVideo({ cenas: uma, duracaoCena: 2, codec: 'vp9' }));
+  check(rFallback.ok === true && rFallback.codec === 'vp8', 'sem VP9 no browser, cai no VP8 sem falhar', `codec=${rFallback.codec}`);
+  globalThis.MediaRecorder = GravadorReal;
+  globalThis.window.MediaRecorder = GravadorReal;
+
+  // A lista de codecs tem os dois, e o VP8 vem primeiro (compatibilidade).
+  check(mod.CODECS.length === 2, `2 codecs oferecidos (${mod.CODECS.length})`, String(mod.CODECS.length));
+  check(mod.CODECS[0].id === 'vp8' && mod.CODECS[1].id === 'vp9', 'VP8 primeiro, VP9 depois', mod.CODECS.map((c) => c.id).join(', '));
+  check(mod.CODECS[0].ordem[0] === 'video/webm;codecs=vp8,opus', `o 1.º candidato do VP8 é o mais compatível (${mod.CODECS[0].ordem[0]})`, mod.CODECS[0].ordem[0]);
+  check(mod.CODECS.every((c) => c.ordem[c.ordem.length - 1] === 'video/webm'), 'todos terminam no WebM puro, como último recurso', 'falta o recurso final');
 }
 
 console.log(falhas.length ? `\n=== ${falhas.length} FALHA(S) ===` : '\n=== GERAÇÃO DE VÍDEO OK ===');

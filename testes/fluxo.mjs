@@ -23,7 +23,8 @@ class El {
   get className() { return this._classe || ''; }
   append(...n) { n.forEach((x) => this.children.push(x)); }
   appendChild(n) { this.children.push(n); return n; }
-  remove() {} setAttribute() {} addEventListener(t, fn) { (this.listeners[t] = this.listeners[t] || []).push(fn); }
+  remove() {} setAttribute() {} removeAttribute() { this.src = ''; }
+  pause() {} play() { return Promise.resolve(); } addEventListener(t, fn) { (this.listeners[t] = this.listeners[t] || []).push(fn); }
   removeEventListener() {} dispatchEvent(ev) { (this.listeners[ev.type] || []).forEach((f) => f(ev)); }
   click() { if (typeof this.onclick === 'function') this.onclick({ preventDefault() {} }); this.dispatchEvent({ type: 'click' }); }
   querySelector() { return null; } querySelectorAll() { return []; }
@@ -50,6 +51,10 @@ globalThis.__video = {
   DURACOES: [{ id: 0.6, rotulo: 'Normal' }],
   DURACOES_CENA: [{ id: 2, rotulo: 'Rápido' }, { id: 3.5, rotulo: 'Normal' }],
   MODOS_DURACAO: [{ id: 'natural', rotulo: 'As imagens' }, { id: 'trilha', rotulo: 'Até acabar a música' }],
+  CODECS: [
+    { id: 'vp8', rotulo: 'Compatível (VP8)', nota: '', ordem: ['video/webm;codecs=vp8,opus'] },
+    { id: 'vp9', rotulo: 'Mais pequeno (VP9)', nota: '', ordem: ['video/webm;codecs=vp9,opus'] },
+  ],
   suporta: () => true,
   gerarVideo: async (op) => { recebido = op; return { ok: true, blob: { size: 5_000_000 }, extensao: 'webm', duracao: 182, formato: '1280x720', transicao: 'fade', comVoz: false, comMusica: true, legendas: 0, srt: '', repetido: true, passagens: 26, cortado: true, duracaoNatural: 7, versao: '9.9.9', semCiclo: '' }; },
 };

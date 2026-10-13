@@ -202,6 +202,10 @@
                 <span class="vp-label">Duração</span>
                 <div id="vid-duracao-modo" class="chips"></div>
               </div>
+              <div class="vp-group">
+                <span class="vp-label">Ficheiro</span>
+                <div id="vid-codec" class="chips"></div>
+              </div>
 
               <div class="vp-group vp-trilha">
                 <span class="vp-label">Letra da música</span>
@@ -255,6 +259,24 @@
               <div id="vid-estado" class="cfg-result" hidden></div>
 
               <canvas id="vid-preview" class="vid-preview" hidden></canvas>
+
+              <div id="vid-resultado" class="trilha-caixa" hidden>
+                <div class="trilha-linha">
+                  <span id="vid-resultado-nome" class="trilha-estado-nome">—</span>
+                </div>
+                <div class="trilha-linha">
+                  <button id="btn-video-ver" class="ghost small" type="button">▶️ Ver o vídeo aqui</button>
+                  <button id="btn-video-guardar" class="ghost small" type="button">⬇️ Descarregar outra vez</button>
+                  <button id="btn-video-guardar-srt" class="ghost small" type="button">⬇️ Guardar o .srt</button>
+                </div>
+                <video id="vid-teste" class="vid-preview" controls playsinline hidden></video>
+                <div class="trilha-linha">
+                  <span class="hint">
+                    Se o vídeo aparecer aqui mas o Windows não o abrir, o problema é do leitor — use o
+                    <b>VLC</b>, que lê WebM sem instalar nada. Aqui dentro confirma se o ficheiro está bom.
+                  </span>
+                </div>
+              </div>
 
               <p class="hint" style="margin:0">
                 O vídeo é montado <b>no seu browser</b>: as imagens são desenhadas com as transições

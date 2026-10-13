@@ -110,16 +110,39 @@ function repetirAte(itens, duracoes, alvo, maxPassagens = MAX_PASSAGENS) {
   return { itens: todos, duracoes: todasDur, passagens: n };
 }
 
-// Escolhe o melhor formato de gravação que o browser aceita.
-export function escolherMime() {
-  const candidatos = [
-    'video/webm;codecs=vp9,opus',
-    'video/webm;codecs=vp8,opus',
-    'video/webm;codecs=vp9',
-    'video/webm;codecs=vp8',
-    'video/webm',
-  ];
-  for (const c of candidatos) {
+// Formatos de gravação, por ordem de COMPATIBILIDADE (não por qualidade).
+//
+// PORQUE O VP8 VEM PRIMEIRO: o VP9 no WebM é mal suportado fora dos browsers.
+// O Windows recusa esses ficheiros com o erro 0xC00D36C4 ("não é possível abrir
+// ... suporte ao tipo de arquivo"), que foi exatamente o que aconteceu. O VP8 é
+// lido pelo Windows, pelos browsers, pelo VLC, pelo DaVinci e pelo YouTube — e
+// o Rebeca Hub 2.0 também punha o VP8 primeiro por este motivo.
+//
+// O VP9 fica disponível como escolha, para quem precisar de ficheiros mais
+// pequenos e só for usar o vídeo em browsers ou no YouTube.
+export const CODECS = [
+  {
+    id: 'vp8',
+    rotulo: '⬛ Compatível (VP8)',
+    nota: 'abre no Windows, VLC, YouTube e browsers — é o mais seguro',
+    ordem: ['video/webm;codecs=vp8,opus', 'video/webm;codecs=vp8', 'video/webm;codecs=vp9,opus', 'video/webm;codecs=vp9', 'video/webm'],
+  },
+  {
+    id: 'vp9',
+    rotulo: '🟪 Mais pequeno (VP9)',
+    nota: 'ficheiro menor, mas o Windows pode recusar abri-lo; use em browsers ou no YouTube',
+    ordem: ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp9', 'video/webm;codecs=vp8,opus', 'video/webm;codecs=vp8', 'video/webm'],
+  },
+];
+
+export const CODEC_PREDEFINIDO = 'vp8';
+
+// Escolhe o melhor formato de gravação que o browser aceita, começando pela
+// ordem de compatibilidade. Sempre pelo MENOS um caminho: o `video/webm` puro
+// fica no fim de todas as listas.
+export function escolherMime(preferencia = CODEC_PREDEFINIDO) {
+  const escolhido = CODECS.find((c) => c.id === preferencia) || CODECS[0];
+  for (const c of escolhido.ordem) {
     try {
       if (window.MediaRecorder && MediaRecorder.isTypeSupported(c)) return c;
     } catch {
@@ -303,6 +326,8 @@ export async function gerarVideo({
   legendasExternas = null,
   // 'natural' (duração das cenas) ou 'trilha' (repete as cenas até a música acabar).
   modoDuracao = 'natural',
+  // Codec de gravação: 'vp8' (compatível, por omissão) ou 'vp9' (mais pequeno).
+  codec = CODEC_PREDEFINIDO,
   // Duração da música, para saber quantas passagens dar. Vem da página, que a
   // mede ao escolher o ficheiro (medir aqui obrigava a descodificar antes).
   musicaSegundos = 0,
@@ -314,7 +339,7 @@ export async function gerarVideo({
   if (!suporta()) {
     return { ok: false, erro: 'Este browser não consegue gravar vídeo. Use o Chrome ou o Edge.' };
   }
-  const mime = escolherMime();
+  const mime = escolherMime(codec);
   if (!mime) return { ok: false, erro: 'Este browser não grava no formato de vídeo necessário.' };
   if (!cenas || !cenas.length) return { ok: false, erro: 'Não há cenas com narração para montar.' };
 
@@ -522,6 +547,9 @@ export async function gerarVideo({
     ok: true,
     blob,
     mime,
+    // O que ficou REALMENTE gravado (pode não ser o que se pediu, se o browser
+    // não souber fazer aquele codec).
+    codec: /vp9/.test(mime) ? 'vp9' : /vp8/.test(mime) ? 'vp8' : 'desconhecido',
     extensao: 'webm',
     duracao: acumulado,
     formato: alvo.id,

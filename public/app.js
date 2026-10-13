@@ -30,6 +30,8 @@ const state = {
   legendas: true,
   // 'natural' (duração das cenas) ou 'trilha' (repete as imagens até a música acabar).
   modoDuracao: 'natural',
+  // Codec do ficheiro: 'vp8' (compatível) ou 'vp9' (mais pequeno).
+  codec: 'vp8',
   // A duração da música foi lida? Se não, o ciclo não pode ser calculado.
   musicaMedida: false,
   // Letra da música: o texto colado e se está a ser usada como legenda.
@@ -1522,6 +1524,58 @@ function limparLetra() {
   resumoVideo();
 }
 
+// ---------------------------------------------------------------- resultado do vídeo
+// O ficheiro fica guardado aqui depois de gerado, para o poder VER dentro da
+// página, descarregar outra vez e guardar o .srt. Ver aqui dentro é o que
+// distingue "o ficheiro está mau" de "o leitor do Windows não o abre".
+let resultadoVideo = { blob: null, nome: '', srt: '' };
+
+function descarregarBlob(blob, nome) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = nome;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+
+function mostrarResultado(r, nome) {
+  resultadoVideo = { blob: r.blob, nome, srt: r.srt || '' };
+  const caixa = $('vid-resultado');
+  if (!caixa) return;
+  caixa.hidden = false;
+  const mb = (r.blob.size / 1048576).toFixed(1);
+  const codec = r.codec === 'vp9' ? 'VP9 (mais pequeno)' : r.codec === 'vp8' ? 'VP8 (compatível)' : 'WebM';
+  $('vid-resultado-nome').textContent = `${nome} · ${mb} MB · ${codec} · ${Math.round(r.duracao)}s`;
+  $('btn-video-guardar-srt').hidden = !resultadoVideo.srt;
+  const v = $('vid-teste');
+  v.hidden = true;
+  if (v.src) URL.revokeObjectURL(v.src);
+  v.removeAttribute('src');
+}
+
+function verResultado() {
+  const v = $('vid-teste');
+  if (!resultadoVideo.blob) return;
+  if (!v.hidden) {
+    v.pause();
+    v.hidden = true;
+    return;
+  }
+  const codec = $('vid-resultado-nome').textContent;
+  if (v.src) URL.revokeObjectURL(v.src);
+  v.src = URL.createObjectURL(resultadoVideo.blob);
+  v.hidden = false;
+  $('vid-estado').textContent =
+    `A tocar dentro da página. Se ouvir e ver tudo, o ficheiro está bom — use o VLC para o abrir no Windows ` +
+    `(o leitor da Microsoft recusa WebM). ${codec}`;
+  $('vid-estado').className = 'cfg-result ok';
+  v.play().catch(() => {
+    $('vid-estado').textContent = '⚠️ O browser não conseguiu abrir o vídeo que gravou — nesse caso o ficheiro pode estar incompleto. Grave outra vez.';
+    $('vid-estado').className = 'cfg-result err';
+  });
+}
+
 // ---------------------------------------------------------------- trilha sonora
 // A música vem do computador do utilizador (não há faixas dentro da app, para
 // ela continuar leve e sem licenças). Fica só nesta sessão — um ficheiro de
@@ -1880,6 +1934,29 @@ async function iniciarVideo() {
   });
   marcarModoDuracao();
 
+  // Codec: compatibilidade primeiro. O VP9 no WebM é o que o Windows recusa
+  // abrir (erro 0xC00D36C4); o VP8 é lido em todo o lado.
+  const cc = $('vid-codec');
+  cc.innerHTML = '';
+  mod.CODECS.forEach((c) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'chip';
+    b.dataset.id = c.id;
+    b.textContent = c.rotulo;
+    b.title = c.nota;
+    b.onclick = () => {
+      state.codec = c.id;
+      [...cc.children].forEach((x) => x.classList.toggle('on', x === b));
+      guardar();
+      resumoVideo();
+    };
+    cc.append(b);
+  });
+  const codecEscolhido = mod.CODECS.find((c) => c.id === state.codec) || mod.CODECS[0];
+  state.codec = codecEscolhido.id;
+  [...cc.children].forEach((x) => x.classList.toggle('on', x.dataset.id === state.codec));
+
   atualizarTrilha();
 
   // Suporte do browser
@@ -1893,6 +1970,15 @@ async function iniciarVideo() {
   $('btn-video').onclick = gerarVideoFinal;
   $('btn-video-parar').onclick = () => {
     state.pararVideo = true;
+  };
+  $('btn-video-ver').onclick = verResultado;
+  $('btn-video-guardar').onclick = () => {
+    if (resultadoVideo.blob) descarregarBlob(resultadoVideo.blob, resultadoVideo.nome);
+  };
+  $('btn-video-guardar-srt').onclick = () => {
+    if (resultadoVideo.srt) {
+      descarregarBlob(new Blob([resultadoVideo.srt], { type: 'text/plain;charset=utf-8' }), 'rebeca-video.srt');
+    }
   };
 }
 
@@ -1999,6 +2085,7 @@ async function gerarVideoFinal() {
       // Com a letra em uso, as legendas ficam ligadas (ela substitui a narração).
       legendas: comLegendas,
       legendasExternas: cuesLetra.length ? cuesLetra : null,
+      codec: state.codec,
       modoDuracao: state.modoDuracao,
       musicaSegundos: state.musicaSegundos,
       // Desenha no canvas visível: vê-se a montagem enquanto grava.
@@ -2041,24 +2128,16 @@ async function gerarVideoFinal() {
     }
 
     const nome = `rebeca-video.${r.extensao}`;
-    const url = URL.createObjectURL(r.blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = nome;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    descarregarBlob(r.blob, nome);
 
     // O .srt sai dos MESMOS blocos que foram desenhados no vídeo.
     if (r.srt) {
       setTimeout(() => {
-        const srtUrl = URL.createObjectURL(new Blob([r.srt], { type: 'text/plain;charset=utf-8' }));
-        const s = document.createElement('a');
-        s.href = srtUrl;
-        s.download = 'rebeca-video.srt';
-        s.click();
-        setTimeout(() => URL.revokeObjectURL(srtUrl), 60000);
+        descarregarBlob(new Blob([r.srt], { type: 'text/plain;charset=utf-8' }), 'rebeca-video.srt');
       }, 700); // dois descarregamentos ao mesmo tempo confundem o browser
     }
+    // Guarda o resultado e mostra-o para se poder VER aqui dentro.
+    mostrarResultado(r, nome);
 
     estadoVideo(
       `✅ Vídeo pronto: ${Math.round(r.duracao)}s, ${(r.blob.size / 1048576).toFixed(1)} MB, ` +
@@ -2071,7 +2150,10 @@ async function gerarVideoFinal() {
             : ''} ` +
         `${r.legendas ? `${r.legendas} bloco(s) de legenda${r.legendasDaLetra ? ' (da letra)' : ''}. ` : ''}` +
         `Descarregado como ${nome}${r.srt ? ' e rebeca-video.srt' : ''}.` +
-        `${r.musicaAviso ? ` ⚠️ ${r.musicaAviso}` : ''} (motor v${r.versao})`,
+        `${r.musicaAviso ? ` ⚠️ ${r.musicaAviso}` : ''} (motor v${r.versao})` +
+        (r.codec === 'vp9'
+          ? ' · ⚠️ Gravado em VP9: o Windows pode recusar abri-lo — use o VLC, ou mude "Ficheiro" para Compatível (VP8).'
+          : ''),
       r.musicaAviso ? 'wait' : 'ok',
     );
     toast(
@@ -2121,6 +2203,7 @@ function guardar() {
         letra: state.letra,
         letraLigada: state.letraLigada,
         modoDuracao: state.modoDuracao,
+        codec: state.codec,
         musicaLigada: state.musicaLigada,
       }),
     );
@@ -2346,6 +2429,7 @@ function init() {
   state.letra = typeof c.letra === 'string' ? c.letra : '';
   state.letraLigada = c.letraLigada === true && state.letra.trim().length > 0;
   state.modoDuracao = c.modoDuracao === 'trilha' ? 'trilha' : 'natural';
+  state.codec = c.codec === 'vp9' ? 'vp9' : 'vp8';
   state.musicaLigada = c.musicaLigada !== false;
   marcarMotor();
   marcarTom();

@@ -1539,6 +1539,52 @@ function descarregarBlob(blob, nome) {
   setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
 
+// O browser sabe abrir a janela "Guardar como"? O Chrome e o Edge sabem (File
+// System Access API); o Firefox e o Safari não. Sem isto, o ficheiro cai sempre
+// na pasta das descargas, sem o utilizador poder escolher o sítio.
+const podeEscolherOnde = () => typeof window !== 'undefined' && typeof window.showSaveFilePicker === 'function';
+
+// Põe nos botões o texto certo para este browser: "Guardar…" quando abre a
+// janela para escolher, "Descarregar" quando não há essa janela.
+function rotularBotoesGuardar() {
+  const escolhe = podeEscolherOnde();
+  const b1 = $('btn-video-guardar');
+  const b2 = $('btn-video-guardar-srt');
+  if (b1) {
+    b1.textContent = escolhe ? '💾 Guardar o vídeo…' : '⬇️ Descarregar o vídeo';
+    b1.title = escolhe ? 'abre a janela para escolher a pasta e o nome' : 'vai para a pasta das transferências';
+  }
+  if (b2) {
+    b2.textContent = escolhe ? '💾 Guardar as legendas (.srt)…' : '⬇️ Descarregar o .srt';
+  }
+}
+
+// Guarda pedindo ao utilizador ONDE. Se ele cancelar a janela, devolve false e
+// NÃO se descarrega nada: cancelar é uma decisão, não uma falha.
+async function guardarComo(blob, nome, descricao = 'Ficheiro') {
+  if (!podeEscolherOnde()) {
+    descarregarBlob(blob, nome);
+    return false;
+  }
+  const tipo = blob.type || 'application/octet-stream';
+  const extensao = `.${(nome.split('.').pop() || '').toLowerCase()}`;
+  try {
+    const handle = await window.showSaveFilePicker({
+      suggestedName: nome,
+      types: [{ description: descricao, accept: { [tipo]: [extensao] } }],
+    });
+    const w = await handle.createWritable();
+    await w.write(blob);
+    await w.close();
+    return true;
+  } catch (e) {
+    if (e && (e.name === 'AbortError' || e.name === 'NotAllowedError')) return false;
+    // Outro erro qualquer: não deixa o utilizador sem o ficheiro.
+    descarregarBlob(blob, nome);
+    return false;
+  }
+}
+
 function mostrarResultado(r, nome) {
   resultadoVideo = { blob: r.blob, nome, srt: r.srt || '' };
   const caixa = $('vid-resultado');
@@ -1548,6 +1594,7 @@ function mostrarResultado(r, nome) {
   const codec = r.codec === 'vp9' ? 'VP9 (mais pequeno)' : r.codec === 'vp8' ? 'VP8 (compatível)' : 'WebM';
   $('vid-resultado-nome').textContent = `${nome} · ${mb} MB · ${codec} · ${Math.round(r.duracao)}s`;
   $('btn-video-guardar-srt').hidden = !resultadoVideo.srt;
+  rotularBotoesGuardar();
   const v = $('vid-teste');
   v.hidden = true;
   if (v.src) URL.revokeObjectURL(v.src);
@@ -1972,14 +2019,18 @@ async function iniciarVideo() {
     state.pararVideo = true;
   };
   $('btn-video-ver').onclick = verResultado;
-  $('btn-video-guardar').onclick = () => {
-    if (resultadoVideo.blob) descarregarBlob(resultadoVideo.blob, resultadoVideo.nome);
+  $('btn-video-guardar').onclick = async () => {
+    if (!resultadoVideo.blob) return;
+    const ok = await guardarComo(resultadoVideo.blob, resultadoVideo.nome, 'Vídeo WebM');
+    if (ok) toast(`Vídeo guardado onde escolheu: ${resultadoVideo.nome}`, 'ok');
   };
-  $('btn-video-guardar-srt').onclick = () => {
-    if (resultadoVideo.srt) {
-      descarregarBlob(new Blob([resultadoVideo.srt], { type: 'text/plain;charset=utf-8' }), 'rebeca-video.srt');
-    }
+  $('btn-video-guardar-srt').onclick = async () => {
+    if (!resultadoVideo.srt) return;
+    const blob = new Blob([resultadoVideo.srt], { type: 'text/plain;charset=utf-8' });
+    const ok = await guardarComo(blob, 'rebeca-video.srt', 'Legendas (SubRip)');
+    if (ok) toast('Legendas guardadas onde escolheu.', 'ok');
   };
+  rotularBotoesGuardar();
 }
 
 async function gerarVideoFinal() {
@@ -2128,16 +2179,25 @@ async function gerarVideoFinal() {
     }
 
     const nome = `rebeca-video.${r.extensao}`;
-    descarregarBlob(r.blob, nome);
 
-    // O .srt sai dos MESMOS blocos que foram desenhados no vídeo.
-    if (r.srt) {
-      setTimeout(() => {
-        descarregarBlob(new Blob([r.srt], { type: 'text/plain;charset=utf-8' }), 'rebeca-video.srt');
-      }, 700); // dois descarregamentos ao mesmo tempo confundem o browser
-    }
     // Guarda o resultado e mostra-o para se poder VER aqui dentro.
     mostrarResultado(r, nome);
+
+    // Com a janela "Guardar como" (Chrome/Edge), o utilizador escolhe a pasta e
+    // o nome. É o passo que faltava: antes o ficheiro caía sempre na pasta das
+    // transferências sem se poder escolher. Nos browsers sem esta janela, cai
+    // numa descarga normal — o mesmo de antes.
+    const escolheu = await guardarComo(r.blob, nome, 'Vídeo WebM');
+
+    // O .srt sai dos MESMOS blocos que foram desenhados no vídeo, e também
+    // pergunta onde guardar (só depois de o vídeo estar tratado, para não abrir
+    // duas janelas de uma vez).
+    if (r.srt) {
+      const srtBlob = new Blob([r.srt], { type: 'text/plain;charset=utf-8' });
+      if (!podeEscolherOnde() || escolheu) {
+        setTimeout(() => guardarComo(srtBlob, 'rebeca-video.srt', 'Legendas (SubRip)'), 400);
+      }
+    }
 
     estadoVideo(
       `✅ Vídeo pronto: ${Math.round(r.duracao)}s, ${(r.blob.size / 1048576).toFixed(1)} MB, ` +

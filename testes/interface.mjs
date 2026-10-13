@@ -164,7 +164,10 @@ const src = readFileSync(BASE + 'app.js', 'utf8')
   .replace(/await import\('@\/base44Client\.js'\)/g, '({ base44: globalThis.__base44Falso })')
   .replace(/await import\('\.\/video\.mjs'\)/g, `await import('${VIDEO_URL}')`)
   .replace(/await import\('\.\/audio-info\.mjs'\)/g, `await import('file:///E:/youtube%20rebeca2/rebeca-hub-3.0-base44/public/audio-info.mjs')`)
-  .replace(/await import\('\.\/legendas-core\.mjs'\)/g, `await import('file:///E:/youtube%20rebeca2/rebeca-hub-3.0-base44/public/legendas-core.mjs')`);;;
+  .replace(/await import\('\.\/legendas-core\.mjs'\)/g, `await import('file:///E:/youtube%20rebeca2/rebeca-hub-3.0-base44/public/legendas-core.mjs')`)
+  // Expõe as funções de guardar para se poderem testar sem gravar vídeo nenhum.
+  .replace('// ---------------------------------------------------------------- trilha sonora',
+    'globalThis.__guardarParaTeste = { guardarComo, descarregarBlob, podeEscolherOnde, rotularBotoesGuardar };\n// ---------------------------------------------------------------- trilha sonora');;;
 const erros = [];
 // Um erro não tratado tem de APARECER. Antes ficava só numa lista e, se
 // rebentasse a meio, o teste terminava calado com sucesso — foi assim que uma
@@ -545,7 +548,58 @@ console.log('\n[15] Pré-escuta da letra: vê os versos a passar');
   check(/Ver a letra a passar/.test(reg.get('btn-letra-previa').textContent), 'parar repõe o botão', reg.get('btn-letra-previa').textContent);
 }
 
-console.log('\n[16] Sem erros de JavaScript');
+console.log('\n[16] Guardar o vídeo: escolher onde, ou descarregar');
+{
+  // O browser falso ganha a janela "Guardar como" (Chrome/Edge).
+  const escritos = [];
+  const nomesSugeridos = [];
+  let comportamento = 'guardar'; // 'guardar' | 'cancelar'
+  const reg = await arrancar(true);
+  globalThis.window.showSaveFilePicker = async (opcoes) => {
+    nomesSugeridos.push(opcoes && opcoes.suggestedName);
+    if (comportamento === 'cancelar') {
+      const e = new Error('cancelado');
+      e.name = 'AbortError';
+      throw e;
+    }
+    return {
+      createWritable: async () => ({
+        write: async (blob) => escritos.push(blob),
+        close: async () => {},
+      }),
+    };
+  };
+
+  const { guardarComo, podeEscolherOnde, rotularBotoesGuardar } = globalThis.__guardarParaTeste;
+  check(podeEscolherOnde() === true, 'deteta que o browser sabe escolher onde guardar', 'não detetou');
+  rotularBotoesGuardar();
+  check(/Guardar/.test(reg.get('btn-video-guardar').textContent), `com a janela, o botão diz "${reg.get('btn-video-guardar').textContent}"`, reg.get('btn-video-guardar').textContent);
+
+  const blob = new Blob(['conteudo-do-video'], { type: 'video/webm' });
+  const ok = await guardarComo(blob, 'borboleta 1.webm', 'Vídeo WebM');
+  check(ok === true, 'guardou onde o utilizador escolheu', `ok=${ok}`);
+  check(escritos.length === 1, `escreveu o ficheiro uma vez (${escritos.length})`, String(escritos.length));
+  check(escritos[0] === blob, 'escreveu o ficheiro certo (sem corromper)', 'escreveu outro objeto');
+  check(nomesSugeridos[0] === 'borboleta 1.webm', `sugere o nome do ficheiro (${nomesSugeridos[0]})`, String(nomesSugeridos[0]));
+
+  // Cancelar não pode guardar nada nem rebentar.
+  comportamento = 'cancelar';
+  escritos.length = 0;
+  const cancelado = await guardarComo(blob, 'borboleta 1.webm');
+  check(cancelado === false, 'cancelar devolve false', `ok=${cancelado}`);
+  check(escritos.length === 0, 'e não escreve ficheiro nenhum', `${escritos.length} escritos`);
+
+  // Sem a janela de guardar: cai numa descarga normal.
+  comportamento = 'guardar';
+  globalThis.window.showSaveFilePicker = undefined;
+  check(podeEscolherOnde() === false, 'sem a API, sabe que não pode escolher', 'continuou a dizer que podia');
+  rotularBotoesGuardar();
+  check(/Descarregar/.test(reg.get('btn-video-guardar').textContent), `sem a janela, o botão diz "${reg.get('btn-video-guardar').textContent}"`, reg.get('btn-video-guardar').textContent);
+  const semApi = await guardarComo(blob, 'rebeca-video.webm');
+  check(semApi === false, 'sem a API, devolve false e usa a descarga', `ok=${semApi}`);
+}
+
+console.log('\n[17] Sem erros de JavaScript');
 if (erros.length) erros.slice(0, 5).forEach((e) => fail(e));
 else ok('nenhum erro não tratado');
 

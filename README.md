@@ -277,7 +277,13 @@ este mesmo painel: a parte de temporizar e legendar já está feita.
   souber o codec escolhido, cai no outro em vez de falhar.
 - Ao acabar, aparece uma caixa com o resultado e o botão **▶️ Ver o vídeo aqui**, que
   o toca dentro da página: é o que distingue «o ficheiro está mau» de «o leitor do
-  Windows não o abre». Há também **⬇️ Descarregar outra vez** e **⬇️ Guardar o .srt**.
+  Windows não o abre». Há também **💾 Guardar o vídeo…** e **💾 Guardar as legendas
+  (.srt)…**.
+- **Guardar pergunta ONDE.** No Chrome e no Edge abre-se a janela «Guardar como»,
+  onde se escolhe a pasta e o nome. No Firefox e no Safari, que não têm essa janela,
+  os botões passam a dizer «Descarregar» e o ficheiro vai para a pasta das
+  transferências, como antes. Cancelar a janela **não** guarda nada — cancelar é
+  uma decisão, não uma falha.
 - **Para abrir o ficheiro no Windows, use o VLC** — lê WebM sem instalar nada. O
   leitor da Microsoft recusa WebM mesmo quando o ficheiro está bom.
 - Não mude de janela enquanto grava; o botão **⏹ Parar** responde logo.

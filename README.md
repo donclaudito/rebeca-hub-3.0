@@ -36,6 +36,13 @@ Precisa de:
 
 ## Publicar — passo a passo
 
+### Atalho: duplo clique em `PUBLICAR.cmd`
+
+Se a sessão da CLI já existir, isto publica o site e as funções. Se ainda não,
+pede primeiro o login (mostra um código e um link) e depois publica sozinho.
+
+### À mão, passo a passo
+
 ### 1. Criar o app na Base44
 
 ```powershell
@@ -108,6 +115,22 @@ base44 site open
 ```
 
 A partir daí, a app funciona em **qualquer computador**, sem nada instalado.
+
+### Se aparecer "Could not validate credentials"
+
+A sessão da CLI expirou. O `deploy` precisa de sessão e o login é **por código de
+dispositivo**, com prazo de poucos minutos:
+
+```powershell
+base44 login
+```
+
+Aparece um `Verification code` e um link. Abra o link, escreva o código e
+confirme — **dentro do prazo**, senão expira e é preciso repetir. Entre com a
+conta **dona do app**, senão o deploy falha por permissão.
+
+Depois do login, o `deploy` volta a funcionar. **Faça o login num terminal à sua
+frente**: o código aparece na hora e não tem de ser copiado de lado nenhum.
 
 ---
 

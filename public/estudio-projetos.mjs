@@ -28,6 +28,8 @@ let pararPreviaLetra = () => {};
 let lerConfig = () => ({});
 let projetos = null;
 
+export { estadoProjeto };
+
 export function iniciar(ctx) {
   state = ctx.state;
   toast = ctx.toast;

@@ -371,6 +371,19 @@ if (typeof window !== 'undefined') {
   if (irPainelDoVideo) irPainelDoVideo.onclick = () => mostrarVista('painel');
   const irEstudioVazio = $('btn-ir-estudio-vazio');
   if (irEstudioVazio) irEstudioVazio.onclick = () => mostrarVista('estudio');
+  // Novo projeto a partir do painel: abre o estúdio JÁ LIMPO, sem puxar
+  // nenhum projeto anterior. O estúdio (app.js) ouve "rh-novo-projeto".
+  const painelNovo = $('btn-painel-novo');
+  if (painelNovo) {
+    painelNovo.onclick = () => {
+      mostrarVista('estudio');
+      try {
+        window.dispatchEvent(new Event('rh-novo-projeto'));
+      } catch {
+        /* sem janela (testes) */
+      }
+    };
+  }
   // Vista inicial: "#estudio" abre o estúdio; em todos os outros casos, o painel.
   mostrarVista(/estudio/.test(hashAtual()) ? 'estudio' : 'painel');
 }

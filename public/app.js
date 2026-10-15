@@ -2061,6 +2061,11 @@ async function novoProjeto() {
 // O script corre no fim do body (módulo, depois da análise): os elementos já
 // existem quando esta linha corre, por isso a ligação pode ser direta.
 $('btn-projeto-novo').onclick = novoProjeto;
+// "✨ Novo projeto" do PAINEL: chega aqui pelo evento do painel.js — abre o
+// estúdio limpo, sem puxar projetos anteriores.
+if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+  window.addEventListener('rh-novo-projeto', () => novoProjeto());
+}
 
 // ---------------------------------------------------------------- arranque
 // Cliente Base44 (o mesmo padrão de sempre: import dinâmico, reescrevível nos testes).
@@ -2072,9 +2077,9 @@ async function clienteBase44() {
 // Módulos extraídos do app.js: trilha, letra, projetos e utilizador.
 async function carregarModulosExtras() {
   const ctx = {
-    state, toast, guardar, resumoVideo, marcarModoDuracao, marcarMotor, marcarTom,
+    state, toast, guardar, resumoVideo, marcarModoDuracao, marcarMotor, marcarTom, atualizarLetra,
     atualizarContador, renderThumbs, renderScenes, updateLayout, preparar, paraBase64,
-    pararPreviaTrilha, lerConfig, projetos, leg, clienteBase44,
+    pararPreviaTrilha, pararPreviaLetra, lerConfig, projetos, leg, clienteBase44,
   };
   try {
     modLetraTrilha = await import('./estudio-letra-trilha.mjs');
@@ -2090,7 +2095,7 @@ async function carregarModulosExtras() {
   }
   try {
     modUtilizadorUI = await import('./estudio-utilizador.mjs');
-    modUtilizadorUI.iniciarUtilizador({ toast });
+    modUtilizadorUI.iniciarUtilizador({ toast, clienteBase44 });
   } catch (e) {
     console.warn('módulo do utilizador não chegou:', e && e.message);
   }

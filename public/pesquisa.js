@@ -260,6 +260,30 @@ function desenharResultados(dados, link) {
     caixa.append(bloco);
   }
 
+  // Vídeos mais visualizados (dados reais da API do YouTube, com o link).
+  const maisVistos = dados.maisVistos || [];
+  if (maisVistos.length) {
+    const bloco = document.createElement('div');
+    bloco.className = 'pesq-similares';
+    const t = document.createElement('h4');
+    t.textContent = '🔥 Vídeos mais visualizados';
+    bloco.append(t);
+    const ul = document.createElement('ul');
+    for (const v of maisVistos) {
+      const li = document.createElement('li');
+      const a = document.createElement('a');
+      a.href = v.url;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      const vistas = formatarViews(v.visualizacoes);
+      a.textContent = v.titulo + (v.canal ? ` — ${v.canal}` : '') + (vistas ? ` · ${vistas}` : '');
+      li.append(a);
+      ul.append(li);
+    }
+    bloco.append(ul);
+    caixa.append(bloco);
+  }
+
   ultimasSugestoes = dados.sugestoes || [];
   filtroIdade = 'todos';
   desenharFiltros(caixa);

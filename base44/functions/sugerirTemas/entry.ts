@@ -58,29 +58,34 @@ async function buscarNoYoutube(videoId, palavras, chave) {
     const consulta = (videoRef?.titulo || palavras || '').trim();
     if (!consulta) return videoRef ? { videoRef, similares: [] } : null;
 
-    const rBusca = await fetch(
-      url('search', {
-        part: 'snippet',
-        type: 'video',
-        maxResults: '6',
-        relevanceLanguage: 'pt',
-        q: consulta.slice(0, 200),
-      }),
-      opcoes,
-    );
-    if (!rBusca.ok) return videoRef ? { videoRef, similares: [] } : null;
-    const dBusca = await rBusca.json();
-    const achados = (dBusca?.items || [])
-      .map((i) => ({
-        id: i.id?.videoId,
-        titulo: String(i.snippet?.title || '').slice(0, 200),
-        canal: String(i.snippet?.channelTitle || '').slice(0, 120),
-      }))
-      .filter((v) => v.id && v.id !== videoId && v.titulo)
-      .slice(0, 5);
+    // Duas buscas na API: "similares" (por relevância) e "mais vistos"
+    // (ordenados pela API por visualizações). As visualizações reais de
+    // ambas vêm de UM só videos.list com todos os ids juntos.
+    const buscarLista = async (params) => {
+      const r = await fetch(
+        url('search', { part: 'snippet', type: 'video', relevanceLanguage: 'pt', ...params }),
+        opcoes,
+      );
+      if (!r.ok) return [];
+      const d = await r.json();
+      return (d?.items || [])
+        .map((i) => ({
+          id: i.id?.videoId,
+          titulo: String(i.snippet?.title || '').slice(0, 200),
+          canal: String(i.snippet?.channelTitle || '').slice(0, 120),
+        }))
+        .filter((v) => v.id && v.id !== videoId && v.titulo);
+    };
+    const [similaresAchados, vistosAchados] = await Promise.all([
+      buscarLista({ maxResults: '6', q: consulta.slice(0, 200) }),
+      buscarLista({ maxResults: '8', order: 'viewCount', q: consulta.slice(0, 200) }),
+    ]);
 
-    // Visualizações reais de cada similar: UM só videos.list com todos os ids.
-    const ids = achados.map((v) => v.id).join(',');
+    const todos = [
+      ...similaresAchados,
+      ...vistosAchados.filter((v) => !similaresAchados.some((s) => s.id === v.id)),
+    ];
+    const ids = todos.map((v) => v.id).join(',');
     const statsPorId = {};
     if (ids) {
       const rStats = await fetch(url('videos', { part: 'statistics', id: ids }), opcoes);
@@ -89,8 +94,12 @@ async function buscarNoYoutube(videoId, palavras, chave) {
         for (const v of dStats?.items || []) statsPorId[v.id] = Number(v.statistics?.viewCount) || 0;
       }
     }
-    const similares = achados.map((v) => ({ ...v, visualizacoes: statsPorId[v.id] || 0 }));
-    return { videoRef, similares };
+    const comStats = (lista) => lista.map((v) => ({ ...v, visualizacoes: statsPorId[v.id] || 0 }));
+    return {
+      videoRef,
+      similares: comStats(similaresAchados).slice(0, 5),
+      maisVistos: comStats(vistosAchados).slice(0, 5),
+    };
   } catch {
     return null;
   }
@@ -123,10 +132,11 @@ export default async function (req) {
     const comLink = Boolean(videoId);
 
     // DADOS REAIS: com a chave da YouTube Data API, buscamos o vídeo de
-    // referência e os similares na API oficial. Sem chave, ou em falha, a
-    // app segue com o caminho antigo (IA com busca na internet).
+    // referência (se houver link), os similares e os mais visualizados na
+    // API oficial — valendo também para buscas só com palavras-chave.
+    // Sem chave, ou em falha, a app segue com o caminho antigo (IA + web).
     const chaveYoutube = (secrets.get('YOUTUBE_API_KEY') || '').trim();
-    const dadosApi = comLink && chaveYoutube ? await buscarNoYoutube(videoId, palavras, chaveYoutube) : null;
+    const dadosApi = chaveYoutube ? await buscarNoYoutube(videoId, palavras, chaveYoutube) : null;
     const fonteReal = Boolean(dadosApi?.videoRef) || (dadosApi?.similares?.length || 0) > 0;
     const linhaDados = [
       dadosApi?.videoRef
@@ -136,6 +146,10 @@ export default async function (req) {
         ? 'DADOS REAIS (API oficial do YouTube) de vídeos similares, com visualizações reais: ' +
           dadosApi.similares.map((v) => `"${v.titulo}" (canal "${v.canal}", ${v.visualizacoes} visualizações)`).join('; ')
         : '',
+      (dadosApi?.maisVistos?.length || 0) > 0
+        ? 'DADOS REAIS (API oficial do YouTube) dos vídeos MAIS VISUALIZADOS para essa busca, em ordem de visualizações: ' +
+          dadosApi.maisVistos.map((v) => `"${v.titulo}" (canal "${v.canal}", ${v.visualizacoes} visualizações)`).join('; ')
+        : '',
     ].filter(Boolean);
 
     const prompt = [
@@ -144,11 +158,13 @@ export default async function (req) {
       videoId
         ? `Vídeo de referência informado pelo usuário: https://www.youtube.com/watch?v=${videoId} (id ${videoId}).`
         : '',
-      comLink
-        ? fonteReal
-          ? 'COM O LINK: você recebeu DADOS REAIS da API oficial do YouTube logo abaixo. Fundamente as sugestões e as justificativas NELES (o que os vídeos reais têm em comum: formato, tema, tom, escala de visualizações). NÃO invente nem corrija esses dados e NÃO precisa devolver "videoInfo" nem "videosSimilares" — a resposta final já leva os dados reais. NUNCA afirme ter assistido aos vídeos.'
-          : 'COM O LINK: pesquise na internet ESSE vídeo (título real, canal, tema) e VÍDEOS SIMILARES de sucesso no YouTube para o mesmo público infantil. Analise o que faz esses vídeos funcionarem (formato, tema, tom) e use isso para fundamentar as sugestões. Em "videoInfo" devolva o que CONFIRMOU sobre o vídeo (titulo e canal reais; em "observacao", uma linha com o que aprendeu; se não encontrou o vídeo, diga isso — NUNCA invente título, canal ou números de visualização). Em "videosSimilares" liste de 3 a 5 vídeos infantis similares de sucesso que encontrou (titulo, canal, url — URL real do YouTube; se não achou, devolva a lista vazia). NUNCA afirme ter assistido aos vídeos.'
-        : 'Sem link: baseie-se no seu conhecimento sobre conteúdo infantil de sucesso no YouTube. NUNCA afirme ter acessado a internet.',
+      fonteReal
+        ? comLink
+          ? 'COM O LINK: você recebeu DADOS REAIS da API oficial do YouTube logo abaixo (o vídeo de referência, similares e os mais visualizados). Fundamente as sugestões e as justificativas NELES (o que os vídeos reais têm em comum: formato, tema, tom, escala de visualizações). NÃO invente nem corrija esses dados e NÃO precisa devolver "videoInfo" nem "videosSimilares" — a resposta final já leva os dados reais. NUNCA afirme ter assistido aos vídeos.'
+          : 'Você recebeu DADOS REAIS da API oficial do YouTube logo abaixo: os vídeos MAIS VISUALIZADOS para as palavras-chave. Fundamente as sugestões e as justificativas NELES (o que esses vídeos têm em comum: formato, tema, tom, escala de visualizações). NÃO invente nem corrija esses dados. NUNCA afirme ter assistido aos vídeos.'
+        : comLink
+          ? 'COM O LINK: pesquise na internet ESSE vídeo (título real, canal, tema) e VÍDEOS SIMILARES de sucesso no YouTube para o mesmo público infantil. Analise o que faz esses vídeos funcionarem (formato, tema, tom) e use isso para fundamentar as sugestões. Em "videoInfo" devolva o que CONFIRMOU sobre o vídeo (titulo e canal reais; em "observacao", uma linha com o que aprendeu; se não encontrou o vídeo, diga isso — NUNCA invente título, canal ou números de visualização). Em "videosSimilares" liste de 3 a 5 vídeos infantis similares de sucesso que encontrou (titulo, canal, url — URL real do YouTube; se não achou, devolva a lista vazia). NUNCA afirme ter assistido aos vídeos.'
+          : 'Sem link: baseie-se no seu conhecimento sobre conteúdo infantil de sucesso no YouTube. NUNCA afirme ter acessado a internet.',
       ...linhaDados,
       '',
       'Tarefa: devolva de 8 a 10 sugestões de TEMAS de vídeos infantis RELACIONADOS, já ordenadas do potencial MAIS ALTO ao MAIS BAIXO —',
@@ -234,14 +250,18 @@ export default async function (req) {
     return json({
       ok: true,
       tema: String(resposta?.tema || palavras || '').trim().slice(0, 160),
-      videoInfo: dadosApi?.videoRef
-        ? {
-            titulo: dadosApi.videoRef.titulo,
-            canal: dadosApi.videoRef.canal,
-            observacao: 'Dados reais obtidos na API oficial do YouTube.',
-            visualizacoes: dadosApi.videoRef.visualizacoes,
-          }
-        : resposta?.videoInfo && typeof resposta.videoInfo === 'object'
+      // "videoInfo" só existe com LINK — a IA nunca o inventa numa busca
+      // só de palavras-chave (antes aparecia um "canal" fabricado).
+      videoInfo: !videoId
+        ? null
+        : dadosApi?.videoRef
+          ? {
+              titulo: dadosApi.videoRef.titulo,
+              canal: dadosApi.videoRef.canal,
+              observacao: 'Dados reais obtidos na API oficial do YouTube.',
+              visualizacoes: dadosApi.videoRef.visualizacoes,
+            }
+          : resposta?.videoInfo && typeof resposta.videoInfo === 'object'
           ? {
               titulo: String(resposta.videoInfo.titulo || '').trim().slice(0, 200),
               canal: String(resposta.videoInfo.canal || '').trim().slice(0, 120),
@@ -266,10 +286,20 @@ export default async function (req) {
       )
         .filter((v) => v.titulo && v.url)
         .slice(0, 5),
+      // Os mais visualizados só existem com dados da API — nunca inventados.
+      maisVistos: (dadosApi?.maisVistos || [])
+        .map((v) => ({
+          titulo: v.titulo,
+          canal: v.canal,
+          url: `https://www.youtube.com/watch?v=${v.id}`,
+          visualizacoes: v.visualizacoes || 0,
+        }))
+        .filter((v) => v.titulo && v.url)
+        .slice(0, 5),
       sugestoes: limpas,
       ms: Date.now() - inicio,
       aviso:
-        'As notas de potencial são estimativas da IA. As visualizações do vídeo de referência e dos similares vêm da API oficial do YouTube (dados reais).',
+        'As notas de potencial são estimativas da IA. As visualizações do vídeo de referência, dos similares e dos mais visualizados vêm da API oficial do YouTube (dados reais).',
     });
   } catch (erro) {
     console.error('sugerirTemas falhou', erro);

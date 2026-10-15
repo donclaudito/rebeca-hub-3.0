@@ -195,6 +195,9 @@ const src = readFileSync(BASE + 'app.js', 'utf8')
   .replace(/await import\('\.\/video\.mjs'\)/g, `await import('${VIDEO_URL}')`)
   .replace(/await import\('\.\/audio-info\.mjs'\)/g, `await import('${new URL('../public/audio-info.mjs', import.meta.url).href}')`)
   .replace(/await import\('\.\/legendas-core\.mjs'\)/g, `await import('${new URL('../public/legendas-core.mjs', import.meta.url).href}')`)
+  .replace(/await import\('\.\/estudio-letra-trilha\.mjs'\)/g, `await import('${new URL('../public/estudio-letra-trilha.mjs', import.meta.url).href}')`)
+  .replace(/await import\('\.\/estudio-projetos\.mjs'\)/g, `await import('${new URL('../public/estudio-projetos.mjs', import.meta.url).href}')`)
+  .replace(/await import\('\.\/estudio-utilizador\.mjs'\)/g, `await import('${new URL('../public/estudio-utilizador.mjs', import.meta.url).href}')`)
   // Expõe as funções de guardar para se poderem testar sem gravar vídeo nenhum.
   .replace('// ---------------------------------------------------------------- trilha sonora',
     'globalThis.__guardarParaTeste = { guardarComo, descarregarBlob, podeEscolherOnde, rotularBotoesGuardar };\n// ---------------------------------------------------------------- trilha sonora');;;

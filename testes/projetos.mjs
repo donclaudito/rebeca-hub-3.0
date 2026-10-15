@@ -248,6 +248,9 @@ js = js.replace(/await import\('\.\/video\.mjs'\)/g, `await import('${BASE}video
 js = js.replace(/await import\('\.\/audio-info\.mjs'\)/g, `await import('${BASE}audio-info.mjs')`);
 js = js.replace(/await import\('\.\/legendas-core\.mjs'\)/g, `await import('${BASE}legendas-core.mjs')`);
 js = js.replace(/await import\('\.\/projetos\.mjs'\)/g, `await import('${BASE}projetos.mjs')`);
+js = js.replace(/await import\('\.\/estudio-projetos\.mjs'\)/g, `await import('${BASE}estudio-projetos.mjs')`);
+js = js.replace(/await import\('\.\/estudio-letra-trilha\.mjs'\)/g, `await import('${BASE}estudio-letra-trilha.mjs')`);
+js = js.replace(/await import\('\.\/estudio-utilizador\.mjs'\)/g, `await import('${BASE}estudio-utilizador.mjs')`);
 
 new Function(js)();
 document.dispatch('DOMContentLoaded');

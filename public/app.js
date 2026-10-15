@@ -104,7 +104,15 @@ function iniciarAbas() {
 // ---------------------------------------------------------------- imagens
 function updateLayout() {
   const tem = state.images.length > 0;
-  $('workspace').hidden = !tem;
+  // O PAINEL é a vista inicial: com ele aberto, o estúdio fica escondido
+  // (mesmo com imagens importadas) — é o painel.js que manda na vista.
+  let noPainel = false;
+  try {
+    noPainel = (localStorage.getItem('rh3vista') || 'painel') === 'painel';
+  } catch {
+    /* modo privado */
+  }
+  $('workspace').hidden = !tem || noPainel;
   $('drop').classList.toggle('compact', tem);
   $('drop-title').textContent = tem ? 'Arraste mais imagens para aqui' : 'Arraste uma pasta de imagens para aqui';
   $('count').textContent = state.images.length;
@@ -1319,142 +1327,15 @@ function duracaoNaturalPrevista() {
 }
 
 // ---------------------------------------------------------------- letra da música
-// A letra vem colada pelo utilizador (uma linha por verso) e é distribuída pelo
-// tempo da música. NÃO há transcrição automática: a app não tem chave que
-// transcreva áudio, e transcrever música cantada com instrumentos por cima é
-// notoriamente pouco fiável. Colar a letra dá um resultado certo, custa zero e
-// o utilizador pode corrigir o que quiser.
-
-let letraTimer = null; // o relógio da pré-escuta da letra
-
-// A letra já temporizada: cada verso com o seu segundo de entrada e de saída.
-// Precisa da duração da música; sem ela não há como distribuir.
-function cuesDaLetra() {
-  const versos = leg.versosDaLetra ? leg.versosDaLetra(state.letra) : [];
-  const duracao = state.musicaSegundos || 0;
-  if (!versos.length || !duracao) return [];
-  return leg.legendasDaLetra(versos, duracao);
-}
-
-function estadoLetra(msg, tipo = '') {
-  const el = $('letra-estado');
-  if (!el) return;
-  el.className = tipo === 'err' ? 'hint err' : tipo === 'ok' ? 'letra-passo' : 'hint';
-  el.textContent = msg;
-}
-
-function atualizarLetra() {
-  const versos = leg.versosDaLetra ? leg.versosDaLetra(state.letra) : [];
-  const duracao = state.musicaSegundos || 0;
-  const btn = $('btn-letra-usar');
-  const previa = $('btn-letra-previa');
-  const limpar = $('btn-letra-limpar');
-  const tem = versos.length > 0;
-
-  if (limpar) limpar.hidden = !tem && !state.letra;
-  if (previa) previa.hidden = !tem || !state.musicaFicheiro;
-  if (btn) {
-    btn.disabled = !tem || !duracao;
-    btn.textContent = state.letraLigada ? '💬 Letra em uso (clique para tirar)' : '💬 Usar a letra como legenda';
-    btn.title = !duracao
-      ? 'escolha primeiro a música (é preciso saber quanto dura)'
-      : !tem
-        ? 'cole a letra, uma linha por verso'
-        : `legendar ${versos.length} verso(s) da música`;
-  }
-
-  if (!tem) {
-    estadoLetra('Cole a letra (uma linha por verso) para legendar a música.');
-    return;
-  }
-  if (!duracao) {
-    estadoLetra(`${versos.length} verso(s), mas ainda não sei quanto dura a música — escolha a trilha.`, 'err');
-    return;
-  }
-  const cada = duracao / versos.length;
-  const minutos = (s) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`;
-  estadoLetra(
-    `${versos.length} verso(s) · ${minutos(cada)} cada um · a letra cobre ${minutos(duracao)}` +
-      `${state.letraLigada ? ' · ✅ em uso como legenda' : ''}`,
-    'ok',
-  );
-}
-
-// Liga ou desliga a letra como legenda do vídeo.
-function alternarLetra() {
-  if (!state.letraLigada && !cuesDaLetra().length) {
-    return toast('Cole a letra e escolha a música primeiro.', 'err');
-  }
-  state.letraLigada = !state.letraLigada;
-  guardar();
-  atualizarLetra();
-  resumoVideo();
-  if (state.letraLigada) {
-    const cues = cuesDaLetra();
-    toast(`A letra passa a ser a legenda do vídeo (${cues.length} versos).`, 'ok');
-  }
-}
-
-// Pré-escuta: toca a música e mostra, verso a verso, o que vai aparecer no
-// vídeo. É a forma de confirmar o sincronismo antes de gravar dois minutos.
-function pararPreviaLetra() {
-  if (letraTimer) {
-    clearTimeout(letraTimer);
-    letraTimer = null;
-  }
-  const b = $('btn-letra-previa');
-  if (b) b.textContent = '▶️ Ver a letra a passar';
-  document.querySelectorAll?.('.letra-passo.on')?.forEach?.((el) => el.classList.remove('on'));
-}
-
-async function preverLetra() {
-  if (letraTimer) {
-    pararPreviaLetra();
-    return;
-  }
-  const cues = cuesDaLetra();
-  if (!cues.length) return toast('Cole a letra e escolha a música primeiro.', 'err');
-  if (!state.musicaFicheiro) return toast('Escolha a música primeiro.', 'err');
-
-  pararPreviaTrilha();
-  const url = URL.createObjectURL(state.musicaFicheiro);
-  trilhaAudio = new Audio(url);
-  trilhaAudio.volume = 0.5;
-  $('btn-letra-previa').textContent = '⏹ Parar';
-
-  // Em vez de esperar pelo fim, agenda cada verso no seu segundo: se a música
-  // for parada, os relógios são limpos todos de uma vez.
-  const caixa = $('letra-estado');
-  const passo = (i) => {
-    if (i >= cues.length) {
-      pararPreviaLetra();
-      return;
-    }
-    const c = cues[i];
-    caixa.className = 'letra-passo on';
-    caixa.textContent = `${i + 1}/${cues.length} · ${c.texto}`;
-    letraTimer = setTimeout(() => passo(i + 1), Math.max(250, (c.fim - c.inicio) * 1000));
-  };
-  try {
-    await trilhaAudio.play();
-  } catch {
-    pararPreviaLetra();
-    toast('Não consegui tocar essa música neste browser.', 'err');
-    return;
-  }
-  passo(0);
-}
-
-function limparLetra() {
-  pararPreviaLetra();
-  state.letra = '';
-  state.letraLigada = false;
-  const ta = $('letra-texto');
-  if (ta) ta.value = '';
-  guardar();
-  atualizarLetra();
-  resumoVideo();
-}
+// A letra da música vive agora em estudio-letra-trilha.mjs (o app.js estava
+// demasiado grande para continuar a crescer); aqui ficam só os atalhos.
+let modLetraTrilha = null;
+const cuesDaLetra = () => (modLetraTrilha ? modLetraTrilha.cuesDaLetra() : []);
+const atualizarLetra = () => modLetraTrilha?.atualizarLetra();
+const limparLetra = () => modLetraTrilha?.limparLetra();
+const alternarLetra = () => modLetraTrilha?.alternarLetra();
+const preverLetra = () => modLetraTrilha?.preverLetra();
+const pararPreviaLetra = () => modLetraTrilha?.pararPreviaLetra();
 
 // ---------------------------------------------------------------- resultado do vídeo
 // O ficheiro fica guardado aqui depois de gerado, para o poder VER dentro da
@@ -1518,7 +1399,15 @@ async function guardarComo(blob, nome, descricao = 'Ficheiro') {
 }
 
 function mostrarResultado(r, nome) {
-  resultadoVideo = { blob: r.blob, nome, srt: r.srt || '' };
+  // Guarda o resultado INTEIRO: os detalhes (duração, formato, voz…) vão
+  // para o registo na nuvem quando o utilizador clica em "Guardar na nuvem".
+  resultadoVideo = { blob: r.blob, nome, srt: r.srt || '', r };
+  const btnNuvem = $('btn-video-nuvem');
+  if (btnNuvem) {
+    btnNuvem.hidden = false;
+    btnNuvem.disabled = false;
+    btnNuvem.textContent = '☁️ Guardar na nuvem';
+  }
   const caixa = $('vid-resultado');
   if (!caixa) return;
   caixa.hidden = false;
@@ -1556,560 +1445,30 @@ function verResultado() {
 }
 
 // ---------------------------------------------------------------- projetos
-// Cada projeto é guardado no IndexedDB com as imagens, o texto e o áudio. Fica
-// no computador do utilizador; não vai para servidor nenhum.
-let projetos = {
-  mod: null, // o módulo projetos.mjs, carregado à primeira utilização
-  idAtual: null,
-  lista: [],
-};
-
-async function modProjetos() {
-  if (!projetos.mod) projetos.mod = await import('./projetos.mjs');
-  return projetos.mod;
-}
-
-function estadoProjeto(msg, tipo = '') {
-  const el = $('projeto-estado');
-  if (!el) return;
-  el.className = tipo === 'err' ? 'hint err' : 'hint';
-  el.textContent = msg;
-}
-
-// Junta tudo o que é preciso para voltar a abrir o trabalho mais tarde.
-async function recolherProjeto(nome) {
-  const cenas = [];
-  for (const [i, img] of state.images.entries()) {
-    const cena = state.scenes[i] || {};
-    let imagem = null;
-    try {
-      // Guarda a versão REDUZIDA quando ela existe: é a que a app usa, e a
-      // original pode ter 20 MB por imagem.
-      const p = await preparar(img);
-      imagem = p.file;
-    } catch {
-      imagem = img.file || null;
-    }
-    let audio = null;
-    if (cena.audioB64) {
-      try {
-        audio = new Blob([binarioDeBase64(cena.audioB64)], { type: cena.audioExt || 'audio/webm' });
-      } catch {
-        audio = null;
-      }
-    }
-    cenas.push({
-      nome: img.name,
-      imagem,
-      texto: cena.texto || '',
-      audio,
-      audioExt: cena.audioExt || '',
-      previaVoz: cena.previaVoz || '',
-    });
-  }
-  return {
-    id: projetos.idAtual || crypto.randomUUID(),
-    nome: String(nome || '').trim() || 'Projeto sem nome',
-    criadoEm: projetos.criadoEm || Date.now(),
-    cenas,
-    config: {
-      servico: state.servico,
-      modelo: state.modelo,
-      voz: state.voz,
-      velocidade: state.velocidade,
-      motor: state.motor,
-      tom: state.tom,
-      vozEleven: state.vozEleven,
-      videoFormato: state.videoFormato,
-      videoTransicao: state.videoTransicao,
-      videoDuracao: state.videoDuracao,
-      videoModo: state.videoModo,
-      videoDuracaoCena: state.videoDuracaoCena,
-      legendas: state.legendas,
-      modoDuracao: state.modoDuracao,
-      codec: state.codec,
-      letra: state.letra,
-      letraLigada: state.letraLigada,
-      texto: { tone: $('tone').value, extra: $('extra').value, minWords: $('minWords').value, maxWords: $('maxWords').value },
-    },
-  };
-}
-
-function binarioDeBase64(b64) {
-  const bin = atob(b64);
-  const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  return bytes;
-}
-
-async function guardarProjetoAgora() {
-  if (!state.images.length) return toast('Importe as imagens primeiro.', 'err');
-  const btn = $('btn-projeto-guardar');
-  const nome = $('projeto-nome').value;
-  btn.disabled = true;
-  estadoProjeto(state.images.length > 20 ? 'a guardar… (são muitas imagens, isto demora um pouco)' : 'a guardar…');
-  try {
-    const mod = await modProjetos();
-    const dados = await recolherProjeto(nome);
-    await mod.guardarProjeto(dados);
-    projetos.idAtual = dados.id;
-    projetos.criadoEm = dados.criadoEm;
-    $('projeto-nome').value = dados.nome;
-    estadoProjeto(`Projeto "${dados.nome}" guardado · ${dados.cenas.length} imagem(ns) · ${mod.tamanhoLegivel(mod.tamanhoDe(dados))}`, 'ok');
-    toast(`Projeto "${dados.nome}" guardado.`, 'ok');
-    await desenharProjetos();
-  } catch (e) {
-    estadoProjeto(`❌ ${e.message}`, 'err');
-    toast(e.message, 'err');
-  } finally {
-    btn.disabled = false;
-  }
-}
-
-async function desenharProjetos() {
-  const lista = $('projetos-ul');
-  if (!lista) return;
-  try {
-    const mod = await modProjetos();
-    projetos.lista = await mod.listarProjetos();
-  } catch (e) {
-    estadoProjeto(`❌ ${e.message}`, 'err');
-    return;
-  }
-  lista.innerHTML = '';
-  const vazio = $('projetos-vazio');
-  if (vazio) vazio.hidden = projetos.lista.length > 0;
-
-  // O botão "Atualizar" só faz sentido depois de haver um projeto aberto.
-  const btnAtualizar = $('btn-projeto-atualizar');
-  if (btnAtualizar) btnAtualizar.hidden = !projetos.idAtual;
-
-  const total = projetos.lista.reduce((s, p) => s + (p.bytes || 0), 0);
-  const resumo = $('projetos-resumo');
-  if (resumo) {
-    resumo.textContent = projetos.lista.length
-      ? `${projetos.lista.length} projeto(s) · ${(await modProjetos()).tamanhoLegivel(total)} no seu computador`
-      : 'Ainda não guardou nenhum projeto.';
-  }
-
-  for (const p of projetos.lista) {
-    const li = document.createElement('li');
-    li.className = `projeto${p.id === projetos.idAtual ? ' atual' : ''}`;
-
-    if (p.miniatura instanceof Blob || p.miniatura) {
-      const img = document.createElement('img');
-      img.alt = '';
-      img.src = URL.createObjectURL(p.miniatura);
-      img.onload = () => URL.revokeObjectURL(img.src);
-      li.append(img);
-    } else {
-      const sem = document.createElement('span');
-      sem.className = 'sem-miniatura';
-      sem.textContent = '🖼️';
-      li.append(sem);
-    }
-
-    const info = document.createElement('div');
-    info.className = 'info';
-    const titulo = document.createElement('div');
-    titulo.className = 'titulo';
-    titulo.textContent = p.nome;
-    const meta = document.createElement('div');
-    meta.className = 'meta';
-    const mod = await modProjetos();
-    meta.textContent =
-      `${p.imagens} imagem(ns) · ${p.comTexto} com texto · ${p.comAudio} com áudio · ` +
-      `${mod.tamanhoLegivel(p.bytes)} · ${mod.quandoFoi(p.guardadoEm)}`;
-    info.append(titulo, meta);
-    li.append(info);
-
-    const acoes = document.createElement('div');
-    acoes.className = 'acoes';
-    const abrir = document.createElement('button');
-    abrir.type = 'button';
-    abrir.className = 'primary small';
-    abrir.textContent = '📂 Abrir';
-    abrir.onclick = () => abrirProjeto(p.id);
-    const apagar = document.createElement('button');
-    apagar.type = 'button';
-    apagar.className = 'ghost small danger';
-    apagar.textContent = '🗑';
-    apagar.title = 'apagar este projeto';
-    apagar.onclick = () => apagarProjeto(p.id, p.nome);
-    acoes.append(abrir, apagar);
-    li.append(acoes);
-
-    lista.append(li);
-  }
-}
-
-async function abrirProjeto(id) {
-  try {
-    const mod = await modProjetos();
-    const p = await mod.lerProjeto(id);
-    if (!p) return toast('Esse projeto já não existe.', 'err');
-
-    // Fecha o que estava aberto antes de trocar de trabalho.
-    pararPreviaTrilha();
-    pararPreviaLetra();
-    for (const img of state.images) if (img.url) URL.revokeObjectURL(img.url);
-    for (const s of state.scenes) {
-      if (s.audioUrl) URL.revokeObjectURL(s.audioUrl);
-      if (s.previaUrl) URL.revokeObjectURL(s.previaUrl);
-    }
-
-    state.images = (p.cenas || [])
-      .filter((c) => c.imagem)
-      .map((c) => ({
-        id: crypto.randomUUID(),
-        file: c.imagem,
-        name: c.nome || 'imagem',
-        url: URL.createObjectURL(c.imagem),
-      }));
-    state.scenes = (p.cenas || [])
-      .filter((c) => c.imagem)
-      .map((c) => ({
-        filename: c.nome || 'imagem',
-        texto: c.texto || '',
-        audioUrl: c.audio ? URL.createObjectURL(c.audio) : null,
-        audioB64: null, // volta a ser calculado quando for preciso (ZIP)
-        audioExt: c.audioExt || '',
-        previaUrl: null,
-        previaVoz: c.previaVoz || '',
-      }));
-    // O base64 do áudio é derivado do Blob, para o ZIP continuar a funcionar.
-    for (const s of state.scenes) {
-      if (s.audioUrl) {
-        try {
-          s.audioB64 = await paraBase64(await (await fetch(s.audioUrl)).blob());
-        } catch {
-          s.audioB64 = null;
-        }
-      }
-    }
-
-    // Preferências do projeto.
-    const c = p.config || {};
-    for (const [k, v] of Object.entries(c)) {
-      if (k === 'texto') continue;
-      if (v !== undefined && v !== null) state[k] = v;
-    }
-    if (c.texto) {
-      if (c.texto.tone !== undefined) $('tone').value = c.texto.tone;
-      if (c.texto.extra !== undefined) $('extra').value = c.texto.extra;
-      if (c.texto.minWords) $('minWords').value = c.texto.minWords;
-      if (c.texto.maxWords) $('maxWords').value = c.texto.maxWords;
-    }
-
-    projetos.idAtual = p.id;
-    projetos.criadoEm = p.criadoEm;
-    $('projeto-nome').value = p.nome;
-
-    // Volta a desenhar tudo com o projeto carregado.
-    renderThumbs();
-    renderScenes();
-    updateLayout();
-    atualizarContador();
-    const lt = $('letra-texto');
-    if (lt) lt.value = state.letra || '';
-    atualizarLetra();
-    marcarMotor();
-    marcarTom();
-    resumoVideo();
-
-    await desenharProjetos();
-    estadoProjeto(`Projeto "${p.nome}" aberto · ${state.images.length} imagem(ns)`, 'ok');
-    toast(`Projeto "${p.nome}" aberto.`, 'ok');
-  } catch (e) {
-    toast(`Não consegui abrir esse projeto: ${e.message}`, 'err');
-  }
-}
-
-async function apagarProjeto(id, nome) {
-  if (!window.confirm(`Apagar o projeto "${nome}"? Isto não se pode desfazer.`)) return;
-  try {
-    const mod = await modProjetos();
-    await mod.apagarProjeto(id);
-    if (projetos.idAtual === id) {
-      projetos.idAtual = null;
-      projetos.criadoEm = null;
-    }
-    await desenharProjetos();
-    toast('Projeto apagado.', '');
-  } catch (e) {
-    toast(`Não consegui apagar: ${e.message}`, 'err');
-  }
-}
-
-function iniciarProjetos() {
-  const ver = $('projetos-lista');
-  $('btn-projeto-guardar').onclick = guardarProjetoAgora;
-  $('btn-projeto-atualizar').onclick = guardarProjetoAgora;
-  $('btn-projetos-ver').onclick = async () => {
-    const aberto = ver.hidden;
-    ver.hidden = !aberto;
-    $('btn-projetos-ver').textContent = aberto ? '📂 Fechar os projetos' : '📂 Os meus projetos';
-    if (aberto) await desenharProjetos();
-  };
-  $('btn-projetos-fechar').onclick = () => {
-    ver.hidden = true;
-    $('btn-projetos-ver').textContent = '📂 Os meus projetos';
-  };
-  // O nome escrito à mão fica guardado nas preferências, para não se perder.
-  $('projeto-nome').addEventListener('input', () => guardar());
-  const cfg = lerConfig();
-  if (cfg.projetoNome) $('projeto-nome').value = cfg.projetoNome;
-}
+// A gestão dos projetos guardados vive agora em estudio-projetos.mjs; o objeto
+// `projetos` fica aqui (o estúdio consulta-o ao limpar e ao guardar).
+const projetos = { mod: null, idAtual: null, lista: [], criadoEm: null };
+let modProjetosUI = null;
+const estadoProjeto = (msg, tipo = '') => modProjetosUI?.estadoProjeto(msg, tipo);
+const desenharProjetos = () => modProjetosUI?.desenharProjetos();
+const guardarProjetoAgora = () => modProjetosUI?.guardarProjetoAgora();
+const abrirProjeto = (id) => modProjetosUI?.abrirProjeto(id);
+const apagarProjeto = (id, nome) => modProjetosUI?.apagarProjeto(id, nome);
+const iniciarProjetos = () => modProjetosUI?.iniciarProjetos();
 
 // ---------------------------------------------------------------- utilizador
-// Quem está a usar a app, no canto superior direito.
-//
-// A app NÃO obriga a entrar: tudo o que é essencial (imagens, narração, vídeo e
-// projetos guardados no computador) funciona sem conta. A conta serve para a app
-// saber quem está a trabalhar e para o trabalho poder ficar associado a uma
-// pessoa na Base44. Por isso não há redirecionamento para um ecrã de login
-// obrigatório — isso fecharia a app a quem só a quer experimentar.
-
-let utilizadorAtual = null;
-
-function mostrarEstadoUser(texto, dentro = false) {
-  const el = $('user-estado');
-  if (!el) return;
-  el.textContent = texto;
-  el.classList.toggle('dentro', dentro);
-}
-
-function nomeDoUtilizador(u) {
-  if (!u) return '';
-  const nome = (u.full_name || '').trim();
-  if (nome) return nome;
-  return String(u.email || '').split('@')[0] || u.email || 'utilizador';
-}
-
-async function clienteBase44() {
-  const { base44 } = await import('@/base44Client.js');
-  return base44;
-}
-
-// Vê quem está a usar. Nunca deixa a página em baixo se a Base44 responder mal:
-// sem sessão, a app continua a funcionar sem conta.
-async function verQuemEsta() {
-  const entrar = $('btn-user-entrar');
-  const sair = $('btn-user-sair');
-  mostrarEstadoUser('a ver quem está…');
-  try {
-    const base44 = await clienteBase44();
-    const u = await base44.auth.me();
-    if (u && (u.email || u.full_name)) {
-      utilizadorAtual = u;
-      mostrarEstadoUser(`👤 ${nomeDoUtilizador(u)}`, true);
-      const el = $('user-estado');
-      if (el) el.title = [u.full_name, u.email, u.role ? `perfil: ${u.role}` : ''].filter(Boolean).join(' · ');
-      if (entrar) entrar.hidden = true;
-      if (sair) sair.hidden = false;
-      return u;
-    }
-    throw new Error('sem sessão');
-  } catch {
-    utilizadorAtual = null;
-    mostrarEstadoUser('sem conta');
-    const el = $('user-estado');
-    if (el) el.title = 'a app funciona sem conta; entrar é opcional';
-    if (entrar) entrar.hidden = false;
-    if (sair) sair.hidden = true;
-    return null;
-  }
-}
-
-function erroUser(msg) {
-  const el = $('user-erro');
-  if (!el) return;
-  if (!msg) {
-    el.hidden = true;
-    return;
-  }
-  el.hidden = false;
-  el.textContent = msg;
-}
-
-// Passa o formulário de "Entrar" para "Criar conta" e ao contrário.
-function modoFormUser(modo) {
-  const criar = modo === 'criar';
-  $('user-titulo').textContent = criar ? 'Criar conta' : 'Entrar';
-  $('campo-nome').hidden = !criar;
-  $('campo-senha').hidden = false;
-  $('campo-otp').hidden = true;
-  $('link-user-trocar').textContent = criar ? 'Já tem conta? Entrar' : 'Ainda não tem conta? Criar uma';
-  $('btn-user-confirmar').textContent = criar ? 'Criar conta' : 'Entrar';
-  $('dlg-user').dataset.modo = criar ? 'criar' : 'entrar';
-  erroUser('');
-}
-
-function abrirDlgUser(modo = 'entrar') {
-  modoFormUser(modo);
-  const d = $('dlg-user');
-  if (d && typeof d.showModal === 'function') d.showModal();
-}
-
-async function submeterUser(ev) {
-  if (ev && ev.preventDefault) ev.preventDefault();
-  const modo = $('dlg-user').dataset.modo || 'entrar';
-  const email = $('user-email').value.trim();
-  const senha = $('user-senha').value;
-  const btn = $('btn-user-confirmar');
-
-  if (!email) return erroUser('Escreva o seu email.');
-  if (modo !== 'otp' && senha.length < 6) return erroUser('A palavra-passe precisa de pelo menos 6 caracteres.');
-
-  btn.disabled = true;
-  erroUser('');
-  btn.textContent = modo === 'criar' ? 'a criar…' : modo === 'otp' ? 'a confirmar…' : 'a entrar…';
-  try {
-    const base44 = await clienteBase44();
-
-    if (modo === 'criar') {
-      const params = { email, password: senha };
-      const nome = $('user-nome').value.trim();
-      if (nome) params.full_name = nome;
-      await base44.auth.register(params);
-      // O registo manda um código para o email: é preciso confirmá-lo.
-      $('campo-senha').hidden = true;
-      $('campo-nome').hidden = true;
-      $('campo-otp').hidden = false;
-      $('user-titulo').textContent = 'Confirmar o email';
-      $('dlg-user').dataset.modo = 'otp';
-      erroUser('');
-      toast('Enviámos um código para o seu email. Escreva-o para confirmar a conta.', 'ok');
-      return;
-    }
-
-    if (modo === 'otp') {
-      await base44.auth.verifyOtp({ email, otpCode: $('user-otp').value.trim() });
-      const u = await verQuemEsta();
-      if (u) {
-        if (typeof $('dlg-user').close === 'function') $('dlg-user').close();
-        toast(`Bem-vindo, ${nomeDoUtilizador(u)}!`, 'ok');
-      } else {
-        erroUser('A conta foi confirmada, mas não consegui abrir a sessão. Tente entrar.');
-        modoFormUser('entrar');
-      }
-      return;
-    }
-
-    const r = await base44.auth.loginViaEmailPassword(email, senha);
-    // O token pode vir no corpo ou já ter ficado no cliente; guarda-se se vier.
-    const token = r?.access_token || r?.data?.access_token;
-    if (token) base44.auth.setToken(token);
-    const u = await verQuemEsta();
-    if (u) {
-      if (typeof $('dlg-user').close === 'function') $('dlg-user').close();
-      toast(`Bem-vindo, ${nomeDoUtilizador(u)}!`, 'ok');
-    } else {
-      erroUser('Entrei, mas não consegui confirmar a sessão. Tente outra vez.');
-    }
-  } catch (e) {
-    const corpo = e?.response?.data;
-    const msg = String(corpo?.message || corpo?.error || e?.message || 'não consegui completar o pedido');
-    const estado = e?.response?.status ? ` (HTTP ${e.response.status})` : '';
-    if (/invalid|incorrect|credential|password/i.test(msg)) erroUser('Email ou palavra-passe não conferem.');
-    else if (/not found|404/i.test(msg)) erroUser('A app não está a responder na Base44 (404). Publique a app primeiro — ver o README.');
-    else if (/already|exists/i.test(msg)) erroUser('Já existe uma conta com este email. Use "Já tem conta? Entrar".');
-    else erroUser(`${msg}${estado}`);
-  } finally {
-    btn.disabled = false;
-    const m = $('dlg-user').dataset.modo || 'entrar';
-    btn.textContent = m === 'criar' ? 'Criar conta' : m === 'otp' ? 'Confirmar' : 'Entrar';
-  }
-}
-
-function sairUser() {
-  if (utilizadorAtual && !window.confirm(`Sair da conta de ${nomeDoUtilizador(utilizadorAtual)}?`)) return;
-  clienteBase44()
-    .then((base44) => {
-      try {
-        base44.auth.logout();
-      } catch {
-        /* segue */
-      }
-      utilizadorAtual = null;
-      verQuemEsta();
-      toast('Saiu da conta.', '');
-    })
-    .catch(() => {
-      utilizadorAtual = null;
-      verQuemEsta();
-    });
-}
-
-function iniciarUtilizador() {
-  $('btn-user-entrar').onclick = () => abrirDlgUser('entrar');
-  $('btn-user-sair').onclick = sairUser;
-  $('btn-user-fechar').onclick = () => {
-    if (typeof $('dlg-user').close === 'function') $('dlg-user').close();
-  };
-  $('form-user').addEventListener('submit', submeterUser);
-  $('link-user-trocar').onclick = (e) => {
-    if (e && e.preventDefault) e.preventDefault();
-    modoFormUser($('dlg-user').dataset.modo === 'criar' ? 'entrar' : 'criar');
-  };
-  // "sem conta" no arranque; a resposta da Base44 substitui isto.
-  mostrarEstadoUser('sem conta');
-  $('btn-user-entrar').hidden = false;
-  // Pergunta quem está, mas sem segurar o arranque da app.
-  verQuemEsta();
-}
+// A lógica de "quem está a usar a app" vive agora em estudio-utilizador.mjs.
+let modUtilizadorUI = null;
+const iniciarUtilizador = () => modUtilizadorUI?.iniciarUtilizador({ toast });
 
 // ---------------------------------------------------------------- trilha sonora
-// A música vem do computador do utilizador (não há faixas dentro da app, para
-// ela continuar leve e sem licenças). Fica só nesta sessão — um ficheiro de
-// música não cabe no armazenamento do browser sem o encher.
-let trilhaAudio = null; // o <audio> da pré-escuta
-
-function pararPreviaTrilha() {
-  if (!trilhaAudio) return;
-  try {
-    trilhaAudio.pause();
-  } catch {
-    /* já parado */
-  }
-  trilhaAudio = null;
-  const b = $('btn-trilha-ouvir');
-  if (b) b.textContent = '▶️ Ouvir';
-}
-
-// Sem música escolhida, "até acabar a música" não faz sentido: fica desativado.
-// A letra também depende da duração da música, por isso se atualiza aqui.
-function aoMudarTrilha() {
-  marcarModoDuracao();
-  atualizarLetra();
-  resumoVideo();
-}
-
-// Desenha o estado da trilha: nome, duração, e que botões fazem sentido.
-function atualizarTrilha() {
-  const tem = Boolean(state.musicaFicheiro);
-  const est = $('trilha-estado');
-  if (est) {
-    if (!tem) {
-      est.className = 'hint';
-      est.textContent = 'Nenhuma música escolhida — o vídeo sai só com a narração.';
-    } else {
-      est.className = 'trilha-estado-nome';
-      const dur = state.musicaDuracao ? ` · ${formatarMinutos(state.musicaDuracao)}` : '';
-      const nome = state.musicaFicheiro.name || 'música';
-      est.textContent = `🎵 ${nome}${dur}`;
-    }
-  }
-  const ouvir = $('btn-trilha-ouvir');
-  const tirar = $('btn-trilha-tirar');
-  const ligada = $('trilha-ligada');
-  if (ouvir) ouvir.hidden = !tem;
-  if (tirar) tirar.hidden = !tem;
-  if (ligada) {
-    ligada.disabled = !tem;
-    ligada.checked = tem && state.musicaLigada;
-  }
-}
+// A trilha sonora vive também em estudio-letra-trilha.mjs; aqui ficam os atalhos.
+const pararPreviaTrilha = () => modLetraTrilha?.pararPreviaTrilha();
+const escolherTrilha = () => modLetraTrilha?.escolherTrilha();
+const tirarTrilha = () => modLetraTrilha?.tirarTrilha();
+const ouvirTrilha = () => modLetraTrilha?.ouvirTrilha();
+const ligarTrilha = () => modLetraTrilha?.ligarTrilha();
+const atualizarTrilha = () => modLetraTrilha?.atualizarTrilha();
 
 // "1:23" — usado para a duração da música e para o tempo previsto do vídeo.
 // O módulo da trilha tem a sua própria versão, com o mesmo formato.
@@ -2118,110 +1477,7 @@ const formatarMinutos = (s) => {
   return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
 };
 
-// Lê a duração real do ficheiro com um <audio> temporário. A leitura é feita
-// pelo módulo audio-info.mjs, que ouve VÁRIOS eventos e ainda pergunta em
-// intervalos: um `loadedmetadata` que não chega deixava a duração a 0, o ciclo
-// ficava sem alvo e a música era cortada a meio.
-async function medirTrilha(ficheiro) {
-  const url = URL.createObjectURL(ficheiro);
-  try {
-    const mod = await import('./audio-info.mjs');
-    return await mod.medirDuracaoAudio(url);
-  } catch {
-    // Sem conseguir medir, o ciclo "até acabar a música" não tem alvo: a página
-    // avisa e o vídeo fica com a duração das imagens, em vez de falhar.
-    return 0;
-  } finally {
-    setTimeout(() => URL.revokeObjectURL(url), 30000);
-  }
-}
 
-async function escolherTrilha() {
-  const input = $('input-trilha');
-  const f = input?.files?.[0];
-  if (!f) return;
-
-  pararPreviaTrilha();
-  state.musicaFicheiro = f;
-  state.musicaLigada = true;
-  state.musicaDuracao = 0;
-  state.musicaMedida = false;
-  // O modo "até acabar a música" fica disponível assim que há música.
-  state.modoDuracao = 'trilha';
-  if (state.videoModo === 'narracao') state.videoModo = 'ambos';
-  atualizarTrilha();
-  aoMudarTrilha();
-
-  const dur = await medirTrilha(f);
-  // Se entretanto o utilizador escolheu outra, não estragamos o estado novo.
-  if (state.musicaFicheiro !== f) return;
-  state.musicaDuracao = dur;
-  state.musicaMedida = dur > 0;
-  atualizarTrilha();
-
-  // O tempo da música é lido aqui (o motor não descodifica só para medir).
-  state.musicaSegundos = dur;
-  guardar();
-  aoMudarTrilha();
-
-  if (!dur) {
-    toast(
-      `Não consegui ler a duração de ${f.name}. O vídeo vai ficar com a duração das imagens ` +
-        '(o ciclo até acabar a música não pode ser calculado). Experimente um MP3 ou um WAV.',
-      'err',
-    );
-  }
-
-  const mb = (f.size / 1048576).toFixed(1);
-  toast(
-    dur
-      ? `Trilha: ${f.name} (${formatarMinutos(dur)}, ${mb} MB). Ouça antes de gerar.`
-      : `Trilha: ${f.name} (${mb} MB).`,
-    'ok',
-  );
-  if (input) input.value = ''; // permite escolher o mesmo ficheiro outra vez
-}
-
-function tirarTrilha() {
-  pararPreviaTrilha();
-  state.musicaFicheiro = null;
-  state.musicaDuracao = 0;
-  state.musicaUrl = '';
-  state.musicaSegundos = 0;
-  state.musicaMedida = false;
-  atualizarTrilha();
-  aoMudarTrilha();
-  toast('Trilha tirada.', '');
-}
-
-async function ouvirTrilha() {
-  if (trilhaAudio) {
-    pararPreviaTrilha();
-    return;
-  }
-  const f = state.musicaFicheiro;
-  if (!f) return;
-  if (state.musicaUrl) URL.revokeObjectURL(state.musicaUrl);
-  state.musicaUrl = URL.createObjectURL(f);
-  trilhaAudio = new Audio(state.musicaUrl);
-  trilhaAudio.volume = 0.6;
-  trilhaAudio.onended = pararPreviaTrilha;
-  $('btn-trilha-ouvir').textContent = '⏹ Parar';
-  try {
-    await trilhaAudio.play();
-  } catch {
-    pararPreviaTrilha();
-    toast('Não consegui tocar essa música neste browser.', 'err');
-  }
-}
-
-function ligarTrilha() {
-  const c = $('trilha-ligada');
-  if (!c) return;
-  state.musicaLigada = c.checked;
-  guardar();
-  resumoVideo();
-}
 
 // ---------------------------------------------------------------- vídeo
 // O vídeo é montado no browser (não há ffmpeg na nuvem). Ver public/video.mjs.
@@ -2466,6 +1722,7 @@ async function iniciarVideo() {
     const ok = await guardarComo(blob, 'rebeca-video.srt', 'Legendas (SubRip)');
     if (ok) toast('Legendas guardadas onde escolheu.', 'ok');
   };
+  $('btn-video-nuvem').onclick = guardarNaNuvem;
   rotularBotoesGuardar();
 }
 
@@ -2557,6 +1814,9 @@ async function gerarVideoFinal() {
 
   const preview = $('vid-preview');
   preview.hidden = false;
+  // A miniatura para o painel é captada durante a gravação (fotograma ~1,5s).
+  state._miniatura = null;
+  state._miniaturaPedida = false;
 
   // A letra é calculada uma vez: a lista é reutilizada na chamada e no resumo.
   const comLegendas = Boolean(state.legendas) || cuesLetra.length > 0;
@@ -2579,6 +1839,16 @@ async function gerarVideoFinal() {
       canvas: preview,
       aoProgredir: (p) => {
         if (p.fase === 'a gravar') {
+          // Miniatura: o primeiro fotograma a partir de 1,5s, para não apanhar
+          // a passagem de entrada escura entre duas imagens.
+          if (!state._miniaturaPedida && p.segundos >= 1.5) {
+            state._miniaturaPedida = true;
+            try {
+              preview.toBlob((b) => { if (b) state._miniatura = b; }, 'image/jpeg', 0.8);
+            } catch {
+              /* sem miniatura, o painel mostra o ícone */
+            }
+          }
           const pct = p.totalSegundos ? Math.round((p.segundos / p.totalSegundos) * 100) : 0;
           const ciclo = p.passagens > 1 ? ` · passagem ${p.passagem} de ${p.passagens}` : '';
           progress(true, pct, `a gravar imagem ${p.atual} de ${p.total}${ciclo} — ${Math.round(p.segundos)}s de ${Math.round(p.totalSegundos)}s`);
@@ -2670,6 +1940,63 @@ async function gerarVideoFinal() {
   }
 }
 
+// Guarda o vídeo pronto na nuvem: ficheiro + miniatura + detalhes, para o
+// 📺 Painel (vídeos prontos para subir ao YouTube).
+async function guardarNaNuvem() {
+  if (!resultadoVideo.blob) return;
+  const btn = $('btn-video-nuvem');
+  btn.disabled = true;
+  btn.textContent = 'a guardar…';
+  try {
+    const { base44 } = await import('@/base44Client.js');
+    estadoVideo('a guardar o vídeo na nuvem…', 'wait');
+    const nome = resultadoVideo.nome;
+    const { file_uri } = await base44.integrations.Core.UploadPrivateFile({
+      file: new File([resultadoVideo.blob], nome, { type: 'video/webm' }),
+    });
+    let thumb_uri = '';
+    if (state._miniatura) {
+      try {
+        const t = await base44.integrations.Core.UploadPrivateFile({
+          file: new File([state._miniatura], 'miniatura.jpg', { type: 'image/jpeg' }),
+        });
+        thumb_uri = t.file_uri;
+      } catch {
+        /* a miniatura é opcional — o cartão mostra o ícone */
+      }
+    }
+    const r = resultadoVideo.r || {};
+    const voz = state.vozesEleven.find((v) => v.id === state.vozEleven);
+    await base44.entities.VideoProducao.create({
+      nome: ($('projeto-nome').value || '').trim() || 'Projeto sem nome',
+      video_uri: file_uri,
+      video_tamanho: resultadoVideo.blob.size,
+      thumb_uri,
+      duracao: Math.round(r.duracao || 0),
+      formato: r.formato || state.videoFormato,
+      transicao: state.videoTransicaoRotulo || state.videoTransicao,
+      comVoz: Boolean(r.comVoz),
+      comMusica: Boolean(r.comMusica),
+      musicaNome: state.musicaFicheiro ? state.musicaFicheiro.name : '',
+      codec: r.codec || state.codec,
+      legendas: r.legendas || 0,
+      motorVoz: state.motor === 'eleven' ? 'ElevenLabs' : 'Voz do browser',
+      vozUsada: state.motor === 'eleven' ? (r.nomeVoz || (voz ? voz.nome : '')) : state.voz,
+    });
+    const btnPainel = $('btn-video-painel');
+    if (btnPainel) btnPainel.hidden = false;
+    btn.textContent = '☁️ Guardado ✓';
+    estadoVideo('✅ Guardado na nuvem — está no 📺 Painel de vídeos prontos.', 'ok');
+    toast('Vídeo guardado na nuvem. Está no 📺 Painel.', 'ok');
+  } catch (e) {
+    estadoVideo(`❌ Não consegui guardar na nuvem: ${e.message}`, 'err');
+    toast(`Não consegui guardar na nuvem: ${e.message}`, 'err');
+  } finally {
+    btn.disabled = false;
+    if (btn.textContent === 'a guardar…') btn.textContent = '☁️ Guardar na nuvem';
+  }
+}
+
 // A imagem de uma cena, pelo nome do ficheiro.
 function imagemDaCena(cena) {
   const i = state.images.find((x) => x.name === cena.filename);
@@ -2736,7 +2063,40 @@ async function novoProjeto() {
 $('btn-projeto-novo').onclick = novoProjeto;
 
 // ---------------------------------------------------------------- arranque
-function init() {
+// Cliente Base44 (o mesmo padrão de sempre: import dinâmico, reescrevível nos testes).
+async function clienteBase44() {
+  const { base44 } = await import('@/base44Client.js');
+  return base44;
+}
+
+// Módulos extraídos do app.js: trilha, letra, projetos e utilizador.
+async function carregarModulosExtras() {
+  const ctx = {
+    state, toast, guardar, resumoVideo, marcarModoDuracao, marcarMotor, marcarTom,
+    atualizarContador, renderThumbs, renderScenes, updateLayout, preparar, paraBase64,
+    pararPreviaTrilha, lerConfig, projetos, leg, clienteBase44,
+  };
+  try {
+    modLetraTrilha = await import('./estudio-letra-trilha.mjs');
+    modLetraTrilha.iniciar(ctx);
+  } catch (e) {
+    console.warn('módulo da letra/trilha não chegou:', e && e.message);
+  }
+  try {
+    modProjetosUI = await import('./estudio-projetos.mjs');
+    modProjetosUI.iniciar(ctx);
+  } catch (e) {
+    console.warn('módulo dos projetos não chegou:', e && e.message);
+  }
+  try {
+    modUtilizadorUI = await import('./estudio-utilizador.mjs');
+    modUtilizadorUI.iniciarUtilizador({ toast });
+  } catch (e) {
+    console.warn('módulo do utilizador não chegou:', e && e.message);
+  }
+}
+
+async function init() {
   $('btn-folder').onclick = pickFolder;
   $('btn-files').onclick = pickFiles;
   $('btn-add').onclick = pickFiles;
@@ -2827,11 +2187,12 @@ function init() {
   // separadores
   iniciarAbas();
 
-  // projetos guardados (histórico)
-  iniciarProjetos();
-
-  // utilizador (quem está a usar)
-  iniciarUtilizador();
+  // O painel manda quando a vista muda (o estúdio tem de se redesenhar).
+  if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+    window.addEventListener('rh-vista', updateLayout);
+  }
+  // projetos guardados (histórico) + utilizador: módulos à parte
+  carregarModulosExtras();
 
   // arrastar para a página (ficheiros ou pastas)
   const drop = $('drop');

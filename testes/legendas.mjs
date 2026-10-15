@@ -1,6 +1,6 @@
 // Testes das legendas: corte em blocos, temporização, .srt e caber no ecrã.
 // A lógica é pura (não precisa de canvas), por isso corre-se diretamente.
-const BASE = 'file:///E:/youtube%20rebeca2/rebeca-hub-3.0-base44/public/';
+const BASE = new URL('../public/', import.meta.url).href;
 const core = await import(BASE + 'legendas-core.mjs');
 
 const falhas = [];

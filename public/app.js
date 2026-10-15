@@ -1136,6 +1136,7 @@ async function descarregarZip() {
     ficheiros.push({ nome: `audio/${String(i + 1).padStart(2, '0')}-${s.filename.replace(/\.[^.]+$/, '')}.${s.audioExt || 'webm'}`, dados: bytes });
   }
 
+  const { criarZip } = await import('./zip.mjs');
   const zip = criarZip(ficheiros);
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([zip], { type: 'application/zip' }));
@@ -1143,75 +1144,6 @@ async function descarregarZip() {
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 5000);
   toast('Pacote descarregado.', 'ok');
-}
-
-// ZIP mínimo (método "store": sem compressão), com CRC32.
-function criarZip(ficheiros) {
-  const tabela = (() => {
-    const t = new Int32Array(256);
-    for (let i = 0; i < 256; i++) {
-      let c = i;
-      for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
-      t[i] = c;
-    }
-    return t;
-  })();
-  const crc32 = (b) => {
-    let c = -1;
-    for (let i = 0; i < b.length; i++) c = tabela[(c ^ b[i]) & 0xff] ^ (c >>> 8);
-    return (c ^ -1) >>> 0;
-  };
-
-  const locais = [];
-  const centrais = [];
-  let offset = 0;
-  const enc = new TextEncoder();
-
-  for (const f of ficheiros) {
-    const nome = enc.encode(f.nome);
-    const dados = f.dados;
-    const crc = crc32(dados);
-    const l = new Uint8Array(30 + nome.length);
-    const dv = new DataView(l.buffer);
-    dv.setUint32(0, 0x04034b50, true);
-    dv.setUint16(4, 20, true);
-    dv.setUint16(6, 0x0800, true);
-    dv.setUint16(8, 0, true); // store
-    dv.setUint32(14, crc, true);
-    dv.setUint32(18, dados.length, true);
-    dv.setUint32(22, dados.length, true);
-    dv.setUint16(26, nome.length, true);
-    l.set(nome, 30);
-    locais.push(l, dados);
-
-    const c = new Uint8Array(46 + nome.length);
-    const cv = new DataView(c.buffer);
-    cv.setUint32(0, 0x02014b50, true);
-    cv.setUint16(4, 20, true);
-    cv.setUint16(6, 20, true);
-    cv.setUint16(8, 0x0800, true);
-    cv.setUint16(10, 0, true);
-    cv.setUint32(16, crc, true);
-    cv.setUint32(20, dados.length, true);
-    cv.setUint32(24, dados.length, true);
-    cv.setUint16(28, nome.length, true);
-    cv.setUint32(42, offset, true);
-    c.set(nome, 46);
-    centrais.push(c);
-
-    offset += l.length + dados.length;
-  }
-
-  const central = centrais.reduce((s, c) => s + c.length, 0);
-  const fim = new Uint8Array(22);
-  const fv = new DataView(fim.buffer);
-  fv.setUint32(0, 0x06054b50, true);
-  fv.setUint16(8, ficheiros.length, true);
-  fv.setUint16(10, ficheiros.length, true);
-  fv.setUint32(12, central, true);
-  fv.setUint32(16, offset, true);
-
-  return new Blob([...locais, ...centrais, fim]);
 }
 
 // ---------------------------------------------------------------- vídeo
@@ -2785,55 +2717,23 @@ function lerConfig() {
   }
 }
 
-async function testarLigacao() {
-  const caixa = $('cfg-resultado');
-  caixa.hidden = false;
-  caixa.className = 'cfg-result wait';
-  caixa.textContent = 'a testar…';
-  const servico = $('cfg-servico').value;
-  try {
-    if (servico === 'local') {
-      const r = await fetch('http://127.0.0.1:3100/api/health').catch(() => null);
-      if (!r || !r.ok) throw new Error('não há servidor local a responder em 127.0.0.1:3100');
-      const d = await r.json();
-      caixa.className = 'cfg-result ok';
-      caixa.textContent = `✅ Servidor local respondeu (versão ${d.versao || '?'}).`;
-      return;
-    }
-    const { base44 } = await import('@/base44Client.js');
-    // Teste propositado: sem imagens, a função responde 400 com a explicação.
-    // Se essa explicação chegar, então a função está viva e a falar com o SDK.
-    let d;
-    try {
-      const r = await base44.functions.invoke('generateNarration', { servico, imagens: [] });
-      d = r?.data && !r.ok ? r.data : r;
-    } catch (e) {
-      d = e?.response?.data || { ok: false, error: e?.message };
-      if (e?.response?.status) d.http = e.response.status;
-    }
-    if (d?.ok) {
-      caixa.className = 'cfg-result ok';
-      caixa.textContent = '✅ A função de nuvem respondeu.';
-    } else if (/Nenhuma imagem recebida/i.test(d?.error || '')) {
-      // É a resposta CERTA para um teste sem imagens: a função está a funcionar.
-      caixa.className = 'cfg-result ok';
-      caixa.textContent =
-        '✅ A função de nuvem está a responder' +
-        (d.http ? ` (HTTP ${d.http})` : '') +
-        '. O teste não envia imagens, por isso ela pede imagens — é o esperado.';
-    } else if (/Falta o segredo/i.test(d?.error || '')) {
-      caixa.className = 'cfg-result err';
-      caixa.textContent =
-        `⚠️ A função responde, mas falta o segredo. Corra:  base44 secrets set DEEPSEEK_API_KEY=sk_...\n\n${d.error}`;
-    } else {
-      caixa.className = 'cfg-result err';
-      caixa.textContent = `❌ ${d?.error || 'a função respondeu de forma inesperada'}`;
-    }
-  } catch (e) {
-    caixa.className = 'cfg-result err';
-    caixa.textContent = `❌ ${e.message}`;
-  }
+// ---------------------------------------------------------------- novo projeto
+// "✨ Novo projeto": começa uma produção limpa. Reaproveita a limpeza do botão
+// "🗑 Limpar" (imagens, narração e áudio) e acrescenta o que ele não faz:
+// letra da música, trilha e o nome do projeto. Os projetos guardados ficam.
+async function novoProjeto() {
+  $('btn-clear').onclick();
+  limparLetra();
+  tirarTrilha();
+  $('projeto-nome').value = '';
+  guardar();
+  estadoProjeto('Projeto novo: importe as imagens desta produção.');
+  toast('Projeto novo — tudo limpo para a próxima produção.', 'ok');
+  await desenharProjetos();
 }
+// O script corre no fim do body (módulo, depois da análise): os elementos já
+// existem quando esta linha corre, por isso a ligação pode ser direta.
+$('btn-projeto-novo').onclick = novoProjeto;
 
 // ---------------------------------------------------------------- arranque
 function init() {
@@ -2969,7 +2869,7 @@ function init() {
 
   // configurações
   $('btn-config').onclick = () => $('dlg').showModal();
-  $('cfg-testar').onclick = testarLigacao;
+  $('cfg-testar').onclick = () => import('./teste-ligacao.mjs').then((m) => m.testarLigacao());
   $('cfg-guardar').onclick = (e) => {
     e.preventDefault();
     state.servico = $('cfg-servico').value;

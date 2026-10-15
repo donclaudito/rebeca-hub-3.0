@@ -1,7 +1,7 @@
 // Sonda: o módulo de medição devolve a duração com um <audio> que se comporta
 // como um browser a sério (só sabe a duração depois de ter o src, e de forma
 // assíncrona). Cada caso imita um browser diferente.
-const BASE = 'file:///E:/youtube%20rebeca2/rebeca-hub-3.0-base44/public/';
+const BASE = new URL('../public/', import.meta.url).href;
 const mod = await import(BASE + 'audio-info.mjs');
 
 const falhas = [];

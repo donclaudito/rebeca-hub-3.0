@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
-const base = 'E:\\youtube rebeca2\\rebeca-hub-3.0-base44\\public\\';
+import { fileURLToPath } from 'node:url';
+const base = fileURLToPath(new URL('../public/', import.meta.url));
 const html = readFileSync(base + 'index.html', 'utf8');
 const js = readFileSync(base + 'app.js', 'utf8');
 const ids = new Set([...html.matchAll(/id="([A-Za-z0-9_-]+)"/g)].map((m) => m[1]));

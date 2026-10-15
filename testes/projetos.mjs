@@ -6,8 +6,9 @@
 // browser. Isto testa o que o módulo faz, não o browser.
 import { readFileSync } from 'node:fs';
 
-const BASE = 'file:///E:/youtube%20rebeca2/rebeca-hub-3.0-base44/public/';
-const raiz = 'E:/youtube rebeca2/rebeca-hub-3.0-base44/public/';
+import { fileURLToPath } from 'node:url';
+const BASE = new URL('../public/', import.meta.url).href;
+const raiz = fileURLToPath(new URL('../public/', import.meta.url));
 
 const falhas = [];
 const ok = (m) => console.log('  ok:', m);

@@ -27,8 +27,30 @@ export function medidasDoVideo(file) {
     const v = document.createElement('video');
     v.preload = 'metadata';
     v.onloadedmetadata = () => {
-      URL.revokeObjectURL(v.src);
-      res({ duracao: v.duration || 0, formato: `${v.videoWidth}x${v.videoHeight}` });
+      // WebM gravado pelo próprio browser chega com duração "Infinity" nos
+      // metadados; o truque do currentTime (pular para o fim) obriga o browser
+      // a calcular a duração verdadeira no evento durationchange.
+      const formato = `${v.videoWidth}x${v.videoHeight}`;
+      if (Number.isFinite(v.duration) && v.duration > 0) {
+        URL.revokeObjectURL(v.src);
+        return res({ duracao: v.duration, formato });
+      }
+      let respondido = false;
+      const fechar = (duracao) => {
+        if (respondido) return;
+        respondido = true;
+        URL.revokeObjectURL(v.src);
+        res({ duracao: Number.isFinite(duracao) && duracao > 0 ? duracao : 0, formato });
+      };
+      v.ondurationchange = () => {
+        if (Number.isFinite(v.duration) && v.duration > 0) fechar(v.duration);
+      };
+      try {
+        v.currentTime = 1e101;
+      } catch {
+        fechar(0);
+      }
+      setTimeout(() => fechar(v.duration), 4000);
     };
     v.onerror = () => rej(new Error('não consegui ler o vídeo'));
     v.src = URL.createObjectURL(file);
@@ -84,7 +106,8 @@ async function abrirVideoNoEstudio(file) {
   toast('A ler o vídeo…');
   let duracao = 0;
   try {
-    duracao = (await medidasDoVideo(file)).duracao;
+    const lida = (await medidasDoVideo(file)).duracao;
+    duracao = Number.isFinite(lida) && lida > 0 ? lida : 0;
   } catch {
     /* segue sem a duração lida */
   }

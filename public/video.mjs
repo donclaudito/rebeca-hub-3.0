@@ -88,8 +88,8 @@ function explicarSemCiclo(modoDuracao, alvo, natural) {
 function duracoesDasCenas(marcaSemFala, clipes, T, duracaoCena, cenas = []) {
   const fixa = Math.max(2 * T + 0.2, Number(duracaoCena) || DURACAO_SEM_VOZ);
   return clipes.map((c, i) => {
-    const doVideo = Number(cenas[i]?.duracaoVideo) || 0;
-    if (doVideo > 0) return Math.max(2 * T + 0.2, doVideo);
+    const doVideo = Number(cenas[i]?.duracaoVideo);
+    if (Number.isFinite(doVideo) && doVideo > 0) return Math.max(2 * T + 0.2, doVideo);
     return marcaSemFala[i] ? fixa : Math.max(2 * T + 0.2, c.duration);
   });
 }

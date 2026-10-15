@@ -18,7 +18,7 @@ import { blocoAtivo, legendasDasCenas, legendasParaSrt } from './legendas-core.m
 // Versão do motor. Aparece no resumo da página: serve para saber, sem dúvidas,
 // qual build está a correr no browser (um build antigo em cache foi uma das
 // causas de "não funcionou" que já apanhei).
-export const VERSAO_VIDEO = '3.5.1';
+export const VERSAO_VIDEO = '3.6.0';
 
 export const FORMATOS = [
   { id: '1920x1080', rotulo: 'Horizontal 1920×1080 (YouTube)', w: 1920, h: 1080 },
@@ -83,9 +83,15 @@ function explicarSemCiclo(modoDuracao, alvo, natural) {
 
 // Uma cena sem narração fica com o tempo escolhido, em vez da duração do
 // silêncio que lá foi posto, para não arrastar a montagem.
-function duracoesDasCenas(marcaSemFala, clipes, T, duracaoCena) {
+// Cena de vídeo: a duração é a DO PRÓPRIO FICHEIRO (duracaoVideo), não a do
+// silêncio nem a do clipe de narração — ela manda no ritmo da montagem.
+function duracoesDasCenas(marcaSemFala, clipes, T, duracaoCena, cenas = []) {
   const fixa = Math.max(2 * T + 0.2, Number(duracaoCena) || DURACAO_SEM_VOZ);
-  return clipes.map((c, i) => (marcaSemFala[i] ? fixa : Math.max(2 * T + 0.2, c.duration)));
+  return clipes.map((c, i) => {
+    const doVideo = Number(cenas[i]?.duracaoVideo) || 0;
+    if (doVideo > 0) return Math.max(2 * T + 0.2, doVideo);
+    return marcaSemFala[i] ? fixa : Math.max(2 * T + 0.2, c.duration);
+  });
 }
 
 // Repete a lista de cenas até chegar à duração pedida.
@@ -173,11 +179,26 @@ const carregarImagem = (url) =>
     i.src = url;
   });
 
-// Desenha a imagem a cobrir o canvas inteiro (recorta o que sobra), sem deformar.
+// Cena de VÍDEO: carrega o ficheiro como <video>; cada fotograma é desenhado
+// durante a gravação e o som entra pela ligação ao destino do gravador.
+const carregarVideo = (url) =>
+  new Promise((resolve, reject) => {
+    const v = document.createElement('video');
+    v.preload = 'auto';
+    v.playsInline = true;
+    v.onloadeddata = () => resolve(v);
+    v.onerror = () => reject(new Error('não consegui ler um dos vídeos da montagem'));
+    v.src = url;
+  });
+
+// Desenha a imagem (ou o fotograma atual do vídeo) a cobrir o canvas inteiro
+// (recorta o que sobra), sem deformar.
 function desenharCobrindo(ctx, img, w, h, escala = 1, deslocamentoX = 0) {
-  const proporcao = Math.max(w / img.naturalWidth, h / img.naturalHeight) * escala;
-  const dw = img.naturalWidth * proporcao;
-  const dh = img.naturalHeight * proporcao;
+  const mw = img.naturalWidth || img.videoWidth || 1;
+  const mh = img.naturalHeight || img.videoHeight || 1;
+  const proporcao = Math.max(w / mw, h / mh) * escala;
+  const dw = mw * proporcao;
+  const dh = mh * proporcao;
   ctx.drawImage(img, (w - dw) / 2 + deslocamentoX, (h - dh) / 2, dw, dh);
 }
 
@@ -353,9 +374,13 @@ export async function gerarVideo({
 
   // 1) carregar as imagens
   aoProgredir({ fase: 'a preparar as imagens', atual: 0, total: cenas.length });
+  // Cada fonte é uma Image (cena de imagem) ou um <video> (cena de vídeo).
   const imagens = [];
+  const elementosVideo = [];
   for (const [i, c] of cenas.entries()) {
-    imagens.push(await carregarImagem(c.imagem));
+    const fonte = c.video ? await carregarVideo(c.imagem) : await carregarImagem(c.imagem);
+    imagens.push(fonte);
+    elementosVideo.push(c.video ? fonte : null);
     aoProgredir({ fase: 'a preparar as imagens', atual: i + 1, total: cenas.length });
   }
 
@@ -426,7 +451,19 @@ export async function gerarVideo({
 
   // Duração natural de cada cena: a do seu áudio, nunca menos do que a passagem
   // precisa (senão as duas passagens sobrepunham-se). Sem voz, é a duração fixa.
-  const duracoes = duracoesDasCenas(marcaSemFala, clipes, T, duracaoCena);
+  const duracoes = duracoesDasCenas(marcaSemFala, clipes, T, duracaoCena, cenas);
+
+  // O SOM das cenas de vídeo vem do próprio ficheiro, tocado em tempo real e
+  // ligado ao mesmo destino da narração e da trilha (entra no vídeo gravado).
+  for (const v of elementosVideo) {
+    if (!v) continue;
+    try {
+      seq.ctx.createMediaElementSource(v).connect(seq.ganho);
+    } catch (e) {
+      try { await seq.ctx.close(); } catch { /* já fechado */ }
+      return { ok: false, erro: `não consegui ligar o som de um vídeo da montagem: ${e.message}` };
+    }
+  }
   const natural = duracoes.reduce((a, d) => a + d, 0);
 
   // O vídeo é curto e a música é longa? Em vez de cortar a música, as imagens
@@ -547,6 +584,19 @@ export async function gerarVideo({
         try { fonte.start(agoraCtx() + Math.max(0, inicios[i] - relogio())); } catch { /* já tocou */ }
       }
 
+      // Cena de vídeo: recomeça o ficheiro e toca — o fotograma atual é o que
+      // o desenho apanha (também nas passagens com a cena em ciclo).
+      const fonteAtual = imagensFinal[i];
+      const cenaDeVideo = fonteAtual && fonteAtual.tagName === 'VIDEO';
+      if (cenaDeVideo) {
+        try {
+          fonteAtual.currentTime = 0;
+          await fonteAtual.play();
+        } catch {
+          /* segue com o fotograma parado; a cena continua */
+        }
+      }
+
       let interrompido = false;
       let acabouMusica = false;
       await new Promise((resolve) => {
@@ -577,6 +627,10 @@ export async function gerarVideo({
         };
         requestAnimationFrame(quadro);
       });
+
+      if (cenaDeVideo) {
+        try { fonteAtual.pause(); } catch { /* já parou */ }
+      }
 
       // Só conta o tempo que chegou a ser gravado.
       acumulado = Math.min(totalEfetivo, Math.max(acumulado, relogio()));

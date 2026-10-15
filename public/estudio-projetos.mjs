@@ -87,6 +87,8 @@ async function recolherProjeto(nome) {
       audio,
       audioExt: cena.audioExt || '',
       previaVoz: cena.previaVoz || '',
+      video: Boolean(img.video),
+      duracaoVideo: Number(img.duracao) || 0,
     });
   }
   return {
@@ -183,7 +185,13 @@ export async function desenharProjetos() {
     const li = document.createElement('li');
     li.className = `projeto${p.id === projetos.idAtual ? ' atual' : ''}`;
 
-    if (p.miniatura instanceof Blob || p.miniatura) {
+    const miniaturaVideo = p.miniatura && /^video\//i.test(p.miniatura.type || '');
+    if (miniaturaVideo) {
+      const sem = document.createElement('span');
+      sem.className = 'sem-miniatura';
+      sem.textContent = '🎬';
+      li.append(sem);
+    } else if (p.miniatura instanceof Blob || p.miniatura) {
       const img = document.createElement('img');
       img.alt = '';
       img.src = URL.createObjectURL(p.miniatura);
@@ -252,6 +260,8 @@ export async function abrirProjeto(id) {
         file: c.imagem,
         name: c.nome || 'imagem',
         url: URL.createObjectURL(c.imagem),
+        video: Boolean(c.video) || /^video\//i.test(c.imagem?.type || ''),
+        duracao: Number(c.duracaoVideo) || 0,
       }));
     state.scenes = (p.cenas || [])
       .filter((c) => c.imagem)

@@ -497,6 +497,38 @@
       </div>
     </dialog>
 
+    <!-- Prompts do tema escolhido: imagem e música, prontos para copiar -->
+    <dialog id="dlg-prompts" class="dlg">
+      <form method="dialog" class="dlg-form">
+        <div class="dlg-cabeca">
+          <h2 id="prompts-titulo">Prompts</h2>
+          <button id="btn-prompts-fechar" class="ghost small" type="button">Fechar</button>
+        </div>
+        <div id="prompts-estado" class="cfg-result" hidden></div>
+        <label class="field wide">
+          <span>🎨 Prompt de imagem (em inglês, para os geradores de imagem)</span>
+          <textarea id="prompts-imagem" rows="5" spellcheck="false"></textarea>
+        </label>
+        <div class="dlg-acoes">
+          <button id="btn-copiar-imagem" class="ghost small" type="button">📋 Copiar o prompt de imagem</button>
+        </div>
+        <label class="field wide">
+          <span>🎵 Estilo da música (para geradores como o Suno)</span>
+          <textarea id="prompts-estilo" rows="3" spellcheck="false"></textarea>
+        </label>
+        <label class="field wide">
+          <span>🎼 Letra da música</span>
+          <textarea id="prompts-letra" rows="9" spellcheck="false"></textarea>
+        </label>
+        <div class="dlg-acoes">
+          <button id="btn-copiar-musica" class="ghost small" type="button">📋 Copiar a música (estilo + letra)</button>
+        </div>
+        <p class="hint" style="margin:8px 0 0">
+          Tudo é editável: mude o texto aqui e copie como ficou. Cole o prompt de imagem no gerador de imagens e o estilo + a letra no gerador de música.
+        </p>
+      </form>
+    </dialog>
+
     <!-- ============================================================ -->
     <!-- Pesquisa de temas: sugestões da IA para vídeos infantis       -->
     <!-- ============================================================ -->

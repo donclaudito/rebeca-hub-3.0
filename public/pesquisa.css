@@ -230,6 +230,31 @@
   color: #9aa3b2;
 }
 
+/* Prompts do tema: botões no cartão e campos editáveis no diálogo. */
+.pesq-acoes-card {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+.dlg-form textarea {
+  background: #0f1115;
+  border: 1px solid #2b3040;
+  border-radius: 10px;
+  color: #fff;
+  padding: 10px 12px;
+  font-size: 14px;
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  line-height: 1.5;
+}
+.dlg-form textarea:focus {
+  outline: 2px solid #a78bfa;
+  outline-offset: 0;
+  border-color: #a78bfa;
+}
+
 @media (max-width: 640px) {
   .pesq-topo {
     flex-direction: column;

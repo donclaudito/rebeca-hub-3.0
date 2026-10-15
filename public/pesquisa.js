@@ -194,8 +194,90 @@ function cartaoSugestao(s) {
   potencial.append(trilho, nota);
   linha.append(potencial);
 
-  li.append(titulo, tema, just, linha);
+  const acoes = document.createElement('div');
+  acoes.className = 'pesq-acoes-card';
+  const bi = document.createElement('button');
+  bi.type = 'button';
+  bi.className = 'ghost small';
+  bi.textContent = '🎨 Prompt de imagem';
+  bi.onclick = () => abrirPrompts(s);
+  const bm = document.createElement('button');
+  bm.type = 'button';
+  bm.className = 'ghost small';
+  bm.textContent = '🎵 Prompt de música';
+  bm.onclick = () => abrirPrompts(s);
+  acoes.append(bi, bm);
+
+  li.append(titulo, tema, just, linha, acoes);
   return li;
+}
+
+// ---------------------------------------------------------------- prompts do tema
+// Abre o diálogo dos prompts para a sugestão escolhida. Gera UMA vez por
+// sugestão (fica em s._promptImagem etc.); o texto é editável e as edições
+// ficam enquanto a resposta estiver na tela.
+function abrirPrompts(s) {
+  const dlg = $('dlg-prompts');
+  const estado = $('prompts-estado');
+  if (!dlg || !estado) return;
+  $('prompts-titulo').textContent = s.tituloIdeia || s.tema;
+  $('prompts-imagem').value = s._promptImagem || '';
+  $('prompts-estilo').value = s._musicaEstilo || '';
+  $('prompts-letra').value = s._musicaLetra || '';
+  $('prompts-imagem').oninput = () => (s._promptImagem = $('prompts-imagem').value);
+  $('prompts-estilo').oninput = () => (s._musicaEstilo = $('prompts-estilo').value);
+  $('prompts-letra').oninput = () => (s._musicaLetra = $('prompts-letra').value);
+
+  if (s._promptImagem) {
+    estado.hidden = true;
+  } else {
+    estado.hidden = false;
+    estado.className = 'cfg-result';
+    estado.textContent = 'a gerar os prompts…';
+    (async () => {
+      try {
+        const b = await cliente();
+        let resposta = await b.functions.invoke('gerarPrompts', {
+          tema: s.tema || '',
+          tituloIdeia: s.tituloIdeia || '',
+          faixa: s.faixa || '',
+        });
+        let d = resposta?.data && typeof resposta.data === 'object' ? resposta.data : resposta;
+        if (d?.data && typeof d.data === 'object') d = d.data;
+        if (!d?.ok) throw new Error(d?.error || 'não consegui gerar os prompts');
+        s._promptImagem = d.promptImagem || '';
+        s._musicaEstilo = d.musicaEstilo || '';
+        s._musicaLetra = d.musicaLetra || '';
+        // Só preenche se o diálogo continua aberto e ainda é o mesmo tema.
+        if (dlg.open && $('prompts-titulo').textContent === (s.tituloIdeia || s.tema)) {
+          $('prompts-imagem').value = s._promptImagem;
+          $('prompts-estilo').value = s._musicaEstilo;
+          $('prompts-letra').value = s._musicaLetra;
+          estado.hidden = true;
+        }
+      } catch (e) {
+        estado.hidden = false;
+        estado.className = 'cfg-result err';
+        estado.textContent = `❌ ${e.message}`;
+      }
+    })();
+  }
+  dlg.showModal();
+}
+
+// Copia o texto para a área de transferência; sem permissão, seleciona o campo.
+async function copiarTexto(texto, campo, btn) {
+  if (!texto.trim()) return;
+  try {
+    await navigator.clipboard.writeText(texto);
+  } catch {
+    // Sem permissão de clipboard: plano B, seleção + comando de cópia.
+    campo.select();
+    if (!document.execCommand('copy')) return; // fica selecionado para copiar à mão
+  }
+  const antigo = btn.textContent;
+  btn.textContent = 'copiado ✓';
+  setTimeout(() => (btn.textContent = antigo), 2000);
 }
 
 // Vídeos entram no filtro quando a faixa deles cruza com a escolhida;
@@ -375,6 +457,22 @@ if (typeof window !== 'undefined') {
   if (form) form.onsubmit = (e) => e.preventDefault();
   const btn = $('btn-pesq');
   if (btn) btn.onclick = pesquisar;
+
+  // Prompts: copiar imagem e copiar música (estilo + letra).
+  const btnCopiarImagem = $('btn-copiar-imagem');
+  if (btnCopiarImagem) {
+    btnCopiarImagem.onclick = () => copiarTexto($('prompts-imagem').value, $('prompts-imagem'), btnCopiarImagem);
+  }
+  const btnCopiarMusica = $('btn-copiar-musica');
+  if (btnCopiarMusica) {
+    btnCopiarMusica.onclick = () => {
+      const estilo = $('prompts-estilo').value.trim();
+      const letra = $('prompts-letra').value.trim();
+      copiarTexto([estilo, '', letra].filter((t, i) => i === 0 || t).join('\n'), $('prompts-letra'), btnCopiarMusica);
+    };
+  }
+  const btnFecharPrompts = $('btn-prompts-fechar');
+  if (btnFecharPrompts) btnFecharPrompts.onclick = () => $('dlg-prompts').close();
 
   // "#pesquisa" abre a vista de temas direto (link, favorito).
   if (/pesquisa/.test(hashAtual())) mostrarPesquisa();

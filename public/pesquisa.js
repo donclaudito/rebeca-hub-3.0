@@ -12,6 +12,67 @@ const $ = (id) => document.getElementById(id);
 
 let ocupado = false;
 
+// Filtros de idade: as sugestões chegam com "faixa" em texto (ex.: "4 a 8 anos");
+// aqui separam-nos pelas faixas 0-3, 4-7 e 8-12.
+let ultimasSugestoes = [];
+let filtroIdade = 'todos';
+
+const FAIXAS_FILTRO = [
+  { id: 'todos', rotulo: 'Todas as idades' },
+  { id: '0-3', rotulo: '0–3 anos', min: 0, max: 3 },
+  { id: '4-7', rotulo: '4–7 anos', min: 4, max: 7 },
+  { id: '8-12', rotulo: '8–12 anos', min: 8, max: 12 },
+];
+
+// A sugestão entra na faixa quando a idade dela cruza com ela
+// ("1 a 4 anos" serve para 0-3 E para 4-7, por exemplo).
+function dentroDaFaixa(sugestao, idFiltro) {
+  const f = FAIXAS_FILTRO.find((x) => x.id === idFiltro);
+  if (!f || f.id === 'todos') return true;
+  const nums = String(sugestao.faixa || '').match(/\d+/g)?.map(Number) || [];
+  if (!nums.length) return false;
+  const min = nums[0];
+  const max = nums.length > 1 ? nums[1] : nums[0];
+  return min <= f.max && max >= f.min;
+}
+
+function desenharSugestoes() {
+  const lista = document.getElementById('pesq-lista-sugestoes');
+  if (!lista) return;
+  lista.innerHTML = '';
+  const ordenadas = ultimasSugestoes
+    .slice()
+    .sort((x, y) => (Number(y.potencial) || 0) - (Number(x.potencial) || 0));
+  const visiveis = ordenadas.filter((s) => dentroDaFaixa(s, filtroIdade));
+  if (!visiveis.length) {
+    const vazio = document.createElement('p');
+    vazio.className = 'pesq-vazio-filtro';
+    vazio.textContent = 'Nenhuma sugestão nessa faixa de idade.';
+    lista.append(vazio);
+    return;
+  }
+  for (const s of visiveis) lista.append(cartaoSugestao(s));
+}
+
+function desenharFiltros(caixa) {
+  const bar = document.createElement('div');
+  bar.className = 'pesq-filtros';
+  for (const f of FAIXAS_FILTRO) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'pesq-filtro' + (filtroIdade === f.id ? ' on' : '');
+    const n = f.id === 'todos' ? ultimasSugestoes.length : ultimasSugestoes.filter((s) => dentroDaFaixa(s, f.id)).length;
+    b.textContent = n ? `${f.rotulo} (${n})` : f.rotulo;
+    b.onclick = () => {
+      filtroIdade = f.id;
+      [...bar.children].forEach((x) => x.classList.toggle('on', x === b));
+      desenharSugestoes();
+    };
+    bar.append(b);
+  }
+  caixa.append(bar);
+}
+
 // ---------------------------------------------------------------- helpers
 async function cliente() {
   const { base44 } = await import('@/base44Client.js');
@@ -189,13 +250,14 @@ function desenharResultados(dados, link) {
     caixa.append(bloco);
   }
 
+  ultimasSugestoes = dados.sugestoes || [];
+  filtroIdade = 'todos';
+  desenharFiltros(caixa);
   const lista = document.createElement('ul');
+  lista.id = 'pesq-lista-sugestoes';
   lista.className = 'pesq-lista';
-  const ordenadas = (dados.sugestoes || [])
-    .slice()
-    .sort((x, y) => (Number(y.potencial) || 0) - (Number(x.potencial) || 0));
-  for (const s of ordenadas) lista.append(cartaoSugestao(s));
   caixa.append(lista);
+  desenharSugestoes();
 
   const nota = document.createElement('p');
   nota.className = 'pesq-nota-rodape';

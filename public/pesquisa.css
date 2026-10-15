@@ -194,6 +194,36 @@
   text-decoration: underline;
 }
 
+.pesq-filtros {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 16px 0 10px;
+}
+.pesq-filtro {
+  background: #171a20;
+  border: 1px solid #262b36;
+  color: #c9cfda;
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.pesq-filtro:hover {
+  border-color: #3a4054;
+}
+.pesq-filtro.on {
+  border-color: #a78bfa;
+  color: #a78bfa;
+  background: rgba(167, 139, 250, 0.12);
+}
+.pesq-vazio-filtro {
+  margin: 6px 0;
+  font-size: 14px;
+  color: #9aa3b2;
+}
+
 @media (max-width: 640px) {
   .pesq-topo {
     flex-direction: column;

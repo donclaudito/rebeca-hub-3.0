@@ -6,6 +6,7 @@
     <title>Rebeca Hub 3.0 — nuvem</title>
     <link rel="stylesheet" href="/style.css" />
     <link rel="stylesheet" href="/painel.css" />
+    <link rel="stylesheet" href="/pesquisa.css" />
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎙️</text></svg>" />
   </head>
   <body>
@@ -20,6 +21,7 @@
       <div class="top-actions">
         <button id="btn-ir-painel" class="ghost" type="button" title="os vídeos já prontos">📺 Painel</button>
         <button id="btn-ir-estudio" class="ghost" type="button" hidden>🎙️ Estúdio</button>
+        <button id="btn-ir-pesquisa" class="ghost" type="button" title="sugestões de temas com IA">🔍 Temas</button>
         <span id="status" class="pill">a ligar…</span>
         <span id="versao" class="pill tiny-pill" title="versão do motor de vídeo que está a correr neste browser">v…</span>
 
@@ -495,8 +497,40 @@
       </div>
     </dialog>
 
+    <!-- ============================================================ -->
+    <!-- Pesquisa de temas: sugestões da IA para vídeos infantis       -->
+    <!-- ============================================================ -->
+    <section id="pesquisa-section" class="pesquisa" hidden>
+      <div class="pesquisa-corpo">
+        <div class="pesquisa-cabeca">
+          <h2>🔍 Pesquisa de temas</h2>
+          <p>Sugestões da IA para vídeos infantis (0–12 anos): temas mais procurados, títulos prontos e faixa etária.</p>
+        </div>
+
+        <form id="form-pesquisa" class="pesq-form">
+          <label class="field">
+            <span>Palavras-chave</span>
+            <input id="pesq-palavras" type="text" maxlength="300"
+              placeholder="ex.: dinossauros, fazendinha, histórias de dormir" />
+          </label>
+          <label class="field">
+            <span>Link de um vídeo do YouTube (opcional, como referência)</span>
+            <input id="pesq-link" type="url" placeholder="https://www.youtube.com/watch?v=…" />
+          </label>
+          <div class="pesq-acoes">
+            <button id="btn-pesq" class="primary" type="submit">✨ Sugerir temas</button>
+          </div>
+          <div id="pesq-estado" class="cfg-result" hidden></div>
+          <div id="pesq-erro" class="cfg-result err" hidden></div>
+        </form>
+
+        <section id="pesq-resultados" class="pesq-resultados"></section>
+      </div>
+    </section>
+
     <div id="toast" class="toast" hidden></div>
     <script type="module" src="/app.js"></script>
     <script type="module" src="/painel.js"></script>
+    <script type="module" src="/pesquisa.js"></script>
   </body>
 </html>

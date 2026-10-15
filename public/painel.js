@@ -83,8 +83,10 @@ function mostrarVista(vista) {
   const drop = $('drop');
   const ws = $('workspace');
   const secao = $('painel-section');
+  const pesq = $('pesquisa-section');
   const btnPainel = $('btn-ir-painel');
   const btnEstudio = $('btn-ir-estudio');
+  if (pesq) pesq.hidden = true;
   if (drop) drop.hidden = noPainel;
   if (secao) secao.hidden = !noPainel;
   if (ws) ws.hidden = noPainel || !ws.hidden; // ao voltar, o estúdio decide (updateLayout)

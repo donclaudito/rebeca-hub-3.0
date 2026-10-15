@@ -1,0 +1,162 @@
+/* ============================================================
+   Rebeca Hub 3.0 — Pesquisa de temas (IA)
+   Mesma paleta escura do painel.
+   ============================================================ */
+.pesquisa {
+  display: flex;
+  justify-content: center;
+  padding: 20px 16px 40px;
+  min-height: 60vh;
+}
+.pesquisa-corpo {
+  width: 100%;
+  max-width: 980px;
+}
+.pesquisa-cabeca h2 {
+  margin: 0 0 6px;
+  font-size: 22px;
+}
+.pesquisa-cabeca p {
+  margin: 0;
+  color: #9aa3b2;
+  font-size: 14px;
+}
+
+.pesq-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: #171a20;
+  border: 1px solid #262b36;
+  border-radius: 14px;
+  padding: 18px;
+  margin: 16px 0;
+}
+.pesq-form label.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.pesq-form label.field span {
+  font-size: 13px;
+  color: #9aa3b2;
+}
+.pesq-form input {
+  background: #0f1115;
+  border: 1px solid #2b3040;
+  border-radius: 10px;
+  color: #fff;
+  padding: 10px 12px;
+  font-size: 15px;
+}
+.pesq-form input:focus {
+  outline: 2px solid #a78bfa;
+  outline-offset: 0;
+  border-color: #a78bfa;
+}
+.pesq-acoes {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.pesq-resultados:empty {
+  display: none;
+}
+.pesq-topo {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin: 18px 0 10px;
+}
+.pesq-topo h3 {
+  margin: 0;
+  font-size: 17px;
+}
+.pesq-topo a {
+  text-decoration: none;
+}
+
+.pesq-lista {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+.pesq-item {
+  background: #171a20;
+  border: 1px solid #262b36;
+  border-radius: 12px;
+  padding: 12px 14px;
+}
+.pesq-item .pesq-titulo {
+  font-weight: 700;
+  font-size: 15px;
+  margin: 0 0 2px;
+}
+.pesq-item .pesq-tema {
+  font-size: 14px;
+  color: #c9cfda;
+  margin: 0 0 6px;
+}
+.pesq-item .pesq-just {
+  font-size: 13px;
+  color: #9aa3b2;
+  margin: 0 0 8px;
+  line-height: 1.5;
+}
+.pesq-item .pesq-linha {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.pesq-etiqueta {
+  font-size: 12px;
+  color: #a78bfa;
+  background: rgba(167, 139, 250, 0.12);
+  border: 1px solid rgba(167, 139, 250, 0.35);
+  border-radius: 999px;
+  padding: 2px 10px;
+  white-space: nowrap;
+}
+.pesq-potencial {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 140px;
+}
+.pesq-trilho {
+  flex: 1;
+  height: 6px;
+  border-radius: 999px;
+  background: #262b36;
+  overflow: hidden;
+}
+.pesq-barra {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #a78bfa, #7c5cf0);
+}
+.pesq-nota {
+  font-size: 12px;
+  color: #c9cfda;
+  white-space: nowrap;
+}
+
+.pesq-nota-rodape {
+  margin: 12px 0 0;
+  font-size: 13px;
+  color: #9aa3b2;
+}
+
+@media (max-width: 640px) {
+  .pesq-topo {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}

@@ -108,7 +108,9 @@ function updateLayout() {
   // (mesmo com imagens importadas) — é o painel.js que manda na vista.
   let noPainel = false;
   try {
-    noPainel = (localStorage.getItem('rh3vista') || 'painel') === 'painel';
+    // O estúdio só aparece na vista "estudio": o painel E a pesquisa de temas
+    // o escondem, mesmo com imagens importadas.
+    noPainel = (localStorage.getItem('rh3vista') || 'painel') !== 'estudio';
   } catch {
     /* modo privado */
   }

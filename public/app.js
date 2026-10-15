@@ -2046,6 +2046,103 @@ function lerConfig() {
   }
 }
 
+// ---------------------------------------------------------------- carregar vídeo
+// Um vídeo JÁ PRONTO (baixado de outro lugar, por exemplo) sobe direto para o
+// 📺 Painel: lê a duração e o formato, tira uma miniatura e guarda na nuvem.
+function medidasDoVideo(file) {
+  return new Promise((res, rej) => {
+    const v = document.createElement('video');
+    v.preload = 'metadata';
+    v.onloadedmetadata = () => {
+      URL.revokeObjectURL(v.src);
+      res({ duracao: v.duration || 0, formato: `${v.videoWidth}x${v.videoHeight}` });
+    };
+    v.onerror = () => rej(new Error('não consegui ler o vídeo'));
+    v.src = URL.createObjectURL(file);
+  });
+}
+
+// Fotograma do vídeo (~1,5s) como miniatura para o cartão do painel.
+function miniaturaDoVideo(file, duracao) {
+  return new Promise((res) => {
+    const v = document.createElement('video');
+    v.preload = 'metadata';
+    v.muted = true;
+    v.onloadeddata = () => {
+      const t = duracao > 3 ? 1.5 : duracao * 0.3;
+      try {
+        v.currentTime = Math.max(0, t);
+      } catch {
+        res(null);
+      }
+    };
+    v.onseeked = () => {
+      try {
+        const c = document.createElement('canvas');
+        const escala = Math.min(1, 640 / Math.max(1, v.videoWidth));
+        c.width = Math.max(1, Math.round(v.videoWidth * escala));
+        c.height = Math.max(1, Math.round(v.videoHeight * escala));
+        c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
+        c.toBlob((b) => res(b), 'image/jpeg', 0.8);
+      } catch {
+        res(null);
+      }
+      URL.revokeObjectURL(v.src);
+    };
+    v.onerror = () => res(null);
+    setTimeout(() => res(null), 8000);
+    v.src = URL.createObjectURL(file);
+  });
+}
+
+const ehFicheiroVideo = (f) => /^video\//i.test(f.type) || /\.(mp4|webm|mov|mkv|avi)$/i.test(f.name);
+
+async function carregarVideoFicheiro(file) {
+  if (!file) return;
+  if (!ehFicheiroVideo(file)) return toast('Esse ficheiro não parece ser um vídeo.', 'err');
+  toast('A ler o vídeo…');
+  let duracao = 0;
+  let formato = '';
+  try {
+    const info = await medidasDoVideo(file);
+    duracao = info.duracao;
+    formato = info.formato;
+  } catch {
+    /* segue sem os detalhes */
+  }
+  let thumb_uri = '';
+  try {
+    const blob = await miniaturaDoVideo(file, duracao);
+    if (blob) {
+      const b = await clienteBase44();
+      const t = await b.integrations.Core.UploadPrivateFile({
+        file: new File([blob], 'miniatura.jpg', { type: 'image/jpeg' }),
+      });
+      thumb_uri = t.file_uri;
+    }
+  } catch {
+    /* a miniatura é opcional */
+  }
+  toast('A guardar o vídeo na nuvem…');
+  try {
+    const b = await clienteBase44();
+    const { file_uri } = await b.integrations.Core.UploadPrivateFile({ file });
+    await b.entities.VideoProducao.create({
+      nome: (file.name.replace(/\.[^.]+$/, '') || 'Vídeo carregado').slice(0, 60),
+      video_uri: file_uri,
+      video_tamanho: file.size,
+      thumb_uri,
+      duracao: Math.round(duracao),
+      formato,
+    });
+    toast('Vídeo carregado — está no 📺 Painel.', 'ok');
+    const btnPainel = $('btn-ir-painel');
+    if (btnPainel && !btnPainel.hidden) btnPainel.click();
+  } catch (e) {
+    toast(`Não consegui guardar o vídeo: ${e.message}`, 'err');
+  }
+}
+
 // ---------------------------------------------------------------- novo projeto
 // "✨ Novo projeto": começa uma produção limpa. Reaproveita a limpeza do botão
 // "🗑 Limpar" (imagens, narração e áudio) e acrescenta o que ele não faz:
@@ -2107,6 +2204,11 @@ async function init() {
   $('btn-folder').onclick = pickFolder;
   $('btn-files').onclick = pickFiles;
   $('btn-add').onclick = pickFiles;
+  $('btn-video-load').onclick = () => $('input-video').click();
+  $('input-video').onchange = (e) => {
+    if (e.target.files?.length) carregarVideoFicheiro(e.target.files[0]);
+    e.target.value = '';
+  };
   $('btn-generate').onclick = gerar;
   $('btn-clear').onclick = () => {
     stopSpeak();
@@ -2232,7 +2334,13 @@ async function init() {
     } else {
       ficheiros.push(...(e.dataTransfer?.files || []));
     }
-    if (ficheiros.length) addImages(ficheiros);
+    if (ficheiros.length) {
+      // Vídeo arrastado vai para o painel; imagens seguem para o estúdio.
+      const videos = ficheiros.filter(ehFicheiroVideo);
+      const imagens = ficheiros.filter((f) => !videos.includes(f));
+      if (videos.length) carregarVideoFicheiro(videos[0]);
+      if (imagens.length) addImages(imagens);
+    }
   });
 
   // configurações

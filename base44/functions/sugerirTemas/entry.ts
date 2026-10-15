@@ -49,15 +49,17 @@ export default async function (req) {
 
     const base44 = createClientFromRequest(req);
 
+    // Com link, a IA pesquisa na internet o vídeo e similares (Gemini com busca).
+    const comLink = Boolean(videoId);
     const prompt = [
       'Você é um pesquisador de temas para vídeos INFANTIS no YouTube (público de 0 a 12 anos; conteúdo sempre seguro e apropriado para crianças).',
       palavras ? `Palavras-chave do usuário: "${palavras}".` : '',
       videoId
         ? `Vídeo de referência informado pelo usuário: https://www.youtube.com/watch?v=${videoId} (id ${videoId}).`
         : '',
-      videoId
-        ? 'Se você reconhecer esse vídeo pela sua memória, pode usá-lo como contexto de tema. NUNCA afirme ter assistido ao vídeo, lido as estatísticas dele ou acessado a internet. Não invente título, canal ou números de visualização.'
-        : '',
+      comLink
+        ? 'COM O LINK: pesquise na internet ESSE vídeo (título real, canal, tema) e VÍDEOS SIMILARES de sucesso no YouTube para o mesmo público infantil. Analise o que faz esses vídeos funcionarem (formato, tema, tom) e use isso para fundamentar as sugestões. Em "videoInfo" devolva o que CONFIRMOU sobre o vídeo (titulo e canal reais; em "observacao", uma linha com o que aprendeu; se não encontrou o vídeo, diga isso — NUNCA invente título, canal ou números de visualização). Em "videosSimilares" liste de 3 a 5 vídeos infantis similares de sucesso que encontrou (titulo, canal, url — URL real do YouTube; se não achou, devolva a lista vazia). NUNCA afirme ter assistido aos vídeos.'
+        : 'Sem link: baseie-se no seu conhecimento sobre conteúdo infantil de sucesso no YouTube. NUNCA afirme ter acessado a internet.',
       '',
       'Tarefa: devolva de 8 a 10 sugestões de TEMAS de vídeos infantis RELACIONADOS, já ordenadas do potencial MAIS ALTO ao MAIS BAIXO —',
       'ou seja, primeiro os temas que você estima serem MAIS PROCURADOS por pais e crianças nesse público, depois os demais.',
@@ -77,10 +79,32 @@ export default async function (req) {
     const inicio = Date.now();
     const resposta = await base44.asServiceRole.integrations.Core.InvokeLLM({
       prompt,
+      // A busca na internet só vale a pena (e só é suportada) quando há link.
+      ...(comLink ? { model: 'gemini_3_8_flash', add_context_from_internet: true } : {}),
       response_json_schema: {
         type: 'object',
         properties: {
           tema: { type: 'string' },
+          videoInfo: {
+            type: 'object',
+            properties: {
+              titulo: { type: 'string' },
+              canal: { type: 'string' },
+              observacao: { type: 'string' },
+            },
+          },
+          videosSimilares: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                titulo: { type: 'string' },
+                canal: { type: 'string' },
+                url: { type: 'string' },
+              },
+              required: ['titulo', 'url'],
+            },
+          },
           sugestoes: {
             type: 'array',
             items: {
@@ -118,6 +142,22 @@ export default async function (req) {
     return json({
       ok: true,
       tema: String(resposta?.tema || palavras || '').trim().slice(0, 160),
+      videoInfo:
+        resposta?.videoInfo && typeof resposta.videoInfo === 'object'
+          ? {
+              titulo: String(resposta.videoInfo.titulo || '').trim().slice(0, 200),
+              canal: String(resposta.videoInfo.canal || '').trim().slice(0, 120),
+              observacao: String(resposta.videoInfo.observacao || '').trim().slice(0, 300),
+            }
+          : null,
+      videosSimilares: (Array.isArray(resposta?.videosSimilares) ? resposta.videosSimilares : [])
+        .map((v) => ({
+          titulo: String(v?.titulo || '').trim().slice(0, 200),
+          canal: String(v?.canal || '').trim().slice(0, 120),
+          url: /^https:\/\/(www\.)?(youtube\.com|youtu\.be)\//.test(String(v?.url || '')) ? String(v.url) : '',
+        }))
+        .filter((v) => v.titulo && v.url)
+        .slice(0, 5),
       sugestoes: limpas,
       ms: Date.now() - inicio,
       aviso:

@@ -147,6 +147,48 @@ function desenharResultados(dados, link) {
   }
   caixa.append(topo);
 
+  // O que a IA confirmou sobre o vídeo de referência (quando veio com link).
+  const info = dados.videoInfo;
+  if (info && (info.titulo || info.observacao)) {
+    const ref = document.createElement('div');
+    ref.className = 'pesq-referencia';
+    const l1 = document.createElement('p');
+    l1.textContent = info.titulo
+      ? `🎬 Referência: ${info.titulo}${info.canal ? ` — ${info.canal}` : ''}`
+      : `🎬 ${info.observacao}`;
+    ref.append(l1);
+    if (info.titulo && info.observacao) {
+      const l2 = document.createElement('p');
+      l2.className = 'pesq-ref-obs';
+      l2.textContent = info.observacao;
+      ref.append(l2);
+    }
+    caixa.append(ref);
+  }
+
+  // Vídeos similares de sucesso que a IA encontrou na internet.
+  const parecidos = dados.videosSimilares || [];
+  if (parecidos.length) {
+    const bloco = document.createElement('div');
+    bloco.className = 'pesq-similares';
+    const t = document.createElement('h4');
+    t.textContent = '🔗 Vídeos similares no YouTube';
+    bloco.append(t);
+    const ul = document.createElement('ul');
+    for (const v of parecidos) {
+      const li = document.createElement('li');
+      const a = document.createElement('a');
+      a.href = v.url;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      a.textContent = v.titulo + (v.canal ? ` — ${v.canal}` : '');
+      li.append(a);
+      ul.append(li);
+    }
+    bloco.append(ul);
+    caixa.append(bloco);
+  }
+
   const lista = document.createElement('ul');
   lista.className = 'pesq-lista';
   const ordenadas = (dados.sugestoes || [])

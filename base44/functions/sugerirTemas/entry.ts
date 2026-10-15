@@ -4,10 +4,13 @@
 //  Recebe palavras-chave e/ou o link de um vídeo do YouTube e
 //  devolve sugestões de TEMAS para vídeos infantis (0–12 anos),
 //  ordenadas do potencial estimado mais alto ao mais baixo.
-//  As notas são estimativas da IA — nunca métricas reais do
-//  YouTube (não há YouTube Data API nem busca na internet aqui).
+//  As notas de potencial são estimativas da IA. Quando há link e a chave
+//  YOUTUBE_API_KEY está configurada, o vídeo de referência e os similares
+//  vêm da API oficial do YouTube (dados reais); sem chave, a IA pesquisa
+//  na internet (Gemini com busca).
 // ============================================================
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.52';
+import { secrets } from 'base44:runtime';
 
 const json = (corpo, status = 200) =>
   new Response(JSON.stringify(corpo), {
@@ -24,6 +27,74 @@ function extrairYoutube(link) {
 }
 
 const MAX_SUGESTOES = 12;
+
+// ---------------------------------------------------------------- YouTube Data API
+// Busca DADOS REAIS na API oficial: o vídeo de referência (título, canal,
+// visualizações) e vídeos similares (busca pelo título do vídeo, ou pelas
+// palavras-chave, com a contagem de visualizações de cada um).
+// Qualquer falha devolve null — a app segue com o caminho antigo (IA + web).
+async function buscarNoYoutube(videoId, palavras, chave) {
+  try {
+    const opcoes = { signal: AbortSignal.timeout(10000) };
+    const url = (caminho, params) =>
+      `https://www.googleapis.com/youtube/v3/${caminho}?${new URLSearchParams({ ...params, key: chave })}`;
+
+    let videoRef = null;
+    if (videoId) {
+      const r = await fetch(url('videos', { part: 'snippet,statistics', id: videoId }), opcoes);
+      if (!r.ok) return null;
+      const d = await r.json();
+      const v = d?.items?.[0];
+      if (v) {
+        videoRef = {
+          id: videoId,
+          titulo: String(v.snippet?.title || '').slice(0, 200),
+          canal: String(v.snippet?.channelTitle || '').slice(0, 120),
+          visualizacoes: Number(v.statistics?.viewCount) || 0,
+        };
+      }
+    }
+
+    const consulta = (videoRef?.titulo || palavras || '').trim();
+    if (!consulta) return videoRef ? { videoRef, similares: [] } : null;
+
+    const rBusca = await fetch(
+      url('search', {
+        part: 'snippet',
+        type: 'video',
+        maxResults: '6',
+        relevanceLanguage: 'pt',
+        q: consulta.slice(0, 200),
+      }),
+      opcoes,
+    );
+    if (!rBusca.ok) return videoRef ? { videoRef, similares: [] } : null;
+    const dBusca = await rBusca.json();
+    const achados = (dBusca?.items || [])
+      .map((i) => ({
+        id: i.id?.videoId,
+        titulo: String(i.snippet?.title || '').slice(0, 200),
+        canal: String(i.snippet?.channelTitle || '').slice(0, 120),
+      }))
+      .filter((v) => v.id && v.id !== videoId && v.titulo)
+      .slice(0, 5);
+
+    // Visualizações reais de cada similar: UM só videos.list com todos os ids.
+    const ids = achados.map((v) => v.id).join(',');
+    const statsPorId = {};
+    if (ids) {
+      const rStats = await fetch(url('videos', { part: 'statistics', id: ids }), opcoes);
+      if (rStats.ok) {
+        const dStats = await rStats.json();
+        for (const v of dStats?.items || []) statsPorId[v.id] = Number(v.statistics?.viewCount) || 0;
+      }
+    }
+    const similares = achados.map((v) => ({ ...v, visualizacoes: statsPorId[v.id] || 0 }));
+    return { videoRef, similares };
+  } catch {
+    return null;
+  }
+}
 
 export default async function (req) {
   try {
@@ -49,8 +120,24 @@ export default async function (req) {
 
     const base44 = createClientFromRequest(req);
 
-    // Com link, a IA pesquisa na internet o vídeo e similares (Gemini com busca).
     const comLink = Boolean(videoId);
+
+    // DADOS REAIS: com a chave da YouTube Data API, buscamos o vídeo de
+    // referência e os similares na API oficial. Sem chave, ou em falha, a
+    // app segue com o caminho antigo (IA com busca na internet).
+    const chaveYoutube = (secrets.get('YOUTUBE_API_KEY') || '').trim();
+    const dadosApi = comLink && chaveYoutube ? await buscarNoYoutube(videoId, palavras, chaveYoutube) : null;
+    const fonteReal = Boolean(dadosApi?.videoRef) || (dadosApi?.similares?.length || 0) > 0;
+    const linhaDados = [
+      dadosApi?.videoRef
+        ? `DADOS REAIS (API oficial do YouTube) do vídeo de referência: "${dadosApi.videoRef.titulo}" — canal "${dadosApi.videoRef.canal}" — ${dadosApi.videoRef.visualizacoes} visualizações.`
+        : '',
+      (dadosApi?.similares?.length || 0) > 0
+        ? 'DADOS REAIS (API oficial do YouTube) de vídeos similares, com visualizações reais: ' +
+          dadosApi.similares.map((v) => `"${v.titulo}" (canal "${v.canal}", ${v.visualizacoes} visualizações)`).join('; ')
+        : '',
+    ].filter(Boolean);
+
     const prompt = [
       'Você é um pesquisador de temas para vídeos INFANTIS no YouTube (público de 0 a 12 anos; conteúdo sempre seguro e apropriado para crianças).',
       palavras ? `Palavras-chave do usuário: "${palavras}".` : '',
@@ -58,8 +145,11 @@ export default async function (req) {
         ? `Vídeo de referência informado pelo usuário: https://www.youtube.com/watch?v=${videoId} (id ${videoId}).`
         : '',
       comLink
-        ? 'COM O LINK: pesquise na internet ESSE vídeo (título real, canal, tema) e VÍDEOS SIMILARES de sucesso no YouTube para o mesmo público infantil. Analise o que faz esses vídeos funcionarem (formato, tema, tom) e use isso para fundamentar as sugestões. Em "videoInfo" devolva o que CONFIRMOU sobre o vídeo (titulo e canal reais; em "observacao", uma linha com o que aprendeu; se não encontrou o vídeo, diga isso — NUNCA invente título, canal ou números de visualização). Em "videosSimilares" liste de 3 a 5 vídeos infantis similares de sucesso que encontrou (titulo, canal, url — URL real do YouTube; se não achou, devolva a lista vazia). NUNCA afirme ter assistido aos vídeos.'
+        ? fonteReal
+          ? 'COM O LINK: você recebeu DADOS REAIS da API oficial do YouTube logo abaixo. Fundamente as sugestões e as justificativas NELES (o que os vídeos reais têm em comum: formato, tema, tom, escala de visualizações). NÃO invente nem corrija esses dados e NÃO precisa devolver "videoInfo" nem "videosSimilares" — a resposta final já leva os dados reais. NUNCA afirme ter assistido aos vídeos.'
+          : 'COM O LINK: pesquise na internet ESSE vídeo (título real, canal, tema) e VÍDEOS SIMILARES de sucesso no YouTube para o mesmo público infantil. Analise o que faz esses vídeos funcionarem (formato, tema, tom) e use isso para fundamentar as sugestões. Em "videoInfo" devolva o que CONFIRMOU sobre o vídeo (titulo e canal reais; em "observacao", uma linha com o que aprendeu; se não encontrou o vídeo, diga isso — NUNCA invente título, canal ou números de visualização). Em "videosSimilares" liste de 3 a 5 vídeos infantis similares de sucesso que encontrou (titulo, canal, url — URL real do YouTube; se não achou, devolva a lista vazia). NUNCA afirme ter assistido aos vídeos.'
         : 'Sem link: baseie-se no seu conhecimento sobre conteúdo infantil de sucesso no YouTube. NUNCA afirme ter acessado a internet.',
+      ...linhaDados,
       '',
       'Tarefa: devolva de 8 a 10 sugestões de TEMAS de vídeos infantis RELACIONADOS, já ordenadas do potencial MAIS ALTO ao MAIS BAIXO —',
       'ou seja, primeiro os temas que você estima serem MAIS PROCURADOS por pais e crianças nesse público, depois os demais.',
@@ -79,8 +169,10 @@ export default async function (req) {
     const inicio = Date.now();
     const resposta = await base44.asServiceRole.integrations.Core.InvokeLLM({
       prompt,
-      // A busca na internet só vale a pena (e só é suportada) quando há link.
-      ...(comLink ? { model: 'gemini_3_8_flash', add_context_from_internet: true } : {}),
+      // A busca na internet só vale a pena (e só é suportada) quando há link
+      // e a API do YouTube não deu os dados reais — com dados reais, chamada
+      // simples (modelo automático, sem custo extra de créditos).
+      ...(comLink && !fonteReal ? { model: 'gemini_3_8_flash', add_context_from_internet: true } : {}),
       response_json_schema: {
         type: 'object',
         properties: {
@@ -142,26 +234,42 @@ export default async function (req) {
     return json({
       ok: true,
       tema: String(resposta?.tema || palavras || '').trim().slice(0, 160),
-      videoInfo:
-        resposta?.videoInfo && typeof resposta.videoInfo === 'object'
+      videoInfo: dadosApi?.videoRef
+        ? {
+            titulo: dadosApi.videoRef.titulo,
+            canal: dadosApi.videoRef.canal,
+            observacao: 'Dados reais obtidos na API oficial do YouTube.',
+            visualizacoes: dadosApi.videoRef.visualizacoes,
+          }
+        : resposta?.videoInfo && typeof resposta.videoInfo === 'object'
           ? {
               titulo: String(resposta.videoInfo.titulo || '').trim().slice(0, 200),
               canal: String(resposta.videoInfo.canal || '').trim().slice(0, 120),
               observacao: String(resposta.videoInfo.observacao || '').trim().slice(0, 300),
+              visualizacoes: 0,
             }
           : null,
-      videosSimilares: (Array.isArray(resposta?.videosSimilares) ? resposta.videosSimilares : [])
-        .map((v) => ({
-          titulo: String(v?.titulo || '').trim().slice(0, 200),
-          canal: String(v?.canal || '').trim().slice(0, 120),
-          url: /^https:\/\/(www\.)?(youtube\.com|youtu\.be)\//.test(String(v?.url || '')) ? String(v.url) : '',
-        }))
+      // Com dados reais da API, os similares SÃO os vídeos reais encontrados.
+      videosSimilares: (dadosApi?.similares?.length
+        ? dadosApi.similares.map((v) => ({
+            titulo: v.titulo,
+            canal: v.canal,
+            url: `https://www.youtube.com/watch?v=${v.id}`,
+            visualizacoes: v.visualizacoes || 0,
+          }))
+        : (Array.isArray(resposta?.videosSimilares) ? resposta.videosSimilares : []).map((v) => ({
+            titulo: String(v?.titulo || '').trim().slice(0, 200),
+            canal: String(v?.canal || '').trim().slice(0, 120),
+            url: /^https:\/\/(www\.)?(youtube\.com|youtu\.be)\//.test(String(v?.url || '')) ? String(v.url) : '',
+            visualizacoes: 0,
+          }))
+      )
         .filter((v) => v.titulo && v.url)
         .slice(0, 5),
       sugestoes: limpas,
       ms: Date.now() - inicio,
       aviso:
-        'As notas são estimativas da IA sobre o interesse do público infantil — não são métricas reais de visualização do YouTube.',
+        'As notas de potencial são estimativas da IA. As visualizações do vídeo de referência e dos similares vêm da API oficial do YouTube (dados reais).',
     });
   } catch (erro) {
     console.error('sugerirTemas falhou', erro);

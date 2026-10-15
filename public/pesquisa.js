@@ -102,6 +102,14 @@ function extrairYoutube(link) {
   return m ? m[1] : '';
 }
 
+// Visualizações vêm da API do YouTube (número cru); aqui viram "1,2 mi".
+function formatarViews(n) {
+  const v = Number(n) || 0;
+  if (v >= 1000000) return `${(v / 1000000).toFixed(1).replace('.', ',')} mi de visualizações`;
+  if (v >= 1000) return `${Math.round(v / 1000)} mil visualizações`;
+  return v ? `${v} visualizações` : '';
+}
+
 // ---------------------------------------------------------------- vistas
 // Entra na vista de pesquisa: esconde painel e estúdio e mostra esta seção.
 function mostrarPesquisa() {
@@ -213,9 +221,10 @@ function desenharResultados(dados, link) {
   if (info && (info.titulo || info.observacao)) {
     const ref = document.createElement('div');
     ref.className = 'pesq-referencia';
+    const vistasRef = formatarViews(info.visualizacoes);
     const l1 = document.createElement('p');
     l1.textContent = info.titulo
-      ? `🎬 Referência: ${info.titulo}${info.canal ? ` — ${info.canal}` : ''}`
+      ? `🎬 Referência: ${info.titulo}${info.canal ? ` — ${info.canal}` : ''}${vistasRef ? ` · ${vistasRef}` : ''}`
       : `🎬 ${info.observacao}`;
     ref.append(l1);
     if (info.titulo && info.observacao) {
@@ -242,7 +251,8 @@ function desenharResultados(dados, link) {
       a.href = v.url;
       a.target = '_blank';
       a.rel = 'noopener noreferrer';
-      a.textContent = v.titulo + (v.canal ? ` — ${v.canal}` : '');
+      const vistas = formatarViews(v.visualizacoes);
+      a.textContent = v.titulo + (v.canal ? ` — ${v.canal}` : '') + (vistas ? ` · ${vistas}` : '');
       li.append(a);
       ul.append(li);
     }

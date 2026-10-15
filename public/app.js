@@ -157,14 +157,21 @@ function renderThumbs() {
     n.className = 'n';
     n.textContent = i + 1;
 
-    const im = document.createElement('img');
+    // Cena de vídeo: a miniatura é o próprio vídeo parado no primeiro fotograma.
+    const im = document.createElement(img.video ? 'video' : 'img');
+    if (img.video) {
+      im.muted = true;
+      im.playsInline = true;
+      im.preload = 'metadata';
+    } else {
+      im.alt = img.name;
+      im.loading = 'lazy';
+    }
     im.src = img.url;
-    im.alt = img.name;
-    im.loading = 'lazy';
 
     const nm = document.createElement('span');
     nm.className = 'nm';
-    nm.textContent = img.name;
+    nm.textContent = img.video ? `🎬 ${img.name}` : img.name;
     nm.title = img.name;
 
     const mover = (simbolo, delta, titulo) => {
@@ -236,17 +243,22 @@ function sincronizarCenas() {
   const porNome = new Map(state.scenes.map((s) => [s.filename, s]));
   state.scenes = state.images.map((img) => {
     const antes = porNome.get(img.name);
-    return (
-      antes || {
-        filename: img.name,
-        texto: '',
-        audioUrl: null,
-        audioB64: null,
-        audioExt: '',
-        previaUrl: null,
-        previaVoz: '',
-      }
-    );
+    // Cenas de vídeo: a duração e o som vêm do próprio ficheiro.
+    const video = Boolean(img?.video);
+    const duracaoVideo = Number(img?.duracao) || 0;
+    return antes
+      ? { ...antes, video, duracaoVideo }
+      : {
+          filename: img.name,
+          texto: '',
+          audioUrl: null,
+          audioB64: null,
+          audioExt: '',
+          previaUrl: null,
+          previaVoz: '',
+          video,
+          duracaoVideo,
+        };
   });
 }
 
@@ -260,6 +272,35 @@ function renderScenes() {
     const img = state.images[i];
     const li = document.createElement('li');
     li.className = 'scene';
+
+    if (img?.video) {
+      // Cena de vídeo: sem narração e sem texto — imagem e som vêm do ficheiro.
+      const vid = document.createElement('video');
+      vid.src = img.url;
+      vid.muted = true;
+      vid.playsInline = true;
+      vid.preload = 'metadata';
+      const corpo = document.createElement('div');
+      corpo.className = 'scene-body';
+      const topo = document.createElement('div');
+      topo.className = 'scene-top';
+      const idx = document.createElement('span');
+      idx.className = 'idx';
+      idx.textContent = `Vídeo ${i + 1}`;
+      const nome = document.createElement('span');
+      nome.className = 'file';
+      nome.textContent = cena.filename;
+      topo.append(idx, nome);
+      const dica = document.createElement('p');
+      dica.className = 'hint';
+      dica.textContent =
+        `🎬 Cena de vídeo${img.duracao ? ` (~${Math.round(img.duracao)}s)` : ''} — a imagem e o som ` +
+        'vêm do próprio ficheiro. Arraste na aba 🖼️ para mudar a ordem.';
+      corpo.append(topo, dica);
+      li.append(vid, corpo);
+      ol.append(li);
+      return;
+    }
 
     const im = document.createElement('img');
     im.src = img ? img.url : '';
@@ -695,9 +736,17 @@ async function gerar() {
   $('btn-generate').disabled = true;
   progress(true, 5, 'a preparar as imagens…');
   try {
+    // Cenas de vídeo não vão para a narração: a fala delas é o próprio vídeo.
+    const enviaveis = state.images.filter((img) => !img.video);
+    if (!enviaveis.length) {
+      progress(false);
+      state.busy = false;
+      $('btn-generate').disabled = false;
+      return toast('Não há imagens para narrar — só cena(s) de vídeo.', 'err');
+    }
     const prontas = [];
-    for (const [i, img] of state.images.entries()) {
-      if (i % 4 === 0) progress(true, 5 + Math.round((i / state.images.length) * 25), `a preparar imagem ${i + 1} de ${state.images.length}…`);
+    for (const [i, img] of enviaveis.entries()) {
+      if (i % 4 === 0) progress(true, 5 + Math.round((i / enviaveis.length) * 25), `a preparar imagem ${i + 1} de ${enviaveis.length}…`);
       prontas.push(await preparar(img));
     }
     const totalMb = prontas.reduce((s, p) => s + p.file.size, 0) / 1048576;
@@ -707,8 +756,8 @@ async function gerar() {
     if (state.servico === 'local') {
       // Alternativa: o servidor local, se ainda o tiver a correr.
       const fd = new FormData();
-      prontas.forEach((p, i) => fd.append('images', p.file, state.images[i].name));
-      fd.append('order', state.images.map((i) => i.name).join('\u0001'));
+      prontas.forEach((p, i) => fd.append('images', p.file, enviaveis[i].name));
+      fd.append('order', enviaveis.map((img) => img.name).join('\u0001'));
       fd.append('tone', $('tone').value.trim());
       fd.append('extra', $('extra').value.trim());
       fd.append('minWords', $('minWords').value);
@@ -724,7 +773,7 @@ async function gerar() {
       const imagens = await Promise.all(
         prontas.map(async (p, i) => {
           const b64 = await paraBase64(p.file);
-          return { nome: state.images[i].name, dataUrl: `data:${p.file.type || 'image/jpeg'};base64,${b64}` };
+          return { nome: enviaveis[i].name, dataUrl: `data:${p.file.type || 'image/jpeg'};base64,${b64}` };
         }),
       );
 
@@ -1315,7 +1364,7 @@ function notaCiclo() {
 
 // Quanto tempo o vídeo levaria sem repetir nada.
 function duracaoNaturalPrevista() {
-  const comTexto = state.scenes.filter((s) => (s.texto || '').trim());
+  const comTexto = state.scenes.filter((s) => (s.texto || '').trim() || s.video);
   const lista = querVoz() ? comTexto : state.images;
   if (!lista.length) return 0;
   if (!querVoz()) return lista.length * (Number(state.videoDuracaoCena) || 3.5);
@@ -1461,6 +1510,7 @@ const iniciarProjetos = () => modProjetosUI?.iniciarProjetos();
 // ---------------------------------------------------------------- utilizador
 // A lógica de "quem está a usar a app" vive agora em estudio-utilizador.mjs.
 let modUtilizadorUI = null;
+let modVideoCarregado = null;
 const iniciarUtilizador = () => modUtilizadorUI?.iniciarUtilizador({ toast });
 
 // ---------------------------------------------------------------- trilha sonora
@@ -1731,7 +1781,8 @@ async function iniciarVideo() {
 async function gerarVideoFinal() {
   if (state.busy) return;
 
-  const comTexto = state.scenes.filter((s) => (s.texto || '').trim());
+  // Cenas de vídeo entram mesmo sem texto: quem manda nelas é o próprio ficheiro.
+  const comTexto = state.scenes.filter((s) => (s.texto || '').trim() || s.video);
   const semFala = comTexto.filter((s) => !s.audioUrl && !s.previaUrl);
   const musica = state.musicaFicheiro && querMusica() && state.musicaLigada ? state.musicaFicheiro : null;
 
@@ -1799,7 +1850,14 @@ async function gerarVideoFinal() {
       }
     }
     // O texto vai com a legenda: é dele que saem os blocos do vídeo e do .srt.
-    cenas.push({ imagem, audio, texto: s.texto || '' });
+    // Cenas de vídeo: a duração e o som vêm do próprio ficheiro.
+    cenas.push({
+      imagem,
+      audio,
+      texto: s.texto || '',
+      video: Boolean(s.video),
+      duracaoVideo: Number(s.duracaoVideo ?? s.duracao) || 0,
+    });
   }
 
   if (!cenas.length) {
@@ -1809,7 +1867,7 @@ async function gerarVideoFinal() {
     return estadoVideo('❌ Não consegui preparar nenhuma imagem para o vídeo.', 'err');
   }
 
-  const semVoz = cenas.filter((c) => !c.audio).length;
+  const semVoz = cenas.filter((c) => !c.audio && !c.video).length;
   if (comVoz && semVoz) {
     estadoVideo(`⚠️ ${semVoz} cena(s) sem áudio — o vídeo fica sem voz nessas.`, 'wait');
   }
@@ -2047,100 +2105,10 @@ function lerConfig() {
 }
 
 // ---------------------------------------------------------------- carregar vídeo
-// Um vídeo JÁ PRONTO (baixado de outro lugar, por exemplo) sobe direto para o
-// 📺 Painel: lê a duração e o formato, tira uma miniatura e guarda na nuvem.
-function medidasDoVideo(file) {
-  return new Promise((res, rej) => {
-    const v = document.createElement('video');
-    v.preload = 'metadata';
-    v.onloadedmetadata = () => {
-      URL.revokeObjectURL(v.src);
-      res({ duracao: v.duration || 0, formato: `${v.videoWidth}x${v.videoHeight}` });
-    };
-    v.onerror = () => rej(new Error('não consegui ler o vídeo'));
-    v.src = URL.createObjectURL(file);
-  });
-}
-
-// Fotograma do vídeo (~1,5s) como miniatura para o cartão do painel.
-function miniaturaDoVideo(file, duracao) {
-  return new Promise((res) => {
-    const v = document.createElement('video');
-    v.preload = 'metadata';
-    v.muted = true;
-    v.onloadeddata = () => {
-      const t = duracao > 3 ? 1.5 : duracao * 0.3;
-      try {
-        v.currentTime = Math.max(0, t);
-      } catch {
-        res(null);
-      }
-    };
-    v.onseeked = () => {
-      try {
-        const c = document.createElement('canvas');
-        const escala = Math.min(1, 640 / Math.max(1, v.videoWidth));
-        c.width = Math.max(1, Math.round(v.videoWidth * escala));
-        c.height = Math.max(1, Math.round(v.videoHeight * escala));
-        c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
-        c.toBlob((b) => res(b), 'image/jpeg', 0.8);
-      } catch {
-        res(null);
-      }
-      URL.revokeObjectURL(v.src);
-    };
-    v.onerror = () => res(null);
-    setTimeout(() => res(null), 8000);
-    v.src = URL.createObjectURL(file);
-  });
-}
-
-const ehFicheiroVideo = (f) => /^video\//i.test(f.type) || /\.(mp4|webm|mov|mkv|avi)$/i.test(f.name);
-
-async function carregarVideoFicheiro(file) {
-  if (!file) return;
-  if (!ehFicheiroVideo(file)) return toast('Esse ficheiro não parece ser um vídeo.', 'err');
-  toast('A ler o vídeo…');
-  let duracao = 0;
-  let formato = '';
-  try {
-    const info = await medidasDoVideo(file);
-    duracao = info.duracao;
-    formato = info.formato;
-  } catch {
-    /* segue sem os detalhes */
-  }
-  let thumb_uri = '';
-  try {
-    const blob = await miniaturaDoVideo(file, duracao);
-    if (blob) {
-      const b = await clienteBase44();
-      const t = await b.integrations.Core.UploadPrivateFile({
-        file: new File([blob], 'miniatura.jpg', { type: 'image/jpeg' }),
-      });
-      thumb_uri = t.file_uri;
-    }
-  } catch {
-    /* a miniatura é opcional */
-  }
-  toast('A guardar o vídeo na nuvem…');
-  try {
-    const b = await clienteBase44();
-    const { file_uri } = await b.integrations.Core.UploadPrivateFile({ file });
-    await b.entities.VideoProducao.create({
-      nome: (file.name.replace(/\.[^.]+$/, '') || 'Vídeo carregado').slice(0, 60),
-      video_uri: file_uri,
-      video_tamanho: file.size,
-      thumb_uri,
-      duracao: Math.round(duracao),
-      formato,
-    });
-    toast('Vídeo carregado — está no 📺 Painel.', 'ok');
-    const btnPainel = $('btn-ir-painel');
-    if (btnPainel && !btnPainel.hidden) btnPainel.click();
-  } catch (e) {
-    toast(`Não consegui guardar o vídeo: ${e.message}`, 'err');
-  }
+// O vídeo carregado (estúdio como cena, ou painel direto) vive em
+// estudio-video-carregado.mjs; cá fica só a ponta que a lista de imagens usa.
+function carregarVideoFicheiro(file) {
+  if (modVideoCarregado) modVideoCarregado.carregarVideoFicheiro(file);
 }
 
 // ---------------------------------------------------------------- novo projeto
@@ -2198,17 +2166,18 @@ async function carregarModulosExtras() {
   } catch (e) {
     console.warn('módulo do utilizador não chegou:', e && e.message);
   }
+  try {
+    modVideoCarregado = await import('./estudio-video-carregado.mjs');
+    modVideoCarregado.iniciar({ state, toast, renderThumbs, renderScenes, updateLayout, clienteBase44 });
+  } catch (e) {
+    console.warn('módulo do vídeo carregado não chegou:', e && e.message);
+  }
 }
 
 async function init() {
   $('btn-folder').onclick = pickFolder;
   $('btn-files').onclick = pickFiles;
   $('btn-add').onclick = pickFiles;
-  $('btn-video-load').onclick = () => $('input-video').click();
-  $('input-video').onchange = (e) => {
-    if (e.target.files?.length) carregarVideoFicheiro(e.target.files[0]);
-    e.target.value = '';
-  };
   $('btn-generate').onclick = gerar;
   $('btn-clear').onclick = () => {
     stopSpeak();
@@ -2335,7 +2304,7 @@ async function init() {
       ficheiros.push(...(e.dataTransfer?.files || []));
     }
     if (ficheiros.length) {
-      // Vídeo arrastado vai para o painel; imagens seguem para o estúdio.
+      // Vídeo arrastado pergunta o destino; imagens seguem para o estúdio.
       const videos = ficheiros.filter(ehFicheiroVideo);
       const imagens = ficheiros.filter((f) => !videos.includes(f));
       if (videos.length) carregarVideoFicheiro(videos[0]);

@@ -15,7 +15,7 @@
     "@base44/sdk": "^0.8.54"
   },
   "devDependencies": {
-    "@base44/vite-plugin": "^1.0.46",
+    "@base44/vite-plugin": "^1.0.47",
     "vite": "^8.2.0"
   }
 }

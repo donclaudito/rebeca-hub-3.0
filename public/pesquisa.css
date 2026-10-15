@@ -193,6 +193,12 @@
 .pesq-similares a:hover {
   text-decoration: underline;
 }
+.pesq-similares li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
 
 .pesq-filtros {
   display: flex;

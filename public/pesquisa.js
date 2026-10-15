@@ -15,6 +15,8 @@ let ocupado = false;
 // Filtros de idade: as sugestões chegam com "faixa" em texto (ex.: "4 a 8 anos");
 // aqui separam-nos pelas faixas 0-3, 4-7 e 8-12.
 let ultimasSugestoes = [];
+let ultimasSimilares = [];
+let ultimasVistos = [];
 let filtroIdade = 'todos';
 
 const FAIXAS_FILTRO = [
@@ -67,6 +69,7 @@ function desenharFiltros(caixa) {
       filtroIdade = f.id;
       [...bar.children].forEach((x) => x.classList.toggle('on', x === b));
       desenharSugestoes();
+      desenharBlocosVideos(caixa.querySelector('.pesq-videos'));
     };
     bar.append(b);
   }
@@ -195,6 +198,57 @@ function cartaoSugestao(s) {
   return li;
 }
 
+// Vídeos entram no filtro quando a faixa deles cruza com a escolhida;
+// sem faixa classificada, só aparecem em "Todas as idades".
+function videoNaFaixa(v, idFiltro) {
+  const f = FAIXAS_FILTRO.find((x) => x.id === idFiltro);
+  if (!f || f.id === 'todos') return true;
+  if (!v.faixa) return false;
+  return dentroDaFaixa(v, idFiltro);
+}
+
+function itemVideo(v) {
+  const li = document.createElement('li');
+  if (v.faixa) {
+    const e = document.createElement('span');
+    e.className = 'pesq-etiqueta';
+    e.textContent = v.faixa;
+    li.append(e);
+  }
+  const a = document.createElement('a');
+  a.href = v.url;
+  a.target = '_blank';
+  a.rel = 'noopener noreferrer';
+  const vistas = formatarViews(v.visualizacoes);
+  a.textContent = v.titulo + (v.canal ? ` — ${v.canal}` : '') + (vistas ? ` · ${vistas}` : '');
+  li.append(a);
+  return li;
+}
+
+// Redesenha os dois blocos de vídeo (similares e mais visualizados)
+// respeitando o filtro de idade escolhido.
+function desenharBlocosVideos(caixaVideos) {
+  if (!caixaVideos) return;
+  caixaVideos.innerHTML = '';
+  const blocos = [
+    ['🔗 Vídeos similares no YouTube', ultimasSimilares],
+    ['🔥 Vídeos mais visualizados', ultimasVistos],
+  ];
+  for (const [titulo, itens] of blocos) {
+    const visiveis = (itens || []).filter((v) => videoNaFaixa(v, filtroIdade));
+    if (!visiveis.length) continue;
+    const bloco = document.createElement('div');
+    bloco.className = 'pesq-similares';
+    const t = document.createElement('h4');
+    t.textContent = titulo;
+    bloco.append(t);
+    const ul = document.createElement('ul');
+    for (const v of visiveis) ul.append(itemVideo(v));
+    bloco.append(ul);
+    caixaVideos.append(bloco);
+  }
+}
+
 function desenharResultados(dados, link) {
   const caixa = $('pesq-resultados');
   if (!caixa) return;
@@ -236,53 +290,13 @@ function desenharResultados(dados, link) {
     caixa.append(ref);
   }
 
-  // Vídeos similares de sucesso que a IA encontrou na internet.
-  const parecidos = dados.videosSimilares || [];
-  if (parecidos.length) {
-    const bloco = document.createElement('div');
-    bloco.className = 'pesq-similares';
-    const t = document.createElement('h4');
-    t.textContent = '🔗 Vídeos similares no YouTube';
-    bloco.append(t);
-    const ul = document.createElement('ul');
-    for (const v of parecidos) {
-      const li = document.createElement('li');
-      const a = document.createElement('a');
-      a.href = v.url;
-      a.target = '_blank';
-      a.rel = 'noopener noreferrer';
-      const vistas = formatarViews(v.visualizacoes);
-      a.textContent = v.titulo + (v.canal ? ` — ${v.canal}` : '') + (vistas ? ` · ${vistas}` : '');
-      li.append(a);
-      ul.append(li);
-    }
-    bloco.append(ul);
-    caixa.append(bloco);
-  }
+  // Vídeos reais (API do YouTube): guardados e desenhados no filtro de idade.
+  ultimasSimilares = dados.videosSimilares || [];
+  ultimasVistos = dados.maisVistos || [];
 
-  // Vídeos mais visualizados (dados reais da API do YouTube, com o link).
-  const maisVistos = dados.maisVistos || [];
-  if (maisVistos.length) {
-    const bloco = document.createElement('div');
-    bloco.className = 'pesq-similares';
-    const t = document.createElement('h4');
-    t.textContent = '🔥 Vídeos mais visualizados';
-    bloco.append(t);
-    const ul = document.createElement('ul');
-    for (const v of maisVistos) {
-      const li = document.createElement('li');
-      const a = document.createElement('a');
-      a.href = v.url;
-      a.target = '_blank';
-      a.rel = 'noopener noreferrer';
-      const vistas = formatarViews(v.visualizacoes);
-      a.textContent = v.titulo + (v.canal ? ` — ${v.canal}` : '') + (vistas ? ` · ${vistas}` : '');
-      li.append(a);
-      ul.append(li);
-    }
-    bloco.append(ul);
-    caixa.append(bloco);
-  }
+  const caixaVideos = document.createElement('div');
+  caixaVideos.className = 'pesq-videos';
+  caixa.append(caixaVideos);
 
   ultimasSugestoes = dados.sugestoes || [];
   filtroIdade = 'todos';
@@ -292,6 +306,7 @@ function desenharResultados(dados, link) {
   lista.className = 'pesq-lista';
   caixa.append(lista);
   desenharSugestoes();
+  desenharBlocosVideos(caixaVideos);
 
   const nota = document.createElement('p');
   nota.className = 'pesq-nota-rodape';

@@ -163,9 +163,12 @@ export default async function (req) {
           ? 'COM O LINK: você recebeu DADOS REAIS da API oficial do YouTube logo abaixo (o vídeo de referência, similares e os mais visualizados). Fundamente as sugestões e as justificativas NELES (o que os vídeos reais têm em comum: formato, tema, tom, escala de visualizações). NÃO invente nem corrija esses dados e NÃO precisa devolver "videoInfo" nem "videosSimilares" — a resposta final já leva os dados reais. NUNCA afirme ter assistido aos vídeos.'
           : 'Você recebeu DADOS REAIS da API oficial do YouTube logo abaixo: os vídeos MAIS VISUALIZADOS para as palavras-chave. Fundamente as sugestões e as justificativas NELES (o que esses vídeos têm em comum: formato, tema, tom, escala de visualizações). NÃO invente nem corrija esses dados. NUNCA afirme ter assistido aos vídeos.'
         : comLink
-          ? 'COM O LINK: pesquise na internet ESSE vídeo (título real, canal, tema) e VÍDEOS SIMILARES de sucesso no YouTube para o mesmo público infantil. Analise o que faz esses vídeos funcionarem (formato, tema, tom) e use isso para fundamentar as sugestões. Em "videoInfo" devolva o que CONFIRMOU sobre o vídeo (titulo e canal reais; em "observacao", uma linha com o que aprendeu; se não encontrou o vídeo, diga isso — NUNCA invente título, canal ou números de visualização). Em "videosSimilares" liste de 3 a 5 vídeos infantis similares de sucesso que encontrou (titulo, canal, url — URL real do YouTube; se não achou, devolva a lista vazia). NUNCA afirme ter assistido aos vídeos.'
+          ? 'COM O LINK: pesquise na internet ESSE vídeo (título real, canal, tema) e VÍDEOS SIMILARES de sucesso no YouTube para o mesmo público infantil. Analise o que faz esses vídeos funcionarem (formato, tema, tom) e use isso para fundamentar as sugestões. Em "videoInfo" devolva o que CONFIRMOU sobre o vídeo (titulo e canal reais; em "observacao", uma linha com o que aprendeu; se não encontrou o vídeo, diga isso — NUNCA invente título, canal ou números de visualização). Em "videosSimilares" liste de 3 a 5 vídeos infantis similares de sucesso que encontrou (titulo, canal, url — URL real do YouTube; faixa: a faixa etária infantil recomendada; se não achou, devolva a lista vazia). NUNCA afirme ter assistido aos vídeos.'
           : 'Sem link: baseie-se no seu conhecimento sobre conteúdo infantil de sucesso no YouTube. NUNCA afirme ter acessado a internet.',
       ...linhaDados,
+      fonteReal
+        ? 'Também devolva "faixas": para CADA vídeo dos DADOS REAIS abaixo, um objeto {titulo: o título EXATAMENTE como aparece nos dados; faixa: a faixa etária infantil recomendada, uma destas: "0 a 3 anos", "4 a 7 anos", "8 a 12 anos"}.'
+        : '',
       '',
       'Tarefa: devolva de 8 a 10 sugestões de TEMAS de vídeos infantis RELACIONADOS, já ordenadas do potencial MAIS ALTO ao MAIS BAIXO —',
       'ou seja, primeiro os temas que você estima serem MAIS PROCURADOS por pais e crianças nesse público, depois os demais.',
@@ -209,8 +212,18 @@ export default async function (req) {
                 titulo: { type: 'string' },
                 canal: { type: 'string' },
                 url: { type: 'string' },
+                faixa: { type: 'string' },
               },
               required: ['titulo', 'url'],
+            },
+          },
+          // Classificação etária dos vídeos reais (casada pelo título).
+          faixas: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: { titulo: { type: 'string' }, faixa: { type: 'string' } },
+              required: ['titulo', 'faixa'],
             },
           },
           sugestoes: {
@@ -247,6 +260,17 @@ export default async function (req) {
       return json({ ok: false, error: 'A IA não devolveu sugestões. Tente outra vez.' }, 502);
     }
 
+    // A IA classifica os vídeos (reais ou achados na web) por faixa etária:
+    // "faixas" casa pelo título normalizado; sem classificação, o vídeo sai
+    // sem faixa e só aparece no filtro "Todas as idades".
+    const chaveDe = (t) => String(t || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+    const mapaFaixas = {};
+    for (const f of Array.isArray(resposta?.faixas) ? resposta.faixas : []) {
+      const k = chaveDe(f?.titulo);
+      if (k && !mapaFaixas[k]) mapaFaixas[k] = String(f?.faixa || '').trim().slice(0, 60);
+    }
+    const faixaDe = (titulo, direto) => mapaFaixas[chaveDe(titulo)] || String(direto || '').trim().slice(0, 60);
+
     return json({
       ok: true,
       tema: String(resposta?.tema || palavras || '').trim().slice(0, 160),
@@ -276,12 +300,14 @@ export default async function (req) {
             canal: v.canal,
             url: `https://www.youtube.com/watch?v=${v.id}`,
             visualizacoes: v.visualizacoes || 0,
+            faixa: faixaDe(v.titulo, v.faixa),
           }))
         : (Array.isArray(resposta?.videosSimilares) ? resposta.videosSimilares : []).map((v) => ({
             titulo: String(v?.titulo || '').trim().slice(0, 200),
             canal: String(v?.canal || '').trim().slice(0, 120),
             url: /^https:\/\/(www\.)?(youtube\.com|youtu\.be)\//.test(String(v?.url || '')) ? String(v.url) : '',
             visualizacoes: 0,
+            faixa: faixaDe(v.titulo, v.faixa),
           }))
       )
         .filter((v) => v.titulo && v.url)
@@ -293,6 +319,7 @@ export default async function (req) {
           canal: v.canal,
           url: `https://www.youtube.com/watch?v=${v.id}`,
           visualizacoes: v.visualizacoes || 0,
+          faixa: faixaDe(v.titulo),
         }))
         .filter((v) => v.titulo && v.url)
         .slice(0, 5),

@@ -504,6 +504,30 @@
       </div>
     </dialog>
 
+    <!-- Preparar envio ao YouTube: confirmação antes de abrir o Studio -->
+    <dialog id="dlg-youtube" class="dlg">
+      <div class="dlg-form">
+        <div class="dlg-cabeca">
+          <h2>📤 <span id="yt-titulo">Preparar envio ao YouTube</span></h2>
+          <button id="btn-yt-fechar" class="ghost small" type="button">Fechar</button>
+        </div>
+        <p class="hint" style="margin:0 0 10px">
+          A app não conecta a sua conta do YouTube: o envio é <b>manual</b>.
+          Ao confirmar, o vídeo é descarregado e o YouTube Studio abre numa janela nova,
+          para você fazer o upload por lá.
+        </p>
+        <div id="yt-info" class="detalhes-grade"></div>
+        <p class="hint" style="margin:10px 0 0">
+          Visibilidade pretendida: <b>Público</b> — selecione “Público” no YouTube antes de publicar.
+          Cancelar ou fechar não inicia envio nenhum.
+        </p>
+        <div class="dlg-acoes">
+          <button id="btn-yt-baixar" class="ghost" type="button">⬇️ Baixar o vídeo</button>
+          <button id="btn-yt-confirmar" class="primary" type="button">▶️ Confirmar e abrir o YouTube Studio</button>
+        </div>
+      </div>
+    </dialog>
+
     <!-- Links cadastrados: assunto + endereço, para abrir rápido -->
     <dialog id="dlg-links" class="dlg">
       <div class="dlg-form">

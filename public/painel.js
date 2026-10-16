@@ -197,7 +197,13 @@ function cartao(p) {
   reedit.textContent = '✏️';
   reedit.title = 'Reeditar projeto';
   reedit.onclick = () => reeditar(p);
-  acoes.append(ver, reedit, descarregar, apagar);
+  const yt = document.createElement('button');
+  yt.type = 'button';
+  yt.className = 'ghost small';
+  yt.textContent = '📤';
+  yt.title = 'Preparar envio ao YouTube';
+  yt.onclick = () => prepararYouTube(p);
+  acoes.append(ver, yt, reedit, descarregar, apagar);
 
   corpo.append(nome, meta, et, acoes);
   c.append(miniatura(p), corpo);
@@ -284,9 +290,42 @@ async function abrirDetalhes(p) {
   const re = $('btn-det-reeditar');
   if (re) re.onclick = () => reeditar(p);
   const yt = $('btn-det-ir-youtube');
-  if (yt) yt.onclick = () => window.open('https://studio.youtube.com', '_blank', 'noopener');
+  if (yt) yt.onclick = () => prepararYouTube(p);
 
   if (typeof dlg.showModal === 'function') dlg.showModal();
+}
+
+// ---------------------------------------------------------------- preparar envio ao YouTube
+// Envio MANUAL: a app não conecta conta nenhuma. Ao confirmar, baixa o
+// vídeo e abre o YouTube Studio, onde o upload é feito à mão.
+let videoYouTube = null;
+
+function prepararYouTube(p) {
+  const dlg = $('dlg-youtube');
+  if (!dlg) return;
+  videoYouTube = p;
+  const titulo = $('yt-titulo');
+  if (titulo) titulo.textContent = p.nome || 'Sem nome';
+  const info = $('yt-info');
+  if (info) {
+    info.innerHTML = '';
+    info.append(
+      detalhe('Vídeo', p.nome || '—'),
+      detalhe('Duração', formatarMinutos(p.duracao)),
+      detalhe('Tamanho', formatarTamanho(p.video_tamanho)),
+      detalhe('Formato', p.formato || '—'),
+    );
+  }
+  dlg.showModal();
+}
+
+function confirmarYouTube() {
+  const p = videoYouTube;
+  const dlg = $('dlg-youtube');
+  if (!p || !dlg) return;
+  dlg.close();
+  descarregarVideo(p);
+  window.open('https://studio.youtube.com', '_blank', 'noopener');
 }
 
 // ---------------------------------------------------------------- reeditar
@@ -547,6 +586,13 @@ if (typeof window !== 'undefined') {
       }
     };
   }
+  // Preparar envio ao YouTube (confirmação antes de abrir o Studio).
+  const ytFechar = $('btn-yt-fechar');
+  if (ytFechar) ytFechar.onclick = () => $('dlg-youtube').close();
+  const ytConfirmar = $('btn-yt-confirmar');
+  if (ytConfirmar) ytConfirmar.onclick = confirmarYouTube;
+  const ytBaixar = $('btn-yt-baixar');
+  if (ytBaixar) ytBaixar.onclick = () => videoYouTube && descarregarVideo(videoYouTube);
   // Links: botão do painel + pop-up de cadastro.
   iniciarLinks();
   // Vista inicial: "#estudio" abre o estúdio; em todos os outros casos, o painel.

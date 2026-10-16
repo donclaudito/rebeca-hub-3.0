@@ -1229,10 +1229,11 @@ function marcarModoDuracao() {
 // por baixo — sem isto, a interface continuava a mostrar as escolhas antigas
 // enquanto o vídeo saía com as do projeto (era o que enganava quem reeditava).
 function aplicarPreferenciasNaInterface() {
-  const marcar = (id, valor, campo = 'dataset.id') => {
+  // atributo: o nome DENTRO de dataset ('id' por omissão; 'r' nas velocidades).
+  const marcar = (id, valor, atributo = 'id') => {
     const grupo = $(id);
     if (!grupo) return;
-    [...grupo.children].forEach((x) => x.classList.toggle('on', String(x[campo]) === String(valor)));
+    [...grupo.children].forEach((x) => x.classList.toggle('on', String(x.dataset[atributo]) === String(valor)));
   };
   const sel = $('vid-formato');
   if (sel) sel.value = state.videoFormato || '1920x1080';
@@ -1242,7 +1243,7 @@ function aplicarPreferenciasNaInterface() {
   marcar('vid-legendas', String(Boolean(state.legendas)));
   marcar('vid-modos', state.videoModo);
   marcar('vid-codec', state.codec);
-  marcar('velocidades', state.velocidade, 'dataset.r');
+  marcar('velocidades', state.velocidade, 'r');
   $('cfg-servico').value = state.servico;
   $('cfg-modelo').value = state.modelo || '';
   const lt = $('letra-texto');

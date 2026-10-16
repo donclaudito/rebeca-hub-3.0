@@ -19,6 +19,7 @@ let marcarMotor = () => {};
 let marcarTom = () => {};
 let atualizarContador = () => {};
 let renderThumbs = () => {};
+let aplicarPreferenciasNaInterface = () => {};
 let renderScenes = () => {};
 let updateLayout = () => {};
 let preparar = null;
@@ -40,6 +41,7 @@ export function iniciar(ctx) {
   marcarTom = ctx.marcarTom;
   atualizarContador = ctx.atualizarContador;
   renderThumbs = ctx.renderThumbs;
+  aplicarPreferenciasNaInterface = ctx.aplicarPreferenciasNaInterface || aplicarPreferenciasNaInterface;
   renderScenes = ctx.renderScenes;
   updateLayout = ctx.updateLayout;
   preparar = ctx.preparar;
@@ -111,6 +113,7 @@ async function recolherProjeto(nome) {
       vozEleven: state.vozEleven,
       videoFormato: state.videoFormato,
       videoTransicao: state.videoTransicao,
+      videoTransicaoRotulo: state.videoTransicaoRotulo || '',
       videoDuracao: state.videoDuracao,
       videoModo: state.videoModo,
       videoDuracaoCena: state.videoDuracaoCena,
@@ -322,6 +325,7 @@ export async function abrirProjeto(id) {
     atualizarLetra();
     marcarMotor();
     marcarTom();
+    aplicarPreferenciasNaInterface();
     resumoVideo();
 
     await desenharProjetos();

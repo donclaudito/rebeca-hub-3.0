@@ -191,7 +191,13 @@ function cartao(p) {
   apagar.textContent = '🗑';
   apagar.title = 'apagar do painel';
   apagar.onclick = () => apagarVideo(p);
-  acoes.append(ver, descarregar, apagar);
+  const reedit = document.createElement('button');
+  reedit.type = 'button';
+  reedit.className = 'ghost small';
+  reedit.textContent = '✏️';
+  reedit.title = 'Reeditar projeto';
+  reedit.onclick = () => reeditar(p);
+  acoes.append(ver, reedit, descarregar, apagar);
 
   corpo.append(nome, meta, et, acoes);
   c.append(miniatura(p), corpo);
@@ -275,10 +281,41 @@ async function abrirDetalhes(p) {
 
   const btn = $('btn-det-descarregar');
   if (btn) btn.onclick = () => descarregarVideo(p);
+  const re = $('btn-det-reeditar');
+  if (re) re.onclick = () => reeditar(p);
   const yt = $('btn-det-ir-youtube');
   if (yt) yt.onclick = () => window.open('https://studio.youtube.com', '_blank', 'noopener');
 
   if (typeof dlg.showModal === 'function') dlg.showModal();
+}
+
+// ---------------------------------------------------------------- reeditar
+// Volta ao estúdio com o PROJETO ORIGINAL do vídeo (cenas, narração e
+// preferências), que vive no IndexedDB deste computador. Confirma que o
+// projeto existe ANTES de trocar de vista — assim nunca se limpa o trabalho
+// aberto no estúdio sem haver projeto para abrir.
+async function reeditar(p) {
+  if (!p.projetoId) {
+    toast('Este vídeo não tem projeto associado — foi guardado antes de a app ligar vídeos a projetos.', 'err');
+    return;
+  }
+  let projeto = null;
+  try {
+    const mod = await import('./projetos.mjs');
+    projeto = await mod.lerProjeto(p.projetoId);
+  } catch {
+    projeto = null;
+  }
+  if (!projeto) {
+    toast(`O projeto original de "${p.nome || 'este vídeo'}" já não está neste computador.`, 'err');
+    return;
+  }
+  mostrarVista('estudio');
+  try {
+    window.dispatchEvent(new CustomEvent('rh-reeditar-projeto', { detail: { id: p.projetoId } }));
+  } catch {
+    /* sem janela (testes) */
+  }
 }
 
 // ---------------------------------------------------------------- descarregar / apagar

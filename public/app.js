@@ -2074,6 +2074,9 @@ async function guardarNaNuvem() {
     const voz = state.vozesEleven.find((v) => v.id === state.vozEleven);
     await base44.entities.VideoProducao.create({
       nome: ($('projeto-nome').value || '').trim() || 'Projeto sem nome',
+      // Liga o vídeo ao projeto guardado neste computador: é o que deixa o
+      // Painel reabrir o projeto original no estúdio ("✏️ Reeditar projeto").
+      projetoId: String(projetos.idAtual || ''),
       video_uri: file_uri,
       video_tamanho: resultadoVideo.blob.size,
       thumb_uri,
@@ -2177,6 +2180,12 @@ $('btn-projeto-novo').onclick = novoProjeto;
 // estúdio limpo, sem puxar projetos anteriores.
 if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
   window.addEventListener('rh-novo-projeto', () => novoProjeto());
+  // "✏️ Reeditar projeto" (Painel e detalhes): abre o projeto original no
+  // estúdio. O Painel já confirmou que o projeto existe antes de mandar o id.
+  window.addEventListener('rh-reeditar-projeto', (e) => {
+    const id = e && e.detail ? e.detail.id : '';
+    if (id) abrirProjeto(id);
+  });
 }
 
 // ---------------------------------------------------------------- arranque

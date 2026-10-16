@@ -55,6 +55,10 @@
     "vozUsada": {
       "type": "string",
       "description": "Nome da voz usada na narra\u00e7\u00e3o"
+    },
+    "projetoId": {
+      "type": "string",
+      "description": "ID do projeto original guardado neste computador, para voltar a editar no est\u00fadio"
     }
   },
   "required": [

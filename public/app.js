@@ -870,6 +870,19 @@ const estadoEleven = (msg, tipo = '') => modEleven?.estadoEleven(msg, tipo);
 const carregarVozesEleven = () => modEleven?.carregarVozesEleven();
 const audioDaEleven = (texto) => modEleven?.audioDaEleven(texto);
 
+// O motor e o tom ficam cá: marcam os chips desenhados no arranque da página.
+function marcarMotor() {
+  [...$('motores').children].forEach((b) => b.classList.toggle('on', b.dataset.motor === state.motor));
+  $('grupo-browser').hidden = state.motor !== 'browser';
+  $('grupo-eleven').hidden = state.motor !== 'eleven';
+  guardar();
+}
+
+function marcarTom() {
+  [...$('tons-eleven').children].forEach((b) => b.classList.toggle('on', b.dataset.tom === state.tom));
+  guardar();
+}
+
 // ---------------------------------------------------------------- ações
 async function gerarTodoAudio() {
   const alvo = state.scenes.filter((s) => (s.texto || '').trim());

@@ -458,7 +458,10 @@
           <div class="painel-titulo">
             <h2>Vídeos prontos</h2>
             <p>Abra para assistir, ver os detalhes e descarregar o ficheiro para o YouTube.</p>
-            <p style="margin-top:10px"><button id="btn-painel-novo" class="primary" type="button">✨ Novo projeto</button></p>
+            <p style="margin-top:10px">
+            <button id="btn-painel-novo" class="primary" type="button">✨ Novo projeto</button>
+            <button id="btn-links" class="ghost" type="button" title="cadastrar e abrir os seus links">🔗 Os meus links</button>
+          </p>
           </div>
           <div class="painel-resumo">
             <div class="resumo-caixa"><b id="resumo-total">0</b><span>vídeo(s)</span></div>
@@ -498,6 +501,32 @@
           Para subir ao YouTube: descarregue o ficheiro WebM e envie-o no YouTube Studio —
           ele aceita WebM sem converter. Os detalhes daqui servem para a descrição.
         </p>
+      </div>
+    </dialog>
+
+    <!-- Links cadastrados: assunto + endereço, para abrir rápido -->
+    <dialog id="dlg-links" class="dlg">
+      <div class="dlg-form">
+        <div class="dlg-cabeca">
+          <h2>🔗 Os meus links</h2>
+          <button id="btn-links-fechar" class="ghost small" type="button">Fechar</button>
+        </div>
+        <form id="form-links" autocomplete="off">
+          <div class="links-form-linha">
+            <label class="field">
+              <span>Assunto</span>
+              <input id="link-assunto" type="text" maxlength="80" placeholder="ex.: Canal do YouTube" required />
+            </label>
+            <label class="field">
+              <span>Endereço (URL)</span>
+              <input id="link-url" type="url" placeholder="https://…" required />
+            </label>
+            <button id="btn-links-cadastrar" class="primary small" type="submit">＋ Cadastrar</button>
+          </div>
+          <div id="links-erro" class="cfg-result err" hidden></div>
+        </form>
+        <ul id="links-ul" class="links-ul"></ul>
+        <p id="links-vazio" class="hint" hidden>Ainda não há links cadastrados.</p>
       </div>
     </dialog>
 

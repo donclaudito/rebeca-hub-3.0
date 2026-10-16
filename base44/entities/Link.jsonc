@@ -1,0 +1,19 @@
+{
+  "name": "Link",
+  "type": "object",
+  "description": "Link guardado pelo utilizador no painel: assunto + endere\u00e7o, para abrir r\u00e1pido",
+  "properties": {
+    "assunto": {
+      "type": "string",
+      "description": "Assunto do link (ex.: Canal do YouTube)"
+    },
+    "url": {
+      "type": "string",
+      "description": "Endere\u00e7o completo do link (https://\u2026)"
+    }
+  },
+  "required": [
+    "assunto",
+    "url"
+  ]
+}

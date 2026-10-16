@@ -411,6 +411,105 @@ async function carregar() {
   desenharLista();
 }
 
+// ---------------------------------------------------------------- links
+// Links cadastrados pelo utilizador: assunto + endereço. Clicar abre a página.
+async function carregarLinks() {
+  const b = await cliente();
+  const page = await b.entities.Link.filter({}, { sort: '-created_date', limit: 100 });
+  return page.items || [];
+}
+
+function desenharLinks(itens) {
+  const ul = $('links-ul');
+  if (!ul) return;
+  ul.innerHTML = '';
+  const vazio = $('links-vazio');
+  if (vazio) vazio.hidden = itens.length > 0;
+  for (const p of itens) {
+    const li = document.createElement('li');
+    li.className = 'links-li';
+    const abrir = document.createElement('button');
+    abrir.type = 'button';
+    abrir.className = 'links-abrir';
+    abrir.title = p.url;
+    abrir.textContent = p.assunto || p.url;
+    // O clique abre a página do link numa janela nova.
+    abrir.onclick = () => window.open(p.url, '_blank', 'noopener');
+    const meta = document.createElement('span');
+    meta.className = 'links-url';
+    meta.textContent = p.url;
+    const apagar = document.createElement('button');
+    apagar.type = 'button';
+    apagar.className = 'ghost small danger';
+    apagar.textContent = '🗑';
+    apagar.title = 'excluir este link';
+    apagar.onclick = () => excluirLink(p);
+    li.append(abrir, meta, apagar);
+    ul.append(li);
+  }
+}
+
+async function excluirLink(p) {
+  if (!window.confirm(`Excluir o link "${p.assunto || p.url}"?`)) return;
+  try {
+    const b = await cliente();
+    await b.entities.Link.delete(p.id);
+    await mostrarLinks();
+    toast('Link excluído.', '');
+  } catch (e) {
+    toast(`Não consegui excluir: ${e.message}`, 'err');
+  }
+}
+
+async function mostrarLinks() {
+  try {
+    desenharLinks(await carregarLinks());
+    const av = $('links-erro');
+    if (av) av.hidden = true;
+  } catch (e) {
+    const av = $('links-erro');
+    if (av) {
+      av.hidden = false;
+      av.textContent = `Não consegui carregar os links: ${e.message}`;
+    }
+  }
+}
+
+function iniciarLinks() {
+  const dlg = $('dlg-links');
+  const btn = $('btn-links');
+  if (!dlg || !btn) return;
+  // Abrir o pop-up: a lista vem da nuvem a cada abertura.
+  btn.onclick = () => {
+    dlg.showModal();
+    mostrarLinks();
+  };
+  $('btn-links-fechar').onclick = () => dlg.close();
+  // Cadastrar novo link.
+  $('form-links').onsubmit = async (e) => {
+    e.preventDefault();
+    const assunto = $('link-assunto').value.trim();
+    let url = $('link-url').value.trim();
+    const av = $('links-erro');
+    if (av) av.hidden = true;
+    if (!assunto || !url) return;
+    if (!/^https?:\/\//i.test(url)) url = `https://${url}`;
+    try {
+      const b = await cliente();
+      await b.entities.Link.create({ assunto, url });
+      $('link-assunto').value = '';
+      $('link-url').value = '';
+      await mostrarLinks();
+      toast('Link cadastrado.', 'ok');
+    } catch (err) {
+      if (av) {
+        av.hidden = false;
+        av.textContent = `Não consegui cadastrar: ${err.message}`;
+      }
+    }
+  };
+}
+
 // ---------------------------------------------------------------- arranque
 // Botoeiros e estado inicial — corre já com o DOM analisado (script de módulo).
 if (typeof window !== 'undefined') {
@@ -448,6 +547,8 @@ if (typeof window !== 'undefined') {
       }
     };
   }
+  // Links: botão do painel + pop-up de cadastro.
+  iniciarLinks();
   // Vista inicial: "#estudio" abre o estúdio; em todos os outros casos, o painel.
   mostrarVista(/estudio/.test(hashAtual()) ? 'estudio' : 'painel');
 }

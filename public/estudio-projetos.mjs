@@ -175,21 +175,30 @@ export async function guardarProjetoAgora() {
 // armazenamento privado e cria/atualiza o registo. Um projeto na nuvem abre
 // em qualquer computador — é o que o botão "✏️ Reeditar projeto" do Painel
 // usa quando o projeto não está neste PC.
+// Guarda o projeto aberto NA NUVEM e devolve o id da cópia. Serve ao botão
+// "☁️ Guardar na nuvem" e também ao guardar do VÍDEO (app.js): um vídeo cujo
+// projeto só está neste computador não se reedita em lado nenhum.
+export async function guardarProjetoNaNuvem() {
+  if (!state.images.length) throw new Error('Importe as imagens primeiro.');
+  const dados = await recolherProjeto($('projeto-nome').value);
+  const nuvem = await import('./projeto-nuvem.mjs');
+  projetos.nuvemId = await nuvem.guardarProjetoNuvem(dados, projetos.nuvemId);
+  // Também fica no histórico local (com a ligação à cópia da nuvem).
+  const mod = await modProjetos();
+  await mod.guardarProjeto({ ...dados, nuvemId: projetos.nuvemId });
+  projetos.idAtual = dados.id;
+  projetos.criadoEm = dados.criadoEm;
+  return projetos.nuvemId;
+}
+
 export async function guardarNuvemAgora() {
   if (!state.images.length) return toast('Importe as imagens primeiro.', 'err');
   const btn = $('btn-projeto-nuvem');
   btn.disabled = true;
   estadoProjeto('a guardar na nuvem… (sobe as imagens e o áudio, pode demorar)');
   try {
-    const dados = await recolherProjeto($('projeto-nome').value);
-    const nuvem = await import('./projeto-nuvem.mjs');
-    projetos.nuvemId = await nuvem.guardarProjetoNuvem(dados, projetos.nuvemId);
-    // Também fica no histórico local (com a ligação à cópia da nuvem).
-    const mod = await modProjetos();
-    await mod.guardarProjeto({ ...dados, nuvemId: projetos.nuvemId });
-    projetos.idAtual = dados.id;
-    projetos.criadoEm = dados.criadoEm;
-    estadoProjeto(`Projeto "${dados.nome}" guardado na nuvem ✓ — abre em qualquer computador.`, 'ok');
+    const id = await guardarProjetoNaNuvem();
+    estadoProjeto(`Projeto "${$('projeto-nome').value}" guardado na nuvem ✓ — abre em qualquer computador.`, 'ok');
     toast('Projeto guardado na nuvem.', 'ok');
     await desenharProjetos();
   } catch (e) {

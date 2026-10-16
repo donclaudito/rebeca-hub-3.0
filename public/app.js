@@ -1936,6 +1936,19 @@ async function guardarNaNuvem() {
   try {
     const { base44 } = await import('@/base44Client.js');
     estadoVideo('a guardar o vídeo na nuvem…', 'wait');
+    // O "Reeditar projeto" precisa do projeto NA NUVEM: sem ele, o vídeo só se
+    // reedita no computador onde as cenas ficaram. Por isso o projeto vai
+    // junto (uma vez) e o vídeo fica ligado ao id da cópia da nuvem.
+    let projetoId = String(projetos.nuvemId || '');
+    if (!projetoId && modProjetosUI?.guardarProjetoNaNuvem) {
+      try {
+        projetoId = String((await modProjetosUI.guardarProjetoNaNuvem()) || '');
+        estadoVideo('projeto guardado na nuvem também ✓', 'wait');
+      } catch (e) {
+        estadoVideo(`⚠️ o projeto não foi para a nuvem (${e.message}) — o vídeo guarda na mesma.`, 'wait');
+      }
+    }
+    if (!projetoId) projetoId = String(projetos.idAtual || '');
     const nome = resultadoVideo.nome;
     const { file_uri } = await base44.integrations.Core.UploadPrivateFile({
       file: new File([resultadoVideo.blob], nome, { type: 'video/webm' }),
@@ -1957,7 +1970,7 @@ async function guardarNaNuvem() {
       nome: ($('projeto-nome').value || '').trim() || 'Projeto sem nome',
       // Liga o vídeo ao projeto guardado neste computador: é o que deixa o
       // Painel reabrir o projeto original no estúdio ("✏️ Reeditar projeto").
-      projetoId: String(projetos.nuvemId || projetos.idAtual || ''),
+      projetoId,
       video_uri: file_uri,
       video_tamanho: resultadoVideo.blob.size,
       thumb_uri,

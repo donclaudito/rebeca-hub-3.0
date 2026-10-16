@@ -316,13 +316,24 @@ async function reeditar(p) {
       projeto = null;
     }
   }
+  // Última tentativa: a NUVEM. O projeto pode estar guardado na app — por
+  // id (vídeos guardados com projeto na nuvem) ou pelo nome do vídeo.
   if (!projeto) {
-    toast(`O projeto original de "${p.nome || 'este vídeo'}" não está neste computador. Abra o vídeo no estúdio e guarde-o com este nome para voltar a editar.`, 'err');
+    try {
+      const nuvem = await import('./projeto-nuvem.mjs');
+      if (p.projetoId) projeto = await nuvem.lerProjetoNuvem(p.projetoId);
+      if (!projeto && p.nome) projeto = await nuvem.procurarProjetoNuvemPorNome(p.nome);
+    } catch {
+      projeto = null;
+    }
+  }
+  if (!projeto) {
+    toast(`O projeto original de "${p.nome || 'este vídeo'}" não está neste computador nem na nuvem. Abra o vídeo no estúdio e clique em ☁️ Guardar na nuvem para o poder reeditar em qualquer lugar.`, 'err');
     return;
   }
   mostrarVista('estudio');
   try {
-    window.dispatchEvent(new CustomEvent('rh-reeditar-projeto', { detail: { id: p.projetoId } }));
+    window.dispatchEvent(new CustomEvent('rh-reeditar-projeto', { detail: { id: projeto.id } }));
   } catch {
     /* sem janela (testes) */
   }

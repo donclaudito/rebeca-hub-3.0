@@ -143,12 +143,54 @@ export async function guardarProjetoAgora() {
   try {
     const mod = await modProjetos();
     const dados = await recolherProjeto(nome);
+    if (projetos.nuvemId) dados.nuvemId = projetos.nuvemId;
     await mod.guardarProjeto(dados);
     projetos.idAtual = dados.id;
     projetos.criadoEm = dados.criadoEm;
     $('projeto-nome').value = dados.nome;
-    estadoProjeto(`Projeto "${dados.nome}" guardado · ${dados.cenas.length} imagem(ns) · ${mod.tamanhoLegivel(mod.tamanhoDe(dados))}`, 'ok');
-    toast(`Projeto "${dados.nome}" guardado.`, 'ok');
+    // Projeto veio da nuvem? As alterações voltam para a nuvem: é o que
+    // mantém a cópia da app em dia quando se reedita e salva outra vez.
+    if (projetos.nuvemId) {
+      estadoProjeto('a guardar também na nuvem…');
+      const nuvem = await import('./projeto-nuvem.mjs');
+      projetos.nuvemId = await nuvem.guardarProjetoNuvem(dados, projetos.nuvemId);
+      await mod.guardarProjeto({ ...dados, nuvemId: projetos.nuvemId });
+    }
+    estadoProjeto(
+      `Projeto "${dados.nome}" guardado${projetos.nuvemId ? ' (aqui e na nuvem)' : ''} · ` +
+        `${dados.cenas.length} imagem(ns) · ${mod.tamanhoLegivel(mod.tamanhoDe(dados))}`,
+      'ok',
+    );
+    toast(`Projeto "${dados.nome}" guardado${projetos.nuvemId ? ', inclusive na nuvem' : ''}.`, 'ok');
+    await desenharProjetos();
+  } catch (e) {
+    estadoProjeto(`❌ ${e.message}`, 'err');
+    toast(e.message, 'err');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// ☁️ Guardar o projeto NA NUVEM (na app): sobe as imagens e o áudio para o
+// armazenamento privado e cria/atualiza o registo. Um projeto na nuvem abre
+// em qualquer computador — é o que o botão "✏️ Reeditar projeto" do Painel
+// usa quando o projeto não está neste PC.
+export async function guardarNuvemAgora() {
+  if (!state.images.length) return toast('Importe as imagens primeiro.', 'err');
+  const btn = $('btn-projeto-nuvem');
+  btn.disabled = true;
+  estadoProjeto('a guardar na nuvem… (sobe as imagens e o áudio, pode demorar)');
+  try {
+    const dados = await recolherProjeto($('projeto-nome').value);
+    const nuvem = await import('./projeto-nuvem.mjs');
+    projetos.nuvemId = await nuvem.guardarProjetoNuvem(dados, projetos.nuvemId);
+    // Também fica no histórico local (com a ligação à cópia da nuvem).
+    const mod = await modProjetos();
+    await mod.guardarProjeto({ ...dados, nuvemId: projetos.nuvemId });
+    projetos.idAtual = dados.id;
+    projetos.criadoEm = dados.criadoEm;
+    estadoProjeto(`Projeto "${dados.nome}" guardado na nuvem ✓ — abre em qualquer computador.`, 'ok');
+    toast('Projeto guardado na nuvem.', 'ok');
     await desenharProjetos();
   } catch (e) {
     estadoProjeto(`❌ ${e.message}`, 'err');
@@ -249,8 +291,16 @@ export async function desenharProjetos() {
 export async function abrirProjeto(id) {
   try {
     const mod = await modProjetos();
-    const p = await mod.lerProjeto(id);
-    if (!p) return toast('Esse projeto já não existe.', 'err');
+    let p = await mod.lerProjeto(id);
+    if (p) {
+      projetos.nuvemId = p.nuvemId || null;
+    } else {
+      // Não está neste computador: tenta NA NUVEM (projeto guardado na app).
+      const nuvem = await import('./projeto-nuvem.mjs');
+      p = await nuvem.lerProjetoNuvem(id);
+      if (!p) return toast('Esse projeto já não existe (nem aqui, nem na nuvem).', 'err');
+      projetos.nuvemId = p.id;
+    }
 
     // Fecha o que estava aberto antes de trocar de trabalho.
     pararPreviaTrilha();
@@ -329,7 +379,10 @@ export async function abrirProjeto(id) {
     resumoVideo();
 
     await desenharProjetos();
-    estadoProjeto(`Projeto "${p.nome}" aberto · ${state.images.length} imagem(ns)`, 'ok');
+    estadoProjeto(
+      `Projeto "${p.nome}" aberto · ${state.images.length} imagem(ns)${projetos.nuvemId ? ' · da nuvem' : ''}`,
+      'ok',
+    );
     toast(`Projeto "${p.nome}" aberto.`, 'ok');
   } catch (e) {
     toast(`Não consegui abrir esse projeto: ${e.message}`, 'err');
@@ -356,6 +409,8 @@ export function iniciarProjetos() {
   const ver = $('projetos-lista');
   $('btn-projeto-guardar').onclick = guardarProjetoAgora;
   $('btn-projeto-atualizar').onclick = guardarProjetoAgora;
+  const btnNuvem = $('btn-projeto-nuvem');
+  if (btnNuvem) btnNuvem.onclick = guardarNuvemAgora;
   $('btn-projetos-ver').onclick = async () => {
     const aberto = ver.hidden;
     ver.hidden = !aberto;

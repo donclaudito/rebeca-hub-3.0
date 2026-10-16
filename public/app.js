@@ -1420,7 +1420,7 @@ function verResultado() {
 // ---------------------------------------------------------------- projetos
 // A gestão dos projetos guardados vive agora em estudio-projetos.mjs; o objeto
 // `projetos` fica aqui (o estúdio consulta-o ao limpar e ao guardar).
-const projetos = { mod: null, idAtual: null, lista: [], criadoEm: null };
+const projetos = { mod: null, idAtual: null, lista: [], criadoEm: null, nuvemId: null };
 let modProjetosUI = null;
 const estadoProjeto = (msg, tipo = '') => modProjetosUI?.estadoProjeto(msg, tipo);
 const desenharProjetos = () => modProjetosUI?.desenharProjetos();
@@ -1957,7 +1957,7 @@ async function guardarNaNuvem() {
       nome: ($('projeto-nome').value || '').trim() || 'Projeto sem nome',
       // Liga o vídeo ao projeto guardado neste computador: é o que deixa o
       // Painel reabrir o projeto original no estúdio ("✏️ Reeditar projeto").
-      projetoId: String(projetos.idAtual || ''),
+      projetoId: String(projetos.nuvemId || projetos.idAtual || ''),
       video_uri: file_uri,
       video_tamanho: resultadoVideo.blob.size,
       thumb_uri,
@@ -2142,6 +2142,7 @@ async function init() {
     // de escrever por cima do que estava aberto.
     projetos.idAtual = null;
     projetos.criadoEm = null;
+    projetos.nuvemId = null;
     const btnAtualizar = $('btn-projeto-atualizar');
     if (btnAtualizar) btnAtualizar.hidden = true;
     estadoProjeto('Guarde o trabalho para o voltar a abrir noutro dia.');

@@ -1,0 +1,26 @@
+{
+  "name": "Projeto",
+  "type": "object",
+  "description": "Projeto guardado na nuvem (na app): cenas com narra\u00e7\u00e3o e prefer\u00eancias, para reeditar em qualquer computador",
+  "properties": {
+    "nome": {
+      "type": "string",
+      "description": "Nome do projeto (ex.: A Borboleta)"
+    },
+    "criadoEm": {
+      "type": "number",
+      "description": "Data de cria\u00e7\u00e3o do projeto (timestamp em ms)"
+    },
+    "config": {
+      "type": "object",
+      "description": "Prefer\u00eancias do projeto: motor de voz, tom, transi\u00e7\u00e3o, formato, legendas, codec, letra, etc."
+    },
+    "cenas": {
+      "type": "string",
+      "description": "Cenas do projeto, por ordem, em JSON: nome, texto da narra\u00e7\u00e3o e ficheiros no armazenamento privado (imagem_uri, audio_uri)"
+    }
+  },
+  "required": [
+    "nome"
+  ]
+}

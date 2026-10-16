@@ -69,7 +69,9 @@ export async function guardarProjetoNuvem(dados, idNuvem) {
 // como Blob, na mesma forma que o histórico local usa — o estúdio não sabe
 // a diferença.
 export async function lerProjetoNuvem(id) {
-  if (!id) return null;
+  // IDs da nuvem têm 24 caracteres hexadecimais. UUIDs (projetos só-deste-
+  // computador) nunca existem aqui: perguntar por eles só gera 404.
+  if (!id || !/^[0-9a-f]{24}$/i.test(String(id))) return null;
   const b = await cliente();
   let reg = null;
   try {

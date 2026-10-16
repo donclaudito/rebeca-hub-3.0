@@ -318,10 +318,14 @@ async function reeditar(p) {
   }
   // Última tentativa: a NUVEM. O projeto pode estar guardado na app — por
   // id (vídeos guardados com projeto na nuvem) ou pelo nome do vídeo.
+  // Só IDs da nuvem (24 caracteres hexadecimais) valem uma procura por id:
+  // os projetos só-deste-computador têm ids de UUID, e perguntar à nuvem por
+  // eles só devolvia um 404 no registo da app.
   if (!projeto) {
     try {
       const nuvem = await import('./projeto-nuvem.mjs');
-      if (p.projetoId) projeto = await nuvem.lerProjetoNuvem(p.projetoId);
+      const idDaNuvem = /^[0-9a-f]{24}$/i.test(String(p.projetoId || ''));
+      if (idDaNuvem) projeto = await nuvem.lerProjetoNuvem(p.projetoId);
       if (!projeto && p.nome) projeto = await nuvem.procurarProjetoNuvemPorNome(p.nome);
     } catch {
       projeto = null;

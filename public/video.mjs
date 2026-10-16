@@ -18,7 +18,7 @@ import { blocoAtivo, legendasDasCenas, legendasParaSrt } from './legendas-core.m
 // Versão do motor. Aparece no resumo da página: serve para saber, sem dúvidas,
 // qual build está a correr no browser (um build antigo em cache foi uma das
 // causas de "não funcionou" que já apanhei).
-export const VERSAO_VIDEO = '3.6.0';
+export const VERSAO_VIDEO = '3.7.0';
 
 export const FORMATOS = [
   { id: '1920x1080', rotulo: 'Horizontal 1920×1080 (YouTube)', w: 1920, h: 1080 },
@@ -88,10 +88,23 @@ function explicarSemCiclo(modoDuracao, alvo, natural) {
 function duracoesDasCenas(marcaSemFala, clipes, T, duracaoCena, cenas = []) {
   const fixa = Math.max(2 * T + 0.2, Number(duracaoCena) || DURACAO_SEM_VOZ);
   return clipes.map((c, i) => {
-    const doVideo = Number(cenas[i]?.duracaoVideo);
-    if (Number.isFinite(doVideo) && doVideo > 0) return Math.max(2 * T + 0.2, doVideo);
+    const doVideo = duracaoDaCenaDeVideo(cenas[i]);
+    if (doVideo > 0) return Math.max(2 * T + 0.2, doVideo);
     return marcaSemFala[i] ? fixa : Math.max(2 * T + 0.2, c.duration);
   });
+}
+
+// Duração de uma cena de vídeo depois do CORTE escolhido (início/fim);
+// sem corte válido, é a duração inteira do ficheiro.
+function duracaoDaCenaDeVideo(c) {
+  const total = Number(c?.duracaoVideo);
+  if (!(Number.isFinite(total) && total > 0)) return 0;
+  const ini = Number(c?.videoInicio);
+  const fim = Number(c?.videoFim);
+  if (Number.isFinite(ini) && Number.isFinite(fim) && fim > ini) {
+    return Math.max(0.2, Math.min(fim, total) - Math.max(0, ini));
+  }
+  return total;
 }
 
 // Repete a lista de cenas até chegar à duração pedida.
@@ -455,10 +468,17 @@ export async function gerarVideo({
 
   // O SOM das cenas de vídeo vem do próprio ficheiro, tocado em tempo real e
   // ligado ao mesmo destino da narração e da trilha (entra no vídeo gravado).
-  for (const v of elementosVideo) {
+  for (const [i, v] of elementosVideo.entries()) {
     if (!v) continue;
     try {
-      seq.ctx.createMediaElementSource(v).connect(seq.ganho);
+      // O volume (ou o mudo) da cena passa por um ganho próprio, antes do
+      // ganho geral — é o "Ajustar áudio" da edição da cena.
+      const ganhoDaCena = seq.ctx.createGain();
+      ganhoDaCena.gain.value = cenas[i].videoMudo
+        ? 0
+        : Math.max(0, Math.min(1, Number(cenas[i].videoVolume ?? 1)));
+      seq.ctx.createMediaElementSource(v).connect(ganhoDaCena);
+      ganhoDaCena.connect(seq.ganho);
     } catch (e) {
       try { await seq.ctx.close(); } catch { /* já fechado */ }
       return { ok: false, erro: `não consegui ligar o som de um vídeo da montagem: ${e.message}` };
@@ -590,7 +610,8 @@ export async function gerarVideo({
       const cenaDeVideo = fonteAtual && fonteAtual.tagName === 'VIDEO';
       if (cenaDeVideo) {
         try {
-          fonteAtual.currentTime = 0;
+          // Começa no INÍCIO do corte escolhido (não no começo do ficheiro).
+          fonteAtual.currentTime = Math.max(0, Number(cenas[i % cenas.length].videoInicio) || 0);
           await fonteAtual.play();
         } catch {
           /* segue com o fotograma parado; a cena continua */

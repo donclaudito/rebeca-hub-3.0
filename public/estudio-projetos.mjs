@@ -89,6 +89,11 @@ async function recolherProjeto(nome) {
       previaVoz: cena.previaVoz || '',
       video: Boolean(img.video),
       duracaoVideo: Number(img.duracao) || 0,
+      videoCorte: img.video
+        ? { inicio: Number(cena.videoCorte?.inicio) || 0, fim: Number(cena.videoCorte?.fim) || 0 }
+        : null,
+      videoVolume: img.video ? Math.max(0, Math.min(1, Number(cena.videoVolume ?? 1))) : 1,
+      videoMudo: img.video ? Boolean(cena.videoMudo) : false,
     });
   }
   return {
@@ -273,6 +278,11 @@ export async function abrirProjeto(id) {
         audioExt: c.audioExt || '',
         previaUrl: null,
         previaVoz: c.previaVoz || '',
+        videoCorte: c.videoCorte
+          ? { inicio: Number(c.videoCorte.inicio) || 0, fim: Number(c.videoCorte.fim) || 0 }
+          : null,
+        videoVolume: Number.isFinite(Number(c.videoVolume)) ? Number(c.videoVolume) : 1,
+        videoMudo: Boolean(c.videoMudo),
       }));
     // O base64 do áudio é derivado do Blob, para o ZIP continuar a funcionar.
     for (const s of state.scenes) {

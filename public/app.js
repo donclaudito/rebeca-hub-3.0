@@ -274,31 +274,20 @@ function renderScenes() {
     li.className = 'scene';
 
     if (img?.video) {
-      // Cena de vídeo: sem narração e sem texto — imagem e som vêm do ficheiro.
-      const vid = document.createElement('video');
-      vid.src = img.url;
-      vid.muted = true;
-      vid.playsInline = true;
-      vid.preload = 'metadata';
-      const corpo = document.createElement('div');
-      corpo.className = 'scene-body';
-      const topo = document.createElement('div');
-      topo.className = 'scene-top';
-      const idx = document.createElement('span');
-      idx.className = 'idx';
-      idx.textContent = `Vídeo ${i + 1}`;
-      const nome = document.createElement('span');
-      nome.className = 'file';
-      nome.textContent = cena.filename;
-      topo.append(idx, nome);
-      const dica = document.createElement('p');
-      dica.className = 'hint';
-      dica.textContent =
-        `🎬 Cena de vídeo${img.duracao ? ` (~${Math.round(img.duracao)}s)` : ''} — a imagem e o som ` +
-        'vêm do próprio ficheiro. Arraste na aba 🖼️ para mudar a ordem.';
-      corpo.append(topo, dica);
-      li.append(vid, corpo);
+      // Cena de vídeo: os controlos (corte, som, substituir, remover) ficam no
+      // módulo da edição de cenas — o app.js já é grande demais.
+      if (modCenasEdit) {
+        modCenasEdit.preencherCenaVideo(li, cena, img, i);
+      } else {
+        const vid = document.createElement('video');
+        vid.src = img.url;
+        vid.muted = true;
+        vid.playsInline = true;
+        vid.preload = 'metadata';
+        li.append(vid);
+      }
       ol.append(li);
+      ligarArrasteCena(li, i);
       return;
     }
 
@@ -319,7 +308,21 @@ function renderScenes() {
     nome.className = 'file';
     nome.textContent = cena.filename;
     nome.title = cena.filename;
-    topo.append(idx, nome);
+    const rm = document.createElement('button');
+    rm.type = 'button';
+    rm.className = 'icon ghost rm';
+    rm.textContent = '✕';
+    rm.title = 'Remover esta cena';
+    rm.onclick = (e) => {
+      e.stopPropagation();
+      if (cena.audioUrl) URL.revokeObjectURL(cena.audioUrl);
+      if (cena.previaUrl) URL.revokeObjectURL(cena.previaUrl);
+      URL.revokeObjectURL(img.url);
+      state.images = state.images.filter((x) => x.id !== img.id);
+      renderThumbs();
+      renderScenes();
+    };
+    topo.append(idx, nome, rm);
 
     const ta = document.createElement('textarea');
     ta.value = cena.texto || '';
@@ -481,9 +484,42 @@ function renderScenes() {
     corpo.append(topo, ta, rodape);
     li.append(im, corpo);
     ol.append(li);
+    ligarArrasteCena(li, i);
   });
   atualizarContador();
 }
+
+// Reordenar cenas por arraste, na própria lista "Narração por imagem".
+// A ordem MANDA nas imagens: movo state.images e a lista de cenas volta a
+// sincronizar (o texto e o áudio de cada cena seguem o nome do ficheiro).
+const ligarArrasteCena = (li, i) => {
+  li.draggable = true;
+  li.addEventListener('dragstart', (e) => {
+    li.classList.add('dragging');
+    e.dataTransfer.setData('text/plain', `cena:${state.images[i].id}`);
+  });
+  li.addEventListener('dragend', () => li.classList.remove('dragging'));
+  li.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    li.classList.add('over');
+  });
+  li.addEventListener('dragleave', () => li.classList.remove('over'));
+  li.addEventListener('drop', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    li.classList.remove('over');
+    const id = String(e.dataTransfer.getData('text/plain') || '');
+    // Ficheiros soltos na lista: quem trata é o listener geral da página.
+    if (!id.startsWith('cena:')) return;
+    const de = state.images.findIndex((x) => x.id === id.slice(5));
+    if (de < 0 || de === i) return;
+    const [m] = state.images.splice(de, 1);
+    state.images.splice(i, 0, m);
+    renderThumbs();
+    renderScenes();
+  });
+};
 
 function atualizarContador() {
   const el = $('narradas');
@@ -1372,6 +1408,11 @@ function duracaoNaturalPrevista() {
   // estima-se pela contagem de palavras (~2,4 palavras por segundo, o mesmo
   // ritmo das vozes usadas) para o resumo não prometer um número inventado.
   return lista.reduce((soma, s) => {
+    // Cena de vídeo: a duração é a do TRECHO escolhido, não a do ficheiro todo.
+    if (s.video) {
+      const d = modCenasEdit ? modCenasEdit.duracaoDaCenaVideo(s) : Number(s.duracaoVideo) || 0;
+      return soma + Math.max(1.2, d);
+    }
     const w = palavras(s.texto);
     return soma + Math.max(1.2, w / 2.4);
   }, 0);
@@ -1511,6 +1552,7 @@ const iniciarProjetos = () => modProjetosUI?.iniciarProjetos();
 // A lógica de "quem está a usar a app" vive agora em estudio-utilizador.mjs.
 let modUtilizadorUI = null;
 let modVideoCarregado = null;
+let modCenasEdit = null;
 const iniciarUtilizador = () => modUtilizadorUI?.iniciarUtilizador({ toast });
 
 // ---------------------------------------------------------------- trilha sonora
@@ -1850,13 +1892,16 @@ async function gerarVideoFinal() {
       }
     }
     // O texto vai com a legenda: é dele que saem os blocos do vídeo e do .srt.
-    // Cenas de vídeo: a duração e o som vêm do próprio ficheiro.
+    // Cenas de vídeo: a duração e o som vêm do próprio ficheiro, com o CORTE
+    // (início/fim) e o VOLUME escolhidos na edição da cena.
+    const doCorte = s.video && modCenasEdit ? modCenasEdit.camposParaMotor(s) : {};
     cenas.push({
       imagem,
       audio,
       texto: s.texto || '',
       video: Boolean(s.video),
       duracaoVideo: Number(s.duracaoVideo ?? s.duracao) || 0,
+      ...doCorte,
     });
   }
 
@@ -2171,6 +2216,12 @@ async function carregarModulosExtras() {
     modVideoCarregado.iniciar({ state, toast, renderThumbs, renderScenes, updateLayout, clienteBase44 });
   } catch (e) {
     console.warn('módulo do vídeo carregado não chegou:', e && e.message);
+  }
+  try {
+    modCenasEdit = await import('./estudio-edicao-cenas.mjs');
+    modCenasEdit.iniciar({ state, toast, renderThumbs, renderScenes, resumoVideo, guardar });
+  } catch (e) {
+    console.warn('módulo da edição de cenas não chegou:', e && e.message);
   }
 }
 

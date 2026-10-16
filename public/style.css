@@ -399,3 +399,29 @@ main { padding: 18px 22px 60px; }
   .painel-corpo { padding: 18px 14px 40px; }
   .grade { grid-template-columns: 1fr; }
 }
+
+/* ---------- edição de cenas de vídeo ---------- */
+.cena-video-edit {
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 10px 12px; border-radius: 10px;
+  background: var(--bg-2); border: 1px solid var(--line);
+}
+.cve-linha { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.cve-campo { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--txt-2); }
+.cve-campo input[type="number"] {
+  width: 76px; padding: 5px 7px; border-radius: 8px;
+  border: 1px solid var(--line); background: var(--bg-3); color: var(--txt);
+}
+.cve-campo input[type="number"]:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.cve-campo input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent); cursor: pointer; }
+.cve-linha input[type="range"] { width: 140px; accent-color: var(--accent); }
+.cve-trecho { font-size: 12px; color: var(--accent-2); white-space: nowrap; }
+.cve-acoes { display: flex; gap: 8px; flex-wrap: wrap; }
+.cve-estado { margin: 0; font-size: 12px; }
+.scene.over { outline: 2px dashed var(--accent); outline-offset: -2px; }
+.scene.dragging { opacity: 0.45; }
+.scene-top .rm { margin-left: auto; }
+
+@media (max-width: 640px) {
+  .cve-linha input[type="range"] { width: 110px; }
+}

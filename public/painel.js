@@ -295,19 +295,29 @@ async function abrirDetalhes(p) {
 // projeto existe ANTES de trocar de vista — assim nunca se limpa o trabalho
 // aberto no estúdio sem haver projeto para abrir.
 async function reeditar(p) {
-  if (!p.projetoId) {
-    toast('Este vídeo não tem projeto associado — foi guardado antes de a app ligar vídeos a projetos.', 'err');
-    return;
-  }
   let projeto = null;
-  try {
-    const mod = await import('./projetos.mjs');
-    projeto = await mod.lerProjeto(p.projetoId);
-  } catch {
-    projeto = null;
+  const mod = await import('./projetos.mjs');
+  // Caminho normal: o vídeo sabe qual é o projeto dele.
+  if (p.projetoId) {
+    try {
+      projeto = await mod.lerProjeto(p.projetoId);
+    } catch {
+      projeto = null;
+    }
+  }
+  // Vídeos antigos, guardados antes de a app ligar vídeos a projetos: procura
+  // um projeto guardado NESTE computador com o mesmo nome do vídeo.
+  if (!projeto) {
+    try {
+      const todos = await mod.listarProjetos();
+      const nome = String(p.nome || '').trim().toLowerCase();
+      projeto = (todos || []).find((x) => String(x.nome || '').trim().toLowerCase() === nome) || null;
+    } catch {
+      projeto = null;
+    }
   }
   if (!projeto) {
-    toast(`O projeto original de "${p.nome || 'este vídeo'}" já não está neste computador.`, 'err');
+    toast(`O projeto original de "${p.nome || 'este vídeo'}" não está neste computador. Abra o vídeo no estúdio e guarde-o com este nome para voltar a editar.`, 'err');
     return;
   }
   mostrarVista('estudio');

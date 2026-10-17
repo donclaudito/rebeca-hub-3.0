@@ -21,7 +21,8 @@ let suportaCodecs = true;        // o browser falso sabe gravar WebM?
 let agendamentos = [];           // {clipe, quando}
 let fontesEmCiclo = [];          // fontes com loop (a trilha)
 let ganhosCriados = [];          // valores de ganho pedidos (narração=1, trilha=0.16)
-let musicaDuracao = 65;          // duração devolvida para a trilha
+let retoques = [];               // fillRect no canvas (o véu preto do fecho)
+let musicaDuracao = 2;           // duração devolvida para a trilha (curta: o fecho com a música não estica as provas)
 let ultimoCtx = null;
 let ultimoGravador = null;
 
@@ -30,6 +31,9 @@ class Ctx2D {
   save() { this._p.push({ a: this.globalAlpha, f: this.filter }); }
   restore() { const s = this._p.pop(); if (s) { this.globalAlpha = s.a; this.filter = s.f; } }
   clearRect() {}
+  // O FECHO do vídeo pinta o ecrã de preto: regista o véu aplicado em cada
+  // instante, para as provas poderem ver o apagar suave.
+  fillRect(x, y, w, h) { retoques.push({ t: relogioMs / 1000, alpha: this.globalAlpha, cor: this.fillStyle, x, y, w, h }); }
   drawImage(img, x, y, w, h) {
     desenhos.push({ t: relogioMs / 1000, img: img && img.nome, escala: w / 1000, alpha: this.globalAlpha, dx: x, filtro: this.filter });
   }
@@ -136,8 +140,8 @@ class GravadorFalso {
 // `musicaSegundos` é a duração que o áudio descodificado da TRILHA devolve — é
 // ela que manda no ciclo. A lista `duracoes` é só da narração, por isso os dois
 // nunca se misturam (misturá-los foi um erro meu que fez o ciclo parecer avariado).
-function instalarAmbiente(duracoes, { musicaSegundos = 65 } = {}) {
-  desenhos = []; agendamentos = []; fontesEmCiclo = []; ganhosCriados = []; legendasDesenhadas = []; fila = []; relogioMs = 0;
+function instalarAmbiente(duracoes, { musicaSegundos = 2 } = {}) {
+  desenhos = []; agendamentos = []; fontesEmCiclo = []; ganhosCriados = []; legendasDesenhadas = []; retoques = []; fila = []; relogioMs = 0;
   mimesUsados = []; suportaCodecs = true;
   musicaDuracao = musicaSegundos;
   const ctx = new AudioCtxFalso(duracoes);
@@ -939,6 +943,33 @@ console.log('\n[24] Browser com o som bloqueado: falha cedo, em vez de gravar mu
   ultimoCtx.state = 'running';
   const r2 = await correrCom(mod.gerarVideo({ cenas: cenasDe(1), transicao: 'fade', duracaoTransicao: 0.4 }));
   check(r2.ok === true, 'com o som a correr, grava normalmente', JSON.stringify(r2).slice(0, 90));
+}
+
+console.log('\n[25] Fecho com a música: a última cena fica até ela acabar');
+{
+  // 2 cenas de 2s = 4s de vídeo; música descodificada de 10s → a última cena
+  // fica 8s mais tempo, o vídeo acaba JUNTO com a música e ambos esmaecem.
+  const musica = { name: 'tema.mp3', arrayBuffer: () => Promise.resolve(new ArrayBuffer(64)) };
+  instalarAmbiente([2.0, 2.0], { musicaSegundos: 10 });
+  const r = await correrCom(mod.gerarVideo({ cenas: cenasDe(2), transicao: 'fade', duracaoTransicao: 0.4, musica }));
+  check(r.ok === true, 'grava com o fecho esticado', JSON.stringify(r).slice(0, 120));
+  check(perto(r.duracao, 10, 0.6), `o vídeo acaba quando a música acaba (${r.duracao.toFixed(1)}s ≈ 10s)`, String(r.duracao));
+  check(r.terminouComMusica === true, 'a gravação terminou com a música', `terminouComMusica=${r.terminouComMusica}`);
+  check(perto(r.tempoExtra, 6, 0.6), `a última cena ganhou ${r.tempoExtra.toFixed(1)}s para a música acabar`, String(r.tempoExtra));
+
+  // No fim, a imagem apaga para preto: retoques pretos cada vez mais fortes
+  // nos últimos ~3s, e nenhum antes disso.
+  const pretos = retoques.filter((q) => /rgba\(0,0,0/.test(q.cor || ''));
+  check(pretos.length > 5, `o véu preto do fecho foi desenhado (${pretos.length} vez(es))`, String(pretos.length));
+  const antes = pretos.filter((q) => q.t < r.duracao - 3.2);
+  check(antes.length === 0, `nenhum véu antes do fecho (antes das ${Math.max(0, r.duracao - 3.2).toFixed(1)}s)`, String(antes.length));
+  const noFim = pretos.filter((q) => q.t >= r.duracao - 0.4);
+  check(noFim.length > 0 && Math.max(...noFim.map((q) => parseFloat(q.cor.match(/([\d.]+)\)$/)?.[1] || '0'))) > 0.85, 'o ecrã está quase todo preto no último instante', JSON.stringify(noFim.at(-1)));
+
+  // A música esmaece: o ganho da trilha desce (rampa programada no fim).
+  const ganhoTrilha = fontesEmCiclo.length ? true : false;
+  check(ganhoTrilha, 'a trilha estava a tocar', 'não tocou');
+  check(perto(r.musicaSegundos, 10, 0.01), `a duração usada da música é a descodificada (${r.musicaSegundos}s)`, String(r.musicaSegundos));
 }
 
 console.log(falhas.length ? `\n=== ${falhas.length} FALHA(S) ===` : '\n=== GERAÇÃO DE VÍDEO OK ===');

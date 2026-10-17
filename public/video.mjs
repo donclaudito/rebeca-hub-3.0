@@ -18,7 +18,11 @@ import { blocoAtivo, legendasDasCenas, legendasParaSrt } from './legendas-core.m
 // Versão do motor. Aparece no resumo da página: serve para saber, sem dúvidas,
 // qual build está a correr no browser (um build antigo em cache foi uma das
 // causas de "não funcionou" que já apanhei).
-export const VERSAO_VIDEO = '3.9.3';
+export const VERSAO_VIDEO = '3.9.4';
+
+// Duração do FECHO: nos últimos segundos do vídeo (quando há trilha), a música
+// esmaece até ao silêncio e a imagem apaga suavemente para preto.
+export const FECHO_SEGUNDOS = 3;
 
 export const FORMATOS = [
   { id: '1920x1080', rotulo: 'Horizontal 1920×1080 (YouTube)', w: 1920, h: 1080 },
@@ -317,10 +321,23 @@ function desenharTransicao(ctx, w, h, de, para, t, tipo) {
 // A legenda é desenhada por cima, já depois de a imagem estar no sítio. Liga-se
 // e desliga-se por instante (nada de guardar estado), para que um bloco que
 // atravesse uma transição continue a aparecer.
-function criarDesenhador({ ctx, w, h, imagens, inicios, duracoes, T, transicao, legendas = [], desenharLegenda = null, epilogoEm = -1, orientacaoEpilogo = '' }) {
+function criarDesenhador({ ctx, w, h, imagens, inicios, duracoes, T, transicao, legendas = [], desenharLegenda = null, epilogoEm = -1, orientacaoEpilogo = '', fechoEm = -1 }) {
   const corte = transicao === 'corte';
   const n = imagens.length;
   const querLegenda = Boolean(desenharLegenda && legendas.length);
+
+  // FECHO: com trilha sonora, a imagem apaga suavemente para preto nos últimos
+  // segundos do vídeo, ao mesmo tempo que a música esmaece — nenhum dos dois é
+  // cortado a seco.
+  const aplicarFecho = (agora) => {
+    if (fechoEm <= 0 || agora <= fechoEm) return;
+    const a = Math.min(1, Math.max(0, (agora - fechoEm) / FECHO_SEGUNDOS));
+    ctx.save();
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = `rgba(0,0,0,${a.toFixed(3)})`;
+    ctx.fillRect(0, 0, w, h);
+    ctx.restore();
+  };
 
   return (k, agora) => {
     const inicio = inicios[k];
@@ -335,6 +352,7 @@ function criarDesenhador({ ctx, w, h, imagens, inicios, duracoes, T, transicao, 
         const bloco = blocoAtivo(legendas, agora);
         if (bloco) desenharLegenda(ctx, bloco.texto, w, h);
       }
+      aplicarFecho(agora);
       return;
     }
 
@@ -360,6 +378,8 @@ function criarDesenhador({ ctx, w, h, imagens, inicios, duracoes, T, transicao, 
       const bloco = blocoAtivo(legendas, agora);
       if (bloco) desenharLegenda(ctx, bloco.texto, w, h);
     }
+
+    aplicarFecho(agora);
   };
 }
 
@@ -656,7 +676,7 @@ export async function gerarVideo({
     inicios.push(soma);
     soma += d;
   }
-  const total = soma;
+  let total = soma;
   // A música nunca corta o vídeo: ele acaba sempre no fim da última cena.
   const cortado = false;
 
@@ -694,6 +714,26 @@ export async function gerarVideo({
     }
   }
 
+  // FECHO COM A MÚSICA: se ela ainda não acabou quando a última cena termina,
+  // a última cena fica MAIS TEMPO no ecrã — o tempo exato que falta para a
+  // música chegar ao fim. Só então o vídeo acaba. As legendas foram calculadas
+  // ANTES deste acréscimo, de propósito: os blocos da narração ficam no tempo
+  // da fala real, sem se esticarem pelo tempo extra de silêncio.
+  let acrescentoFim = 0;
+  if (duracaoMusica > 0 && total < duracaoMusica) {
+    acrescentoFim = duracaoMusica - total;
+    durFinal[durFinal.length - 1] += acrescentoFim;
+    inicios.length = 0;
+    let somaFecho = 0;
+    for (const d of durFinal) {
+      inicios.push(somaFecho);
+      somaFecho += d;
+    }
+    total = somaFecho;
+  }
+  // Com trilha, o vídeo acaba NO INSTANTE em que a música acaba — nunca antes.
+  const terminouComMusica = duracaoMusica > 0 && Math.abs(total - duracaoMusica) < 0.5;
+
   // 3) começar a gravar
   const fluxoVideo = canvas.captureStream(fps);
   const fluxo = new MediaStream([...fluxoVideo.getVideoTracks(), ...seq.destino.stream.getAudioTracks()]);
@@ -717,6 +757,8 @@ export async function gerarVideo({
     legendas: listaCues, desenharLegenda,
     epilogoEm: comEpilogo ? ciclos.length - 1 : -1,
     orientacaoEpilogo: comEpilogo ? orientacao : '',
+    // Com trilha, a imagem apaga para preto nos últimos segundos do vídeo.
+    fechoEm: duracaoMusica > 0 ? total - Math.min(FECHO_SEGUNDOS, total / 2) : -1,
   });
   desenhar(0, 0);
 
@@ -731,10 +773,10 @@ export async function gerarVideo({
     try {
       trilha = modTrilha.tocarTrilha({ ctx: seq.ctx, destino: seq.destino, musica: musicaBuffer, quando: seq.ctx.currentTime });
       musicaAviso = avisoTrilha;
-      // E acaba SUAVE: nos últimos 2s a trilha esmaece até ao silêncio, terminando
-      // exatamente no fim da última cena (ou do epílogo) — sem corte a seco.
+      // E acaba SUAVE: nos últimos segundos a trilha esmaece até ao silêncio,
+      // terminando exatamente no fim do vídeo — junto com o apagar da imagem.
       if (trilha.comecou && trilha.esmaecerAte) {
-        trilha.esmaecerAte(trilha.comecouEm + totalEfetivo, Math.min(2, Math.max(0.3, totalEfetivo)));
+        trilha.esmaecerAte(trilha.comecouEm + totalEfetivo, Math.min(FECHO_SEGUNDOS, Math.max(0.3, totalEfetivo)));
       }
     } catch (e) {
       musicaAviso = `não consegui usar a trilha: ${e.message}`;
@@ -847,9 +889,11 @@ export async function gerarVideo({
     cenasPorPassagem: cenas.length,
     repetido: Boolean(repetido.itens.length),
     cortado,
-    // A gravação acaba sempre NO FIM DA ÚLTIMA CENA; a música (em ciclo) é
-    // parada nesse mesmo instante — nunca é o vídeo que ela corta.
-    terminouComMusica: false,
+    // Com trilha, o vídeo acaba NO INSTANTE em que a música acaba: se faltava
+    // tempo, a última cena fica mais tempo no ecrã (tempoExtra), com som e
+    // imagem a esmaecer juntos no fecho.
+    terminouComMusica,
+    tempoExtra: acrescentoFim,
     duracaoNatural: natural,
     versao: VERSAO_VIDEO,
     semCiclo,

@@ -1203,6 +1203,13 @@ function notaIntro() {
   return ` 🎬 Introdução: o vídeo abre com "${state.cenaInicial}", parada, antes da sequência — ela não volta no meio.`;
 }
 
+// Nota do fecho: com trilha sonora, o vídeo acaba quando a música acaba — a
+// última cena fica o tempo que faltar e, no fim, som e imagem apagam suaves.
+function notaFecho() {
+  if (!state.musicaFicheiro || !state.musicaLigada) return '';
+  return ' 🎬 Fecho: o vídeo acaba quando a música acaba — a última cena fica o tempo que faltar, com som e imagem a apagar suavemente no fim.';
+}
+
 // Nota da letra, para o resumo: diz quantos versos e quanto tempo cada um leva.
 function notaLetra() {
   if (!state.letraLigada) return '';
@@ -1228,7 +1235,7 @@ function resumoVideo() {
     return estadoVideo(
       `Vai sair um vídeo de ${n} imagem(ns), cerca de ${formatarMinutos(seg)}, com a trilha ` +
         `"${state.musicaFicheiro.name}" em ciclo e sem voz. Transição "${transicaoRotulo()}".` +
-        `${nota}${notaIntro()}${notaEpilogo()}${notaCiclo()} Demora cerca de ${formatarMinutos(vezesQueRepete().total || seg)} a gravar.`,
+        `${nota}${notaIntro()}${notaEpilogo()}${notaCiclo()}${notaFecho()} Demora cerca de ${formatarMinutos(vezesQueRepete().total || seg)} a gravar.`,
       '',
     );
   }
@@ -1248,7 +1255,7 @@ function resumoVideo() {
     return estadoVideo(
       `Pronto para o vídeo de letra: ${state.images.length} imagem(ns), transição "${transicaoRotulo()}", ` +
         `trilha "${state.musicaFicheiro.name}".` +
-        `${nota}${notaIntro()}${notaEpilogo()}${notaCiclo()} A gravação demora o tempo do vídeo.`,
+        `${nota}${notaIntro()}${notaEpilogo()}${notaCiclo()}${notaFecho()} A gravação demora o tempo do vídeo.`,
       '',
     );
   }
@@ -1273,7 +1280,7 @@ function resumoVideo() {
     `Pronto: ${n} imagem(ns), transição "${transicaoRotulo()}", ${m.rotulo.toLowerCase()}` +
       `${semAudio ? ` — ${semAudio} cena(s) sem áudio` : ''}` +
       `${musica ? `, trilha "${state.musicaFicheiro.name}"` : state.videoModo === 'ambos' ? ' (sem trilha escolhida)' : ''}.` +
-      `${nota}${notaIntro()}${notaEpilogo()}${notaCiclo()} A gravação demora o tempo do vídeo.`,
+      `${nota}${notaIntro()}${notaEpilogo()}${notaCiclo()}${notaFecho()} A gravação demora o tempo do vídeo.`,
     semAudio ? 'wait' : '',
   );
 }

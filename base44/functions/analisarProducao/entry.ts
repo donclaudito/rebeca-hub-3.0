@@ -94,6 +94,17 @@ export default async function (req) {
         '- promptRefinado: se as imagens tiverem falhas de geração (personagens inconsistentes entre cenas, artefactos, texto escrito na imagem, enquadramento fraco, iluminação incoerente), UM prompt refinado em INGLÊS, pronto para colar num gerador de imagens, que corrige essas falhas e mantém o estilo infantil com proporção 16:9, uma frase rica sem listas. Se as imagens estiverem boas, devolva um prompt que eleve ainda mais a qualidade.',
         'Responda em português do Brasil, concreto e sem enrolação — exceto promptRefinado, que é sempre em inglês.',
         '',
+        'Além dos quatro campos, devolva também um quinto, "aplicar": as melhorias que se resolvem NOS CONTROLOS da própria app, como objeto. Campos possíveis (omita cada campo em que NÃO recomenda mudança; nunca invente valores fora destas listas):',
+        '- transicao: um de fade, corte, slideleft, zoom, desfoque;',
+        '- duracaoTransicao: um de 0.4, 0.6, 0.9, 1.4 (segundos);',
+        '- duracaoCena: um de 2, 3.5, 5, 8 (segundos por imagem; só faz sentido em montagem sem voz);',
+        '- legendas: true ou false (legendas incrustadas);',
+        '- modoDuracao: natural (duração da narração) ou trilha (repete as imagens até a música acabar);',
+        '- orientacao: um de natureza, narrativa, clipe (encerramento em epílogo) — omita para não mudar;',
+        '- codec: vp8 (compatível) ou vp9 (mais pequeno);',
+        '- foraDaApp: array de 0 a 4 frases curtas com o que pede edição externa e não tem controlo na app.',
+        'NÃO coloque aqui nada sobre as imagens nem sobre o prompt refinado.',
+        '',
         'Dados da montagem:',
         ...linhas,
       ].join('\n'),
@@ -112,6 +123,19 @@ export default async function (req) {
             },
           },
           promptRefinado: { type: 'string' },
+          aplicar: {
+            type: 'object',
+            properties: {
+              transicao: { type: 'string' },
+              duracaoTransicao: { type: 'number' },
+              duracaoCena: { type: 'number' },
+              legendas: { type: 'boolean' },
+              modoDuracao: { type: 'string' },
+              orientacao: { type: 'string' },
+              codec: { type: 'string' },
+              foraDaApp: { type: 'array', items: { type: 'string' } },
+            },
+          },
         },
         required: ['composicao', 'sincronia', 'melhorias', 'promptRefinado'],
       },
@@ -129,7 +153,10 @@ export default async function (req) {
     if (!composicao || !sincronia) {
       return json({ ok: false, error: 'A IA não devolveu a análise. Tente outra vez.' }, 502);
     }
-    return json({ ok: true, composicao, sincronia, melhorias, promptRefinado });
+    // As melhorias convertidas em controlos da app: o estúdio aplica-as e
+    // regenera. O que a IA mandou fora das listas válidas é ignorado lá.
+    const aplicar = resposta?.aplicar && typeof resposta.aplicar === 'object' ? resposta.aplicar : null;
+    return json({ ok: true, composicao, sincronia, melhorias, promptRefinado, ...(aplicar ? { aplicar } : {}) });
   } catch (erro) {
     console.error('analisarProducao falhou', erro);
     return json({ ok: false, error: erro?.message || 'erro inesperado' }, 500);

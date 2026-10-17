@@ -2081,7 +2081,10 @@ async function carregarModulosExtras() {
   }
   try {
     modAnalise = await import('./estudio-analise.mjs');
-    modAnalise.iniciarAnalise({ state, $, toast, clienteBase44, videoAtual: () => resultadoVideo });
+    modAnalise.iniciarAnalise({
+      state, $, toast, clienteBase44, videoAtual: () => resultadoVideo,
+      guardar, resumoVideo, aplicarPreferenciasNaInterface, gerarVideoFinal,
+    });
   } catch (e) {
     console.warn('módulo da análise não chegou:', e && e.message);
   }

@@ -385,7 +385,9 @@ console.log('\n[10] A trilha em ciclo por baixo da narração');
   }
   const f = fontesEmCiclo[0];
   check(f.loop === true, 'a música está em ciclo (loop)', `loop=${f.loop}`);
-  check(f.comecou === true && (f.quando === undefined || f.quando === 0), 'a música começa logo no início do vídeo', `quando=${f.quando}`);
+  // A música já não entra durante a preparação (ficava adiantada): entra no
+  // instante em que a gravação começa — o mesmo instante zero do vídeo.
+  check(f.comecou === true && (f.quando === undefined || f.quando <= 0.15), 'a música entra no início da gravação, no mesmo instante do vídeo', `quando=${f.quando}`);
   check(f.parou === true, 'a música é parada no fim da gravação', 'ficou a tocar');
   check(!r.musicaAviso, `sem avisos: "${r.musicaAviso}"`, r.musicaAviso);
   check(agendamentos.length === 3, `as 3 narrações continuam agendadas (${agendamentos.length})`, String(agendamentos.length));

@@ -109,7 +109,7 @@ export async function carregarTrilha(ficheiro, ctx) {
 
 // Liga a música ao destino da gravação. Fica em ciclo e começa já — o vídeo
 // abre na primeira imagem, por isso a música não fica desfasada da narração.
-export function tocarTrilha({ ctx, destino, musica }) {
+export function tocarTrilha({ ctx, destino, musica, quando = null }) {
   const ganho = ctx.createGain();
   ganho.gain.value = VOLUME_TRILHA;
   ganho.connect(destino);
@@ -122,8 +122,10 @@ export function tocarTrilha({ ctx, destino, musica }) {
   let comecou = false;
   let comecouEm = 0;
   try {
-    comecouEm = ctx.currentTime;
-    fonte.start();
+    // `quando` PROGRAMA o início (a música entra no instante exato da gravação,
+    // o que mantém a letra alinhada com ela); sem ele, começa já.
+    comecouEm = Number.isFinite(quando) && quando !== null ? Number(quando) : ctx.currentTime;
+    fonte.start(comecouEm);
     comecou = true;
   } catch {
     /* sem música é melhor do que sem vídeo */

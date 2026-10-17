@@ -18,7 +18,7 @@ import { blocoAtivo, legendasDasCenas, legendasParaSrt } from './legendas-core.m
 // Versão do motor. Aparece no resumo da página: serve para saber, sem dúvidas,
 // qual build está a correr no browser (um build antigo em cache foi uma das
 // causas de "não funcionou" que já apanhei).
-export const VERSAO_VIDEO = '3.9.2';
+export const VERSAO_VIDEO = '3.9.3';
 
 export const FORMATOS = [
   { id: '1920x1080', rotulo: 'Horizontal 1920×1080 (YouTube)', w: 1920, h: 1080 },
@@ -503,19 +503,26 @@ export async function gerarVideo({
 
   // 2b) a trilha sonora (opcional). Se falhar, o vídeo sai sem música e a
   // página é avisada — nunca se perde o trabalho por causa da trilha.
+  // Aqui ela só é CARREGADA (descodificada): entra a TOCAR no instante exato
+  // em que a gravação começa (junto a gravador.start, lá em baixo). Se
+  // entrasse já, ficava adiantada em relação ao vídeo — e a letra, que é
+  // temporizada a partir do segundo zero do vídeo, saía atrasada.
   let trilha = null;
   let musicaAviso = '';
   let musicaReal = 0;
+  let musicaBuffer = null;
+  let modTrilha = null;
+  let avisoTrilha = '';
   if (musica) {
     try {
-      const mod = await import('./musica.mjs');
-      const r = await mod.carregarTrilha(musica, seq.ctx);
+      modTrilha = await import('./musica.mjs');
+      const r = await modTrilha.carregarTrilha(musica, seq.ctx);
       if (r.ok) {
         // Este valor é a verdade sobre a duração: vem do áudio já descodificado,
         // não de um <audio> a ler metadados. Serve de segunda opinião à página.
         musicaReal = r.duracao;
-        trilha = mod.tocarTrilha({ ctx: seq.ctx, destino: seq.destino, musica: r.musica });
-        musicaAviso = r.aviso;
+        musicaBuffer = r.musica;
+        avisoTrilha = r.aviso;
       } else {
         musicaAviso = r.erro;
       }
@@ -662,7 +669,16 @@ export async function gerarVideo({
   if (querLegendas && externas.length) {
     // A letra repete com as imagens? Não: a letra acompanha a MÚSICA, que toca
     // uma vez. Se o vídeo tem passagens, a letra fica só na primeira.
-    listaCues = externas.map((c) => ({ texto: c.texto, inicio: c.inicio, fim: c.fim }));
+    //
+    // SINCRONIZAÇÃO FINA: a letra foi distribuída pela duração MEDIDA pela
+    // página (metadados); a verdade é a duração JÁ DESCODIFICADA (musicaReal).
+    // Se as duas divergirem, os versos ressincronizam à escala real da música —
+    // senão a letra ia atrasando-se ao longo do vídeo.
+    const fator =
+      musicaReal > 0 && musicaSegundos > 0 && musicaReal !== musicaSegundos
+        ? musicaReal / musicaSegundos
+        : 1;
+    listaCues = externas.map((c) => ({ texto: c.texto, inicio: c.inicio * fator, fim: c.fim * fator }));
   } else if (querLegendas) {
     listaCues = legendasDasCenas(ciclos.map((c) => c._texto || ''), durFinal, inicios);
   }
@@ -691,16 +707,6 @@ export async function gerarVideo({
   // exatamente nesse instante — a música termina junto com a última cena.
   const totalEfetivo = total;
 
-  // E acaba SUAVE: nos últimos 2s a trilha esmaece até ao silêncio, terminando
-  // exatamente no fim da última cena (ou do epílogo) — sem corte a seco.
-  if (trilha && trilha.comecou && trilha.esmaecerAte) {
-    try {
-      trilha.esmaecerAte(trilha.comecouEm + totalEfetivo, Math.min(2, Math.max(0.3, totalEfetivo)));
-    } catch {
-      /* sem esmaecimento é melhor do que sem gravação */
-    }
-  }
-
   // Repete as imagens na mesma ordem da primeira passagem (a imagem de cada
   // cena vem do ficheiro original; `ciclos` só diz qual toca em cada momento).
   const imagensFinal = ciclos.map((c) => imagens[c._fonte]);
@@ -715,6 +721,25 @@ export async function gerarVideo({
   desenhar(0, 0);
 
   gravador.start(250);
+
+  // A MÚSICA ENTRA AGORA, no primeiro instante gravado — e não antes. Era
+  // ligada durante a preparação, quando o relógio do vídeo ainda não tinha
+  // começado: ficava ADIANTADA e a letra, temporizada a partir do segundo
+  // zero do vídeo, saía ATRASADA em relação a ela. Começando aqui, letra e
+  // música partem do MESMO instante.
+  if (musicaBuffer && modTrilha) {
+    try {
+      trilha = modTrilha.tocarTrilha({ ctx: seq.ctx, destino: seq.destino, musica: musicaBuffer, quando: seq.ctx.currentTime });
+      musicaAviso = avisoTrilha;
+      // E acaba SUAVE: nos últimos 2s a trilha esmaece até ao silêncio, terminando
+      // exatamente no fim da última cena (ou do epílogo) — sem corte a seco.
+      if (trilha.comecou && trilha.esmaecerAte) {
+        trilha.esmaecerAte(trilha.comecouEm + totalEfetivo, Math.min(2, Math.max(0.3, totalEfetivo)));
+      }
+    } catch (e) {
+      musicaAviso = `não consegui usar a trilha: ${e.message}`;
+    }
+  }
 
   // 4) desenhar e tocar, cena a cena, em tempo real
   const inicio = performance.now();

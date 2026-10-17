@@ -1000,5 +1000,46 @@ console.log('\n[26] Letra após intro instrumental: um único relógio e pausas 
   check(JSON.stringify(tempos.cuesDaLetra(state)) === JSON.stringify(cues), 'tempos aplicados substituem o rascunho sem recalcular', 'recalculou tempos confirmados');
 }
 
+console.log('\n[27] Rascunho da letra re-temporizado ao canto REAL da faixa');
+{
+  instalarAmbiente([], { musicaSegundos: 8 });
+  // Faixa de 8s: canta só dos 2s aos 5s; o resto é instrumental. (O silêncio
+  // final precisa de mais de 2,5s — é o buraco mínimo que o detetor aceita.)
+  ultimoCtx.decodeAudioData = function () {
+    const b = new BufferFalso(8, 2);
+    for (let i = Math.floor(2 * b.sampleRate); i < Math.floor(5 * b.sampleRate); i++) b._dados[i] = 0.5 * Math.sin(i / 20);
+    return Promise.resolve(b);
+  };
+  // Rascunho da página dividido igual (a análise não correu): 0–3 e 3–6.
+  const cues = [{ texto: 'Primeiro', inicio: 0, fim: 3 }, { texto: 'Segundo', inicio: 3, fim: 6 }];
+  const r = await correrCom(mod.gerarVideo({
+    cenas: [{ imagem: 'uma', audio: null }],
+    musica: { arrayBuffer: async () => new ArrayBuffer(8) },
+    duracaoCena: 6, legendas: true, legendasExternas: cues, legendasRascunho: true,
+  }));
+  check(r.ok, 'gravação concluída', JSON.stringify(r).slice(0, 120));
+  check(r.legendas === 2, '2 versos desenhados', String(r.legendas));
+  // Pesos pelo tempo de canto de cada verso: 1s e 2s (o instrumental que o
+  // 'Segundo' atravessava não conta) → 2–3 e 3–5, acabando com a voz.
+  check(r.srt.includes('00:00:02,000 --> 00:00:03,000') && r.srt.includes('00:00:03,000 --> 00:00:05,000'), 'SRT sai já no tempo do canto (2–3 e 3–5)', r.srt.slice(0, 200));
+  const inicioMusica = fontesEmCiclo[0].quando;
+  const letras = legendasDesenhadas.filter((d) => d.tipo === 'preenchimento');
+  const primeira = letras.find((d) => d.texto.includes('Primeiro'));
+  const segunda = letras.find((d) => d.texto.includes('Segundo'));
+  check(primeira && perto(primeira.t - inicioMusica, 2, 0.2), `o primeiro verso entra quando a voz entra (${primeira ? (primeira.t - inicioMusica).toFixed(2) : '?'}s)`, JSON.stringify(primeira));
+  check(segunda && perto(segunda.t - inicioMusica, 3, 0.2), `o segundo entra logo a seguir (${segunda ? (segunda.t - inicioMusica).toFixed(2) : '?'}s)`, JSON.stringify(segunda));
+  check(!letras.some((d) => d.t - inicioMusica < 1.9 || d.t - inicioMusica > 5.1), 'nenhuma legenda nos silêncios instrumentais', 'letra invadiu o instrumental');
+
+  // Tempos CONFIRMADOS (rascunho desligado) nunca são re-temporizados.
+  instalarAmbiente([], { musicaSegundos: 6 });
+  ultimoCtx.decodeAudioData = function () { return Promise.resolve(new BufferFalso(6, 2)); };
+  const r2 = await correrCom(mod.gerarVideo({
+    cenas: [{ imagem: 'uma', audio: null }],
+    musica: { arrayBuffer: async () => new ArrayBuffer(8) },
+    duracaoCena: 6, legendas: true, legendasExternas: cues, legendasRascunho: false,
+  }));
+  check(r2.ok && r2.srt.includes('00:00:00,000 --> 00:00:03,000'), 'tempos confirmados não são alterados', r2.srt.slice(0, 120));
+}
+
 console.log(falhas.length ? `\n=== ${falhas.length} FALHA(S) ===` : '\n=== GERAÇÃO DE VÍDEO OK ===');
 process.exit(falhas.length ? 1 : 0);

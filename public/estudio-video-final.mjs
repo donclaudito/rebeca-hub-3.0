@@ -157,6 +157,9 @@ export async function gerarVideoFinal() {
       // Com a letra em uso, as legendas ficam ligadas (ela substitui a narração).
       legendas: comLegendas,
       legendasExternas: cuesLetra.length ? cuesLetra : null,
+      // Rascunho (sem tempos confirmados nem alinhados)? O motor re-temporiza
+      // os versos ao canto real da faixa, no momento exato da voz.
+      legendasRascunho: cuesLetra.length > 0 && !state.legendasLetra,
       codec: state.codec,
       modoDuracao: state.modoDuracao,
       musicaSegundos: state.musicaSegundos,

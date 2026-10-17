@@ -347,5 +347,23 @@ console.log('\n[12] Detetor de voz: onde a música tem canto');
   delete globalThis.AudioContext;
 }
 
+console.log('\n[13] Re-temporização do rascunho ao canto real');
+{
+  // Rascunho dividido igual (a análise da página não correu): 2 versos em 60s.
+  const secoes = [{ inicio: 10, fim: 30 }, { inicio: 40, fim: 55 }];
+  const rascunho = [{ texto: 'a', inicio: 0, fim: 30 }, { texto: 'b', inicio: 30, fim: 60 }];
+  const novas = core.ressincronizarPelaVoz(rascunho, secoes);
+  check(Boolean(novas), 'devolve os tempos corrigidos', 'devolveu nada');
+  check(perto(novas[0].inicio, 10, 0.01), `o 1.º verso entra quando a voz entra (${novas[0].inicio}s)`, String(novas[0].inicio));
+  check(perto(novas[0].fim, 30, 0.01), `o 1.º acaba onde a voz para (${novas[0].fim}s)`, String(novas[0].fim));
+  check(perto(novas[1].inicio, 40, 0.01), `o 2.º salta o instrumental e segue o canto (${novas[1].inicio}s)`, String(novas[1].inicio));
+  check(perto(novas.at(-1).fim, 55, 0.01), `o último acaba junto com o canto (${novas.at(-1).fim}s)`, String(novas.at(-1).fim));
+  const dentro = novas.every((c) => secoes.some((s) => c.inicio >= s.inicio - 0.01 && c.inicio < s.fim));
+  check(dentro, 'nenhum verso começa no instrumental', JSON.stringify(novas.map((c) => [c.inicio, c.fim])));
+  check(novas.every((c, i) => i === 0 || c.inicio >= novas[i - 1].inicio - 0.01), 'a ordem dos versos nunca recua', JSON.stringify(novas));
+  check(core.ressincronizarPelaVoz(rascunho, []) === null, 'sem trechos devolve null (fica como estava)', 'devolveu lista');
+  check(core.ressincronizarPelaVoz([], secoes) === null, 'sem cues devolve null', 'devolveu lista');
+}
+
 console.log(falhas.length ? `\n=== ${falhas.length} FALHA(S) ===` : '\n=== LEGENDAS OK ===');
 process.exit(falhas.length ? 1 : 0);

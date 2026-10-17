@@ -244,6 +244,52 @@ function secoesUteis(secoes, base, janela) {
   return boas;
 }
 
+// Re-temporiza os versos ao canto REAL (trechos de voz da faixa descodificada,
+// de `analisarVozDeBuffer` em musica.mjs). É o que garante que a legenda entra
+// NO MOMENTO EXATO da voz, mesmo que a análise da página tenha faltado.
+//
+// O peso de cada verso é o tempo DE CANTO que o rascunho lhe deu (o silêncio
+// instrumental que ele atravessava NÃO conta) e os versos se repartem pelos
+// trechos de canto na ordem — a mesma redistribuição de `legendasDaLetra`:
+// o primeiro entra quando a voz entra, nenhum verso começa ou anda por um
+// silêncio instrumental e a ordem nunca recua.
+export function ressincronizarPelaVoz(cues, secoes) {
+  const boas = (Array.isArray(secoes) ? secoes : [])
+    .map((s) => ({ inicio: Number(s?.inicio), fim: Number(s?.fim) }))
+    .filter((s) => Number.isFinite(s.inicio) && Number.isFinite(s.fim) && s.fim > s.inicio + 0.2)
+    .sort((a, b) => a.inicio - b.inicio);
+  if (!boas.length || !Array.isArray(cues) || !cues.length) return null;
+  const cantoAte = (t) =>
+    boas.reduce((a, s) => a + Math.max(0, Math.min(Number(t), s.fim) - s.inicio), 0);
+  const pesos = cues.map((c) => {
+    const canto = cantoAte(c.fim) - cantoAte(c.inicio);
+    return canto > 0.05
+      ? canto
+      : Math.max(1, String(c.texto || '').trim().split(/\s+/).filter(Boolean).length);
+  });
+  const novas = [];
+  let k = 0;
+  let cursor = boas[0].inicio;
+  for (let i = 0; i < cues.length; i++) {
+    const restaVocal = boas
+      .slice(k)
+      .reduce((a, s) => a + (s.fim - Math.max(s.inicio, cursor)), 0);
+    const restaPesos = pesos.slice(i).reduce((a, p) => a + p, 0);
+    const dur = restaPesos > 0 ? (restaVocal * pesos[i]) / restaPesos : 0;
+    const inicio = Math.min(cursor, boas[boas.length - 1].fim);
+    const fim = Math.min(boas[boas.length - 1].fim, inicio + dur, boas[k].fim);
+    novas.push({ texto: cues[i].texto, inicio, fim });
+    cursor = fim;
+    // A voz acabou nesta seção: o texto salta o instrumental e espera pelo
+    // próximo trecho de canto.
+    if (cursor >= boas[k].fim - 0.05 && k < boas.length - 1) {
+      k++;
+      cursor = Math.max(cursor, boas[k].inicio);
+    }
+  }
+  return novas;
+}
+
 // ---- ficheiro .srt ----
 const tempoSrt = (seg) => {
   const ms = Math.max(0, Math.round(seg * 1000));

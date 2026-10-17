@@ -13,7 +13,7 @@
 //  de 2 minutos leva 2 minutos a gravar.
 // ============================================================
 
-import { blocoAtivo, legendasDasCenas, legendasParaSrt } from './legendas-core.mjs';
+import { blocoAtivo, legendasDasCenas, legendasParaSrt, ressincronizarPelaVoz } from './legendas-core.mjs';
 import { erroNosTempos } from './legendas-tempos.mjs';
 
 // Versão do motor. Aparece no resumo da página: serve para saber, sem dúvidas,
@@ -438,6 +438,10 @@ export async function gerarVideo({
   // Legendas já prontas (a letra da música, distribuída pelo tempo). Quando vêm,
   // substituem as legendas tiradas da narração: as duas juntas enchiam o ecrã.
   legendasExternas = null,
+  // Os tempos acima vêm do RASCUNHO da página (não confirmados)? Então o motor
+  // re-temporiza os versos ao canto REAL da faixa que vai gravar. Tempos
+  // conferidos ou alinhados palavra a palavra NUNCA são alterados.
+  legendasRascunho = false,
   // 'natural' (duração das cenas) ou 'trilha' (repete as cenas até a música acabar).
   modoDuracao = 'natural',
   // Codec de gravação: 'vp8' (compatível, por omissão) ou 'vp9' (mais pequeno).
@@ -728,9 +732,20 @@ export async function gerarVideo({
   let desenharLegenda = null;
   const externas = Array.isArray(legendasExternas) ? legendasExternas.filter((c) => c && c.texto) : [];
   if (querLegendas && externas.length) {
-    // A página já preparou e mostrou estes tempos. Não analisar novamente,
-    // redimensionar ou substituir: a prévia, o vídeo e o SRT usam a mesma lista.
-    listaCues = externas.map((c) => ({ texto: c.texto, inicio: c.inicio, fim: c.fim }));
+    // Tempos da letra. Quando vêm do RASCUNHO, re-temporizam-se ao canto REAL
+    // da faixa que vai gravar (a análise da página pode ter faltado ou ficado
+    // desatualizada — o canto é a única verdade). Confirmados, ficam como vêm:
+    // a prévia, o vídeo e o SRT usam a MESMA lista.
+    let lista = externas;
+    if (legendasRascunho && musicaBuffer && modTrilha) {
+      try {
+        const corrigidas = ressincronizarPelaVoz(externas, modTrilha.analisarVozDeBuffer(musicaBuffer)?.secoes);
+        if (corrigidas?.length) lista = corrigidas;
+      } catch {
+        /* sem análise do motor, ficam os tempos da página */
+      }
+    }
+    listaCues = lista.map((c) => ({ texto: c.texto, inicio: c.inicio, fim: c.fim }));
   } else if (querLegendas) {
     listaCues = legendasDasCenas(ciclos.map((c) => c._texto || ''), durFinal, inicios);
   }

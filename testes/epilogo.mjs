@@ -88,6 +88,14 @@ class GravadorFalso {
   }
 }
 
+// Diagnóstico: quem pede temporizadores e quando — se o motor ficar pendente
+// depois do último fotograma, aparece aqui o que ficou a esperar.
+const setTimeoutOriginal = globalThis.setTimeout;
+globalThis.setTimeout = (fn, ms, ...resto) => {
+  console.error(`    [timer] ${ms}ms @ relogio=${relogioMs}`);
+  return setTimeoutOriginal(fn, ms, ...resto);
+};
+
 function instalarAmbiente(duracoes, { musica = 65 } = {}) {
   desenhos = []; agendamentos = []; fontesEmCiclo = []; fila = []; relogioMs = 0;
   musicaDuracao = musica;
@@ -113,19 +121,28 @@ async function correrCom(promessa, limiteMs = 60000) {
   let feito = false, valor, erro;
   promessa.then((v) => { feito = true; valor = v; }, (e) => { feito = true; erro = e; });
   let passos = 0;
+  const passoMs = 100; // passos largos: o ambiente de teste é lento em passos finos
   while (!feito && relogioMs < limiteMs && passos < 30000) {
     const lote = fila; fila = [];
     await Promise.resolve();
-    relogioMs += 16;
+    relogioMs += passoMs;
     if (ultimoCtx) ultimoCtx.currentTime = relogioMs / 1000;
     for (const f of lote) f();
     passos++;
+    if (passos % 10 === 0) console.error(`    [correr] passos=${passos} relogio=${relogioMs}ms fila=${fila.length}`);
     if (!fila.length) await new Promise((r) => setTimeout(r, 0));
   }
   if (erro) throw erro;
   if (!feito) throw new Error(`a gravação não terminou (relógio em ${relogioMs}ms, ${passos} passos)`);
   return valor;
 }
+
+const mostrarResultado = (rotulo, r) =>
+  console.error(
+    `    [${rotulo}] ok=${r.ok} duracao=${r.duracao && r.duracao.toFixed(2)} epilogo=${r.epilogo} ` +
+      `orientacao=${r.orientacao} repetido=${r.repetido} passagens=${r.passagens} natural=${r.duracaoNatural && r.duracaoNatural.toFixed(2)} ` +
+      `terminouComMusica=${r.terminouComMusica} agend=${JSON.stringify(agendamentos)}`,
+  );
 
 const blobsDe = (n) => Array.from({ length: n }, () => ({ arrayBuffer: () => Promise.resolve(new ArrayBuffer(4)) }));
 const cenasDe = (n) => Array.from({ length: n }, (_, i) => ({ imagem: `c${i + 1}`, audio: blobsDe(1)[0] }));
@@ -142,6 +159,7 @@ console.log('\n[1] Epílogo sem música (natureza, cena 1)');
     cenaFinal: 0,
   }));
   check(r.ok === true, 'devolveu ok', JSON.stringify(r).slice(0, 200));
+  mostrarResultado('1', r);
   check(r.orientacao === 'natureza', 'orientação aplicada', String(r.orientacao));
   check(perto(r.duracao, 8.0, 0.15), `duração ≈ 8s (2+1 de sequência + 5 de epílogo): ${r.duracao.toFixed(2)}s`, `${r.duracao}`);
   check(r.epilogo > 0, `epílogo de ${r.epilogo.toFixed(1)}s`, String(r.epilogo));
@@ -170,6 +188,7 @@ console.log('\n[2] Epílogo em ciclo até acabar a música (narrativa, cena 1)')
     cenaFinal: 0,
   }));
   check(r.ok === true, 'devolveu ok', JSON.stringify(r).slice(0, 200));
+  mostrarResultado('2', r);
   check(r.repetido === true, 'as outras cenas repetiram em ciclo', String(r.repetido));
   check(r.epilogo >= 2.5, `epílogo cabe no tempo que sobra da música: ${r.epilogo.toFixed(1)}s`, String(r.epilogo));
   check(r.duracao <= 30 + 0.5, `o vídeo acaba no fim da música (${r.duracao.toFixed(1)}s ≤ 30,5s)`, `${r.duracao}`);
@@ -189,6 +208,7 @@ console.log('\n[3] Clipe musical: apaga para preto no fim');
     cenaFinal: 2,
   }));
   check(r.ok === true, 'devolveu ok', JSON.stringify(r).slice(0, 200));
+  mostrarResultado('3', r);
   // Sem música, a cena final já era a última; o epílogo mantém-na no fim com
   // o apagar para preto (retoques pretos no fim do desenho).
   const canvas = desenhos.length && null;
@@ -204,6 +224,7 @@ console.log('\n[4] Sem orientação: comportamento de sempre');
     formato: '1280x720',
   }));
   check(r.ok === true, 'devolveu ok', JSON.stringify(r).slice(0, 200));
+  mostrarResultado('4', r);
   check(perto(r.duracao, 6.0, 0.15), `duração ≈ 6s: ${r.duracao.toFixed(2)}s`, `${r.duracao}`);
   check(r.orientacao === '' && r.epilogo === 0, 'sem epílogo', JSON.stringify({ o: r.orientacao, e: r.epilogo }));
 }

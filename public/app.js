@@ -7,6 +7,8 @@
 //   - não há servidor nenhum no seu computador.
 // ============================================================
 
+import { ehFicheiroVideo } from './estudio-video-carregado.mjs';
+
 const $ = (id) => document.getElementById(id);
 
 const state = {
@@ -1901,14 +1903,14 @@ async function iniciarVideo() {
 // grande demais). Aqui fica só a ponta que os botões usam.
 let modFinal = null;
 async function gerarVideoFinal() {
-  if (modLetraTrilha?.validarTempos() === false) return;
+  if (modLetraTrilha?.validarTempos(true) === false) return;
   if (!modFinal) {
     modFinal = await import('./estudio-video-final.mjs');
     modFinal.iniciarVideoFinal({
       state, $, toast, progress, estadoVideo, mostrarResultado, guardarComo,
       podeEscolherOnde, imagemDaCena, querVoz, querMusica, cuesDaLetra,
       guardar, atualizarTrilha, modCenasEdit: () => modCenasEdit,
-      validarTempos: () => modLetraTrilha?.validarTempos() !== false,
+      validarTempos: () => modLetraTrilha?.validarTempos(true) !== false,
       pararPreviaLetra,
     });
   }

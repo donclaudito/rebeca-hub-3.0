@@ -334,8 +334,8 @@
                   </div>
                   <div class="trilha-linha">
                     <span class="hint">
-                      Os tempos automáticos são estimativas, não reconhecimento das palavras cantadas.
-                      Confira e ajuste o início e o fim de cada verso na aba Legendas antes de gerar.
+                      Na aba Legendas, use Sincronizar com o canto para localizar as palavras no áudio.
+                      Confira a prévia e aplique os tempos antes de gerar; estimativas não serão exportadas.
                     </span>
                   </div>
                 </div>
@@ -435,6 +435,11 @@
             </header>
             <div class="legendas-editor">
               <p class="hint">Revise os versos da letra antes de processar. Use mm:ss.mmm (00:32.500) ou segundos (32.5). O fim deve ser maior que o início, sem sobrepor o próximo verso.</p>
+              <div class="trilha-linha">
+                <button id="btn-legendas-sincronizar" class="primary small" type="button" disabled>Sincronizar com o canto</button>
+              </div>
+              <p class="hint">Alinha a letra exata com as palavras no áudio via ElevenLabs, com cobrança pela sua conta nesse serviço. Inclua versos repetidos. A música é enviada apenas ao solicitar o alinhamento, sem criar uma cópia na nuvem da app. O reconhecimento de canto pode errar: ouça e aplique os tempos conferidos.</p>
+              <p id="legendas-sincronia-estado" role="status"></p>
               <audio id="legendas-audio" controls preload="metadata" aria-label="Música para conferir os tempos" hidden></audio>
               <p id="legendas-previa" class="legendas-previa" aria-live="off">Sem legenda neste trecho</p>
               <p id="legendas-vazio" class="hint">Cole a letra e escolha a trilha sonora na aba Vídeo para ver as legendas aqui.</p>
@@ -442,7 +447,7 @@
                 <ol id="legendas-lista" class="legendas-lista"></ol>
                 <div class="trilha-linha">
                   <button id="btn-legendas-aplicar" class="primary small" type="button">Aplicar tempos</button>
-                  <button id="btn-legendas-restaurar" class="ghost small" type="button">Restaurar automáticos</button>
+                  <button id="btn-legendas-restaurar" class="ghost small" type="button">Restaurar rascunho</button>
                 </div>
               </fieldset>
               <p id="legendas-editor-estado" class="cfg-result" role="status"></p>

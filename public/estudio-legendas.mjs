@@ -14,15 +14,20 @@ export default function iniciarEditorLegendas(ctx) {
     if (!sujo && nova !== assinatura) {
       exibidas = cues; assinatura = nova;
       lista.replaceChildren(...cues.map(criarLinhaLegenda));
-      avisar(temposManuais(state) ? 'Tempos manuais aplicados. Serão usados sem recalcular no vídeo e no .srt.' : 'Tempos automáticos estimados. Confira com a música e ajuste antes de aplicar.');
+      avisar(temposManuais(state) ? state.legendasLetra.confirmado === false ? 'Palavras alinhadas ao áudio. Confira a prévia e clique em Aplicar tempos.' : 'Tempos aplicados. Vídeo e .srt usarão os mesmos instantes.' : 'Rascunho não sincronizado. Sincronize com o canto ou ajuste os tempos ouvindo a música; depois aplique.');
     }
     $('legendas-vazio').hidden = cues.length > 0;
     status.hidden = !cues.length;
-    $('legendas-campos').disabled = state.busy || !cues.length;
+    $('legendas-campos').disabled = state.busy || state.sincronizandoLetra || !cues.length;
     $('legendas-resumo').textContent = `${cues.length} legenda(s) da música`;
   };
   lista.oninput = () => { sujo = true; avisar('Alterações pendentes. Clique em Aplicar tempos antes de gerar o vídeo.', true); };
-  const validar = () => {
+  const validar = (paraGerar = false) => {
+    if (state.sincronizandoLetra) { avisar('Aguarde o alinhamento terminar antes de continuar.', true); return false; }
+    if (paraGerar && state.letraLigada && (!temposManuais(state) || state.legendasLetra.confirmado === false)) {
+      avisar('Confira o canto e aplique os tempos. Rascunhos ou alinhamentos não conferidos não serão usados no vídeo.', true);
+      document.querySelector('[data-tab="tab-legendas"]').click(); status.scrollIntoView({ block: 'center' }); return false;
+    }
     // Conferir os valores atuais também cobre preenchimento automático do navegador.
     const alterado = [...lista.children].some((li, i) => ['inicio', 'fim'].some((campo) =>
       lerTempo(li.querySelector(`[data-campo="${campo}"]`).value) !== Math.round(exibidas[i][campo] * 1000) / 1000));
@@ -33,16 +38,16 @@ export default function iniciarEditorLegendas(ctx) {
     return false;
   };
   $('btn-legendas-aplicar').onclick = () => {
-    if (state.busy) return;
+    if (state.busy || state.sincronizandoLetra) return;
     const cues = [...lista.children].map((li, i) => ({ texto: exibidas[i].texto, inicio: lerTempo(li.querySelector('[data-campo="inicio"]').value), fim: lerTempo(li.querySelector('[data-campo="fim"]').value) }));
     const erro = erroNosTempos(cues, state.musicaSegundos);
     if (erro) return avisar(erro, true);
-    state.legendasLetra = { chave: chaveDaLetra(state), cues };
+    state.legendasLetra = { chave: chaveDaLetra(state), cues, origem: sujo ? 'manual' : state.legendasLetra?.origem || 'manual', confirmado: true };
     state.letraLigada = true; sujo = false; guardar(); atualizarLetra(); resumoVideo();
     avisar('Tempos manuais aplicados. Serão usados sem recalcular no vídeo e no .srt.');
   };
   $('btn-legendas-restaurar').onclick = () => {
-    if (state.busy) return;
+    if (state.busy || state.sincronizandoLetra) return;
     state.legendasLetra = null; sujo = false; assinatura = ''; guardar(); atualizarLetra(); resumoVideo();
   };
   atualizar();

@@ -11,10 +11,11 @@ export default function iniciarPreviaLegendas({ state, cuesDaLetra }) {
     const cue = blocoAtivo(cuesDaLetra(), audio.currentTime);
     texto.textContent = `${formatarTempo(audio.currentTime)} · ${cue?.texto || 'Sem legenda neste trecho'}`;
   };
-  audio.ontimeupdate = mostrar;
-  audio.onseeked = mostrar;
-  audio.onplay = () => { botao.textContent = '⏹ Parar'; };
-  audio.onpause = audio.onended = () => { botao.textContent = '▶️ Ver a letra a passar'; };
+  let quadro = 0;
+  const acompanhar = () => { mostrar(); if (!audio.paused && !audio.ended) quadro = requestAnimationFrame(acompanhar); };
+  audio.ontimeupdate = audio.onseeked = mostrar;
+  audio.onplay = () => { botao.textContent = '⏹ Parar'; cancelAnimationFrame(quadro); acompanhar(); };
+  audio.onpause = audio.onended = () => { cancelAnimationFrame(quadro); mostrar(); botao.textContent = '▶️ Ver a letra a passar'; };
   const parar = () => audio.pause();
   const atualizar = () => {
     if (ficheiro !== state.musicaFicheiro) {

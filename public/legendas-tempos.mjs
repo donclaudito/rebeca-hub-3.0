@@ -11,7 +11,8 @@ export function temposManuais(state) {
 export function cuesDaLetra(state) {
   const manual = temposManuais(state);
   if (manual) return manual.map((c) => ({ ...c }));
-  return legendasDaLetra(versosDaLetra(state.letra), state.musicaSegundos, { secoes: state.musicaVoz?.secoes });
+  // Rascunho para edição apenas: volume instrumental não identifica canto.
+  return legendasDaLetra(versosDaLetra(state.letra), state.musicaSegundos);
 }
 export function erroNosTempos(cues, duracao = Infinity) {
   for (let i = 0; i < cues.length; i++) {

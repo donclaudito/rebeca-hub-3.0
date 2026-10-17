@@ -19,7 +19,7 @@ import { erroNosTempos } from './legendas-tempos.mjs';
 // Versão do motor. Aparece no resumo da página: serve para saber, sem dúvidas,
 // qual build está a correr no browser (um build antigo em cache foi uma das
 // causas de "não funcionou" que já apanhei).
-export const VERSAO_VIDEO = '3.9.6';
+export const VERSAO_VIDEO = '3.9.7';
 
 // Duração do FECHO: nos últimos segundos do vídeo (quando há trilha), a música
 // esmaece até ao silêncio e a imagem apaga suavemente para preto.
@@ -780,6 +780,7 @@ export async function gerarVideo({
   desenhar(0, 0);
 
   gravador.start(250);
+  const inicioAudio = seq.ctx.currentTime;
 
   // A MÚSICA ENTRA AGORA, no primeiro instante gravado — e não antes. Era
   // ligada durante a preparação, quando o relógio do vídeo ainda não tinha
@@ -788,7 +789,7 @@ export async function gerarVideo({
   // música partem do MESMO instante.
   if (musicaBuffer && modTrilha) {
     try {
-      trilha = modTrilha.tocarTrilha({ ctx: seq.ctx, destino: seq.destino, musica: musicaBuffer, quando: seq.ctx.currentTime });
+      trilha = modTrilha.tocarTrilha({ ctx: seq.ctx, destino: seq.destino, musica: musicaBuffer, quando: inicioAudio });
       musicaAviso = avisoTrilha;
       // E acaba SUAVE: nos últimos segundos a trilha esmaece até ao silêncio,
       // terminando exatamente no fim do vídeo — junto com o apagar da imagem.
@@ -801,8 +802,9 @@ export async function gerarVideo({
   }
 
   // 4) desenhar e tocar, cena a cena, em tempo real
-  const inicio = performance.now();
-  const relogio = () => (performance.now() - inicio) / 1000;
+  // Imagens e legendas seguem o relógio do áudio gravado, não outro relógio
+  // que possa derivar ou avançar durante uma suspensão do AudioContext.
+  const relogio = () => Math.max(0, seq.ctx.currentTime - inicioAudio);
   const agoraCtx = () => seq.ctx.currentTime;
   let acumulado = 0;
   const totalCenas = ciclos.length;

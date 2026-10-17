@@ -9,11 +9,13 @@
 import { cuesDaLetra as obterCues, temposManuais, formatarTempo } from './legendas-tempos.mjs';
 import iniciarEditorLegendas from './estudio-legendas.mjs';
 import iniciarPreviaLegendas from './legendas-previa.mjs';
+import iniciarSincronia from './legendas-sincronizar.mjs';
 
 const $ = (id) => document.getElementById(id);
 let editorLegendas = null;
 let previaLegendas = null;
-export const validarTempos = () => editorLegendas?.validar() !== false;
+let sincronia = null;
+export const validarTempos = (paraGerar = false) => editorLegendas?.validar(paraGerar) !== false;
 
 let state = null;
 let toast = () => {};
@@ -31,6 +33,7 @@ export function iniciar(ctx) {
   leg = ctx.leg;
   previaLegendas = iniciarPreviaLegendas({ state, cuesDaLetra });
   editorLegendas = iniciarEditorLegendas({ state, guardar, atualizarLetra, resumoVideo });
+  sincronia = iniciarSincronia({ ...ctx, atualizarLetra });
 }
 
 // ---------------------------------------------------------------- trilha sonora
@@ -141,36 +144,9 @@ async function escolherTrilha() {
   guardar();
   aoMudarTrilha();
 
-  // SINCRONIA DA LETRA: analisar ONDE se canta (e onde é só instrumento), para
-  // os versos entrarem no momento certo. A análise descodifica o mesmo áudio
-  // que o motor do vídeo descodifica — a duração que ela devolve é a verdade,
-  // e com ela a letra não precisa de ressincronizar na hora de gravar.
-  state.musicaVoz = null;
-  try {
-    const modMusica = await import('./musica.mjs');
-    const analise = await modMusica.analisarVoz(f);
-    if (state.musicaFicheiro !== f) return;
-    if (analise) {
-      state.musicaVoz = analise;
-      if (analise.duracao > 0) {
-        state.musicaSegundos = analise.duracao;
-        state.musicaMedida = true;
-      }
-    }
-  } catch {
-    state.musicaVoz = null; // sem análise, a letra fica na divisão igual
-  }
-  atualizarLetra();
-  resumoVideo();
-  guardar();
+  // Apenas medir a duração. Volume alto não distingue voz de instrumentos;
+  // os tempos vêm do alinhamento das palavras ou da edição confirmada.
   aoMudarTrilha();
-
-  if (state.musicaVoz?.secoes?.length) {
-    toast(
-      `Estimativa por volume pronta. Confira e ajuste os versos na aba Legendas.`, 
-      'ok',
-    );
-  }
 
   if (!dur) {
     toast(
@@ -233,11 +209,8 @@ function ligarTrilha() {
 }
 
 // ---------------------------------------------------------------- letra da música
-// A letra vem colada pelo utilizador (uma linha por verso) e é distribuída pelo
-// tempo da música. NÃO há transcrição automática: a app não tem chave que
-// transcreva áudio, e transcrever música cantada com instrumentos por cima é
-// notoriamente pouco fiável. Colar a letra dá um resultado certo, custa zero e
-// o utilizador pode corrigir o que quiser.
+// A letra exata vem do utilizador, incluindo versos repetidos. O alinhamento
+// localiza as palavras no áudio; o rascunho proporcional serve só para edição.
 
 // A mesma lista alimenta o editor, a prévia, o vídeo e o .srt.
 function cuesDaLetra() {
@@ -254,6 +227,7 @@ function estadoLetra(msg, tipo = '') {
 function atualizarLetra() {
   editorLegendas?.atualizar();
   previaLegendas?.atualizar();
+  sincronia?.atualizar();
   const versos = leg.versosDaLetra ? leg.versosDaLetra(state.letra) : [];
   const duracao = state.musicaSegundos || 0;
   const btn = $('btn-letra-usar');
@@ -285,10 +259,8 @@ function atualizarLetra() {
   const inicio = cues.length ? formatarTempo(cues[0].inicio) : '00:00.000';
   const fim = cues.length ? formatarTempo(cues[cues.length - 1].fim) : '00:00.000';
   const origem = temposManuais(state)
-    ? 'tempos manuais aplicados'
-    : state.musicaVoz?.secoes?.length
-      ? 'estimativa por volume, não sincronização palavra a palavra'
-      : 'tempos automáticos estimados';
+    ? state.legendasLetra.confirmado === false ? 'alinhamento aguardando conferência e aplicação' : 'tempos conferidos e aplicados'
+    : 'rascunho não sincronizado: alinhe com o canto ou ajuste manualmente';
   estadoLetra(
     `${versos.length} verso(s) · de ${inicio} a ${fim} · ${origem}. Revise na aba Legendas.` +
       `${state.letraLigada ? ' · em uso como legenda' : ''}`,

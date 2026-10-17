@@ -1858,6 +1858,7 @@ async function iniciarVideo() {
 // grande demais). Aqui fica só a ponta que os botões usam.
 let modFinal = null;
 async function gerarVideoFinal() {
+  if (modLetraTrilha?.validarTempos() === false) return;
   if (!modFinal) {
     modFinal = await import('./estudio-video-final.mjs');
     modFinal.iniciarVideoFinal({

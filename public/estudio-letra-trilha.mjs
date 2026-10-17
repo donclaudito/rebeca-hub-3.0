@@ -129,6 +129,37 @@ async function escolherTrilha() {
   guardar();
   aoMudarTrilha();
 
+  // SINCRONIA DA LETRA: analisar ONDE se canta (e onde é só instrumento), para
+  // os versos entrarem no momento certo. A análise descodifica o mesmo áudio
+  // que o motor do vídeo descodifica — a duração que ela devolve é a verdade,
+  // e com ela a letra não precisa de ressincronizar na hora de gravar.
+  state.musicaVoz = null;
+  try {
+    const modMusica = await import('./musica.mjs');
+    const analise = await modMusica.analisarVoz(f);
+    if (state.musicaFicheiro !== f) return;
+    if (analise) {
+      state.musicaVoz = analise;
+      if (analise.duracao > 0) {
+        state.musicaSegundos = analise.duracao;
+        state.musicaMedida = true;
+      }
+    }
+  } catch {
+    state.musicaVoz = null; // sem análise, a letra fica na divisão igual
+  }
+  atualizarLetra();
+  resumoVideo();
+  guardar();
+  aoMudarTrilha();
+
+  if (state.musicaVoz?.secoes?.length) {
+    toast(
+      `Sincronia pronta: a voz entra aos ${formatarMinutos(state.musicaVoz.vozInicio)} e os versos seguem o canto.`,
+      'ok',
+    );
+  }
+
   if (!dur) {
     toast(
       `Não consegui ler a duração de ${f.name}. O vídeo vai ficar com a duração das imagens ` +
@@ -154,6 +185,7 @@ function tirarTrilha() {
   state.musicaUrl = '';
   state.musicaSegundos = 0;
   state.musicaMedida = false;
+  state.musicaVoz = null;
   atualizarTrilha();
   aoMudarTrilha();
   toast('Trilha tirada.', '');
@@ -203,7 +235,9 @@ function cuesDaLetra() {
   const versos = leg.versosDaLetra ? leg.versosDaLetra(state.letra) : [];
   const duracao = state.musicaSegundos || 0;
   if (!versos.length || !duracao) return [];
-  return leg.legendasDaLetra(versos, duracao);
+  // Com os trechos de voz detetados na música, os versos seguem o CANTO: cada
+  // um entra quando a voz canta a sua linha (e não em fatias iguais).
+  return leg.legendasDaLetra(versos, duracao, { secoes: state.musicaVoz?.secoes || null });
 }
 
 function estadoLetra(msg, tipo = '') {
@@ -243,9 +277,17 @@ function atualizarLetra() {
   }
   const cada = duracao / versos.length;
   const minutos = (s) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`;
+  // Estado da sincronia: com os trechos de voz, a letra segue o canto real.
+  const sincronia = state.musicaVoz?.secoes?.length
+    ? ` · 🎤 sincronizada com o canto (voz desde ${minutos(state.musicaVoz.vozInicio)})`
+    : state.musicaVoz
+      ? ' · canto contínuo — divisão igual entre os versos'
+      : state.musicaFicheiro
+        ? ' · a sincronizar com o canto…'
+        : '';
   estadoLetra(
     `${versos.length} verso(s) · ${minutos(cada)} cada um · a letra cobre ${minutos(duracao)}` +
-      `${state.letraLigada ? ' · ✅ em uso como legenda' : ''}`,
+      `${sincronia}${state.letraLigada ? ' · ✅ em uso como legenda' : ''}`,
     'ok',
   );
 }

@@ -53,6 +53,8 @@ const state = {
   musicaSegundos: 0,
   musicaLigada: true,
   musicaUrl: '',
+  // Trechos de voz da música (analisarVoz): onde a letra da legenda entra.
+  musicaVoz: null,
   servico: 'deepseek',
   modelo: '',
   busy: false,

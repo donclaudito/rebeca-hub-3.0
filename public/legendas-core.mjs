@@ -167,18 +167,54 @@ export function versosDaLetra(texto) {
 
 // Distribui os versos pelo tempo da música.
 //
-// Decisão: divisão IGUAL entre os versos. Não é perfeito — numa música com
-// refrão repetido e versos de durações diferentes, o tempo exato de cada verso
-// só se sabe a ouvir. Mas é previsível, o utilizador vê o tempo de cada verso
-// antes de gravar e pode corrigir a letra (juntar ou separar linhas) para
-// acertar. Prometer precisão que não temos seria pior.
-export function legendasDaLetra(versos, duracaoSegundos, { avanco = 0, piso = CAPT_PISO } = {}) {
+// COM OS TRECHOS DE VOZ (de `analisarVoz`, em musica.mjs): os versos seguem
+// ONDE SE CANTA — o primeiro entra quando a voz entra (depois da intro
+// instrumental), a duração de cada verso é proporcional ao seu tamanho, um
+// verso nunca atravessa um trecho só de instrumentos (é cortado onde a voz
+// para) e os seguintes se repartem pelo canto que resta. Assim o texto aparece
+// no momento certo da letra, e não em fatias iguais.
+//
+// Sem trechos úteis (voz contínua, análise falhada, música sem gaps): divisão
+// IGUAL entre os versos, como sempre — previsível, e o utilizador vê o tempo
+// de cada verso antes de gravar.
+export function legendasDaLetra(versos, duracaoSegundos, { avanco = 0, piso = CAPT_PISO, secoes = null } = {}) {
   const lista = Array.isArray(versos) ? versos.filter(Boolean) : versosDaLetra(versos);
   const total = Math.max(0, Number(duracaoSegundos) || 0);
   if (!lista.length || !total) return [];
   const base = Math.max(0, Number(avanco) || 0);
   const janela = Math.max(0, total - base);
   if (!janela) return [];
+
+  const vocais = secoesUteis(secoes, base, janela);
+  if (vocais.length) {
+    const pesos = lista.map((t) => String(t).trim().split(/\s+/).filter(Boolean).length || 1);
+    const cues = [];
+    let k = 0;
+    let cursor = vocais[0].inicio;
+    for (let i = 0; i < lista.length; i++) {
+      // O tempo deste verso é a sua fatia DO CANTO QUE RESTA: a cada corte
+      // (voz acabou, a letra espera pelo próximo trecho), os versos seguintes
+      // se redistribuem pelo que sobrou — ninguém fica sem tempo e a letra
+      // acaba junto com a última voz.
+      const restaVocal = vocais
+        .slice(k)
+        .reduce((a, s) => a + (s.fim - Math.max(s.inicio, cursor)), 0);
+      const restaPesos = pesos.slice(i).reduce((a, p) => a + p, 0);
+      const dur = restaPesos > 0 ? (restaVocal * pesos[i]) / restaPesos : 0;
+      const inicio = Math.min(cursor, base + janela);
+      const fim = Math.min(base + total, inicio + dur, vocais[k].fim);
+      cues.push({ texto: lista[i], inicio, fim });
+      cursor = fim;
+      // Chegámos ao fim da voz desta seção: a letra salta o instrumental e
+      // espera pelo próximo trecho de canto.
+      if (cursor >= vocais[k].fim - 0.05 && k < vocais.length - 1) {
+        k++;
+        cursor = Math.max(cursor, vocais[k].inicio);
+      }
+    }
+    return cues;
+  }
+
   const cada = janela / lista.length;
   const minimo = Math.min(Math.max(0, Number(piso) || 0), cada);
   return lista.map((texto, i) => ({
@@ -188,6 +224,24 @@ export function legendasDaLetra(versos, duracaoSegundos, { avanco = 0, piso = CA
     // muito curta é esticada até ao mínimo, sem passar do fim do vídeo.
     fim: Math.min(base + total, base + (i + 1) * cada + (minimo - cada > 0 ? minimo - cada : 0)),
   }));
+}
+
+// Trechos de voz que valem a pena usar. Voz CONTÍNUA (ou quase nada de voz):
+// os trechos não dizem nada de útil — a divisão igual de sempre já está alinhada.
+function secoesUteis(secoes, base, janela) {
+  const fimTudo = base + janela;
+  const boas = (Array.isArray(secoes) ? secoes : [])
+    .map((s) => ({ inicio: Number(s?.inicio), fim: Number(s?.fim) }))
+    .filter((s) => Number.isFinite(s.inicio) && Number.isFinite(s.fim) && s.fim > s.inicio)
+    .map((s) => ({
+      inicio: Math.max(base, Math.min(s.inicio, fimTudo)),
+      fim: Math.max(base, Math.min(s.fim, fimTudo)),
+    }))
+    .filter((s) => s.fim > s.inicio + 0.2);
+  if (!boas.length) return [];
+  const cobertura = boas.reduce((a, s) => a + (s.fim - s.inicio), 0) / janela;
+  if (cobertura > 0.97 || cobertura < 0.05) return [];
+  return boas;
 }
 
 // ---- ficheiro .srt ----

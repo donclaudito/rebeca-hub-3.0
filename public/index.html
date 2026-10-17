@@ -289,6 +289,13 @@
               <div class="vp-group" id="grupo-orientacao">
                 <span class="vp-label">Orientação do encerramento</span>
                 <div id="vid-orientacao" class="chips"></div>
+                <div class="trilha-linha" id="linha-cena-inicial">
+                  <label class="field">
+                    <span>Imagem inicial (introdução)</span>
+                    <select id="vid-cena-inicial" class="select-simples"></select>
+                  </label>
+                  <span class="hint">sai da sequência e abre o vídeo, parada — nunca repete</span>
+                </div>
                 <div class="trilha-linha" id="linha-cena-final" hidden>
                   <label class="field">
                     <span>Imagem final (epílogo)</span>
@@ -298,6 +305,7 @@
                 <p class="hint" style="margin:0">
                   Com uma orientação escolhida, a imagem final é retirada do ciclo e volta no fim,
                   parada como epílogo — o vídeo acaba nela, sem repetir a sequência.
+                  A imagem inicial faz o mesmo no começo: abre o vídeo, parada, como introdução.
                 </p>
               </div>
 

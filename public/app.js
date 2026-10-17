@@ -38,6 +38,9 @@ const state = {
   orientacao: '',
   orientacaoRotulo: '',
   cenaFinal: '',
+  // Imagem inicial (introdução), pelo nome do ficheiro — o mesmo raciocínio do
+  // epílogo: sai da sequência e abre o vídeo, parada.
+  cenaInicial: '',
   // A duração da música foi lida? Se não, o ciclo não pode ser calculado.
   musicaMedida: false,
   // Letra da música: o texto colado e se está a ser usada como legenda.
@@ -1136,29 +1139,54 @@ function marcarOrientacao() {
   guardar();
 }
 
-// O seletor da imagem final (epílogo) segue a lista de imagens: refaz as
-// opções a cada mudança e preserva a escolha quando o nome ainda existe.
+// Os seletores da imagem inicial (introdução) e da imagem final (epílogo)
+// seguem a lista de imagens: refazem as opções a cada mudança e preservam a
+// escolha quando o nome ainda existe.
 function atualizarSeletorCenaFinal() {
-  const sel = $('vid-cena-final');
-  if (!sel) return;
-  const escolhidoAntes = state.cenaFinal;
-  sel.innerHTML = '';
-  const auto = document.createElement('option');
-  auto.value = '';
-  auto.textContent = 'A última cena do vídeo';
-  sel.append(auto);
   const nomes = state.images.map((img) => (img.video ? `🎬 ${img.name}` : img.name));
-  nomes.forEach((nome, i) => {
-    const o = document.createElement('option');
-    o.value = nome;
-    o.textContent = `${i + 1}. ${nome}`;
-    sel.append(o);
-  });
-  if (escolhidoAntes && nomes.includes(escolhidoAntes)) {
-    sel.value = escolhidoAntes;
-  } else {
-    state.cenaFinal = '';
-    sel.value = '';
+
+  const sel = $('vid-cena-final');
+  if (sel) {
+    const escolhidoAntes = state.cenaFinal;
+    sel.innerHTML = '';
+    const auto = document.createElement('option');
+    auto.value = '';
+    auto.textContent = 'A última cena do vídeo';
+    sel.append(auto);
+    nomes.forEach((nome, i) => {
+      const o = document.createElement('option');
+      o.value = nome;
+      o.textContent = `${i + 1}. ${nome}`;
+      sel.append(o);
+    });
+    if (escolhidoAntes && nomes.includes(escolhidoAntes)) {
+      sel.value = escolhidoAntes;
+    } else {
+      state.cenaFinal = '';
+      sel.value = '';
+    }
+  }
+
+  const si = $('vid-cena-inicial');
+  if (si) {
+    const escolhidoAntes = state.cenaInicial;
+    si.innerHTML = '';
+    const nenhuma = document.createElement('option');
+    nenhuma.value = '';
+    nenhuma.textContent = 'Sem introdução';
+    si.append(nenhuma);
+    nomes.forEach((nome, i) => {
+      const o = document.createElement('option');
+      o.value = nome;
+      o.textContent = `${i + 1}. ${nome}`;
+      si.append(o);
+    });
+    if (escolhidoAntes && nomes.includes(escolhidoAntes)) {
+      si.value = escolhidoAntes;
+    } else {
+      state.cenaInicial = '';
+      si.value = '';
+    }
   }
 }
 
@@ -1167,6 +1195,12 @@ function notaEpilogo() {
   if (!state.orientacao) return '';
   const nome = state.cenaFinal || 'a última cena';
   return ` 🎬 Encerramento "${state.orientacaoRotulo || state.orientacao}": o vídeo acaba em ${nome}, parada como epílogo, sem repetir a sequência.`;
+}
+
+// Nota da introdução: a imagem que abre o vídeo, parada, e que não repete.
+function notaIntro() {
+  if (!state.cenaInicial) return '';
+  return ` 🎬 Introdução: o vídeo abre com "${state.cenaInicial}", parada, antes da sequência — ela não volta no meio.`;
 }
 
 // Nota da letra, para o resumo: diz quantos versos e quanto tempo cada um leva.
@@ -1194,7 +1228,7 @@ function resumoVideo() {
     return estadoVideo(
       `Vai sair um vídeo de ${n} imagem(ns), cerca de ${formatarMinutos(seg)}, com a trilha ` +
         `"${state.musicaFicheiro.name}" em ciclo e sem voz. Transição "${transicaoRotulo()}".` +
-        `${nota}${notaEpilogo()}${notaCiclo()} Demora cerca de ${formatarMinutos(vezesQueRepete().total || seg)} a gravar.`,
+        `${nota}${notaIntro()}${notaEpilogo()}${notaCiclo()} Demora cerca de ${formatarMinutos(vezesQueRepete().total || seg)} a gravar.`,
       '',
     );
   }
@@ -1214,7 +1248,7 @@ function resumoVideo() {
     return estadoVideo(
       `Pronto para o vídeo de letra: ${state.images.length} imagem(ns), transição "${transicaoRotulo()}", ` +
         `trilha "${state.musicaFicheiro.name}".` +
-        `${nota}${notaEpilogo()}${notaCiclo()} A gravação demora o tempo do vídeo.`,
+        `${nota}${notaIntro()}${notaEpilogo()}${notaCiclo()} A gravação demora o tempo do vídeo.`,
       '',
     );
   }
@@ -1239,7 +1273,7 @@ function resumoVideo() {
     `Pronto: ${n} imagem(ns), transição "${transicaoRotulo()}", ${m.rotulo.toLowerCase()}` +
       `${semAudio ? ` — ${semAudio} cena(s) sem áudio` : ''}` +
       `${musica ? `, trilha "${state.musicaFicheiro.name}"` : state.videoModo === 'ambos' ? ' (sem trilha escolhida)' : ''}.` +
-      `${nota}${notaEpilogo()}${notaCiclo()} A gravação demora o tempo do vídeo.`,
+      `${nota}${notaIntro()}${notaEpilogo()}${notaCiclo()} A gravação demora o tempo do vídeo.`,
     semAudio ? 'wait' : '',
   );
 }
@@ -1299,6 +1333,8 @@ function aplicarPreferenciasNaInterface() {
   atualizarSeletorCenaFinal();
   const selFinal = $('vid-cena-final');
   if (selFinal) selFinal.value = state.cenaFinal || '';
+  const selIni = $('vid-cena-inicial');
+  if (selIni) selIni.value = state.cenaInicial || '';
   marcar('velocidades', state.velocidade, 'r');
   $('cfg-servico').value = state.servico;
   $('cfg-modelo').value = state.modelo || '';
@@ -1761,6 +1797,16 @@ async function iniciarVideo() {
     guardar();
     resumoVideo();
   };
+  // A introdução: escolher a imagem que abre o vídeo (ou nenhum).
+  const selInicial = $('vid-cena-inicial');
+  if (selInicial) {
+    selInicial.value = state.cenaInicial || '';
+    selInicial.onchange = () => {
+      state.cenaInicial = selInicial.value;
+      guardar();
+      resumoVideo();
+    };
+  }
 
   atualizarTrilha();
 
@@ -1792,240 +1838,19 @@ async function iniciarVideo() {
   rotularBotoesGuardar();
 }
 
+// A montagem do vídeo vive agora em estudio-video-final.mjs (o app.js ficou
+// grande demais). Aqui fica só a ponta que os botões usam.
+let modFinal = null;
 async function gerarVideoFinal() {
-  if (state.busy) return;
-
-  // Cenas de vídeo entram mesmo sem texto: quem manda nelas é o próprio ficheiro.
-  const comTexto = state.scenes.filter((s) => (s.texto || '').trim() || s.video);
-  const semFala = comTexto.filter((s) => !s.audioUrl && !s.previaUrl);
-  const musica = state.musicaFicheiro && querMusica() && state.musicaLigada ? state.musicaFicheiro : null;
-
-  // A letra, se estiver em uso, é calculada uma vez e reutilizada.
-  const cuesLetra = state.letraLigada ? cuesDaLetra() : [];
-
-  // Com a letra em uso e SEM narração gerada, o vídeo é de letra: vale o mesmo
-  // que o modo "só música" — uma imagem por vez, ao ritmo escolhido.
-  const comVoz = querVoz() && !(cuesLetra.length && semFala.length === comTexto.length);
-
-  // --- O que é preciso para cada modo ---
-  // Só música (ou vídeo de letra): uma trilha e imagens. Narração nenhuma.
-  if (!comVoz) {
-    if (!musica && !cuesLetra.length) {
-      return estadoVideo(
-        '❌ O modo "só música" precisa de uma trilha. Escolha a música aqui em cima, ' +
-          'ou mude "O que entra" para 🎙️🎵 Narração + música.',
-        'err',
-      );
-    }
-    if (cuesLetra.length && !musica) {
-      return estadoVideo('❌ A letra precisa da música para saber o tempo de cada verso.', 'err');
-    }
-    if (!state.images.length) {
-      return estadoVideo('❌ Importe as imagens primeiro (aba 🖼️ Imagens).', 'err');
-    }
-  } else {
-    if (!comTexto.length) {
-      return estadoVideo(
-        '❌ Gere a narração primeiro (aba ⚡ Ações). ' +
-          'Se quer um vídeo só com música, mude "O que entra" para 🎵 Só música.',
-        'err',
-      );
-    }
-    if (semFala.length === comTexto.length) {
-      return estadoVideo(
-        '❌ Ainda não há áudio. Vá à aba ⚡ Ações e clique em "🎧 Gerar o áudio de todas as cenas" — ' +
-          'o vídeo usa esse áudio. (A pré-escuta de cada cena também serve.) ' +
-          'Ou mude "O que entra" para 🎵 Só música, que não precisa de voz.',
-        'err',
-      );
-    }
-  }
-
-  const mod = await import('./video.mjs');
-  state.busy = true;
-  state.pararVideo = false;
-  $('btn-video').disabled = true;
-  $('btn-video-parar').hidden = false;
-
-  // Uma cena por imagem que tenha ficheiro conhecido. No modo com voz, são as
-  // cenas narradas; no modo só música, são TODAS as imagens importadas.
-  const lista = comVoz ? comTexto : state.images;
-
-  // Orientação do encerramento: qual cena fica como epílogo no fim (por nome;
-  // sem escolha explícita, é a última).
-  const nomesNaLista = lista.map((s) => (comVoz ? s.filename : s.name));
-  const nomeFinal = String(state.cenaFinal || '');
-  const idxFinal = nomeFinal && nomesNaLista.includes(nomeFinal)
-    ? nomesNaLista.indexOf(nomeFinal)
-    : lista.length - 1;
-  const cenas = [];
-  for (const s of lista) {
-    const imagem = comVoz ? imagemDaCena(s) : s.url;
-    if (!imagem) continue;
-    let audio = null;
-    const url = comVoz ? s.audioUrl || s.previaUrl : null;
-    if (url) {
-      try {
-        audio = await (await fetch(url)).blob();
-      } catch {
-        audio = null; // fica sem voz nesta cena, mas entra no vídeo
-      }
-    }
-    // O texto vai com a legenda: é dele que saem os blocos do vídeo e do .srt.
-    // Cenas de vídeo: a duração e o som vêm do próprio ficheiro, com o CORTE
-    // (início/fim) e o VOLUME escolhidos na edição da cena.
-    const doCorte = s.video && modCenasEdit ? modCenasEdit.camposParaMotor(s) : {};
-    cenas.push({
-      imagem,
-      audio,
-      texto: s.texto || '',
-      video: Boolean(s.video),
-      duracaoVideo: Number(s.duracaoVideo ?? s.duracao) || 0,
-      ...doCorte,
+  if (!modFinal) {
+    modFinal = await import('./estudio-video-final.mjs');
+    modFinal.iniciarVideoFinal({
+      state, $, toast, progress, estadoVideo, mostrarResultado, guardarComo,
+      podeEscolherOnde, imagemDaCena, querVoz, querMusica, cuesDaLetra,
+      guardar, atualizarTrilha, modCenasEdit: () => modCenasEdit,
     });
   }
-
-  if (!cenas.length) {
-    state.busy = false;
-    $('btn-video').disabled = false;
-    $('btn-video-parar').hidden = true;
-    return estadoVideo('❌ Não consegui preparar nenhuma imagem para o vídeo.', 'err');
-  }
-
-  const semVoz = cenas.filter((c) => !c.audio && !c.video).length;
-  if (comVoz && semVoz) {
-    estadoVideo(`⚠️ ${semVoz} cena(s) sem áudio — o vídeo fica sem voz nessas.`, 'wait');
-  }
-
-  const preview = $('vid-preview');
-  preview.hidden = false;
-  // A miniatura para o painel é captada durante a gravação (fotograma ~1,5s).
-  state._miniatura = null;
-  state._miniaturaPedida = false;
-
-  // A letra é calculada uma vez: a lista é reutilizada na chamada e no resumo.
-  const comLegendas = Boolean(state.legendas) || cuesLetra.length > 0;
-
-  try {
-    const r = await mod.gerarVideo({
-      cenas,
-      formato: state.videoFormato,
-      transicao: state.videoTransicao,
-      duracaoTransicao: state.videoDuracao,
-      musica,
-      duracaoCena: state.videoDuracaoCena,
-      // Com a letra em uso, as legendas ficam ligadas (ela substitui a narração).
-      legendas: comLegendas,
-      legendasExternas: cuesLetra.length ? cuesLetra : null,
-      codec: state.codec,
-      modoDuracao: state.modoDuracao,
-      musicaSegundos: state.musicaSegundos,
-      // Orientação do encerramento + a cena que fecha o vídeo (epílogo).
-      orientacao: state.orientacao,
-      cenaFinal: idxFinal,
-      // Desenha no canvas visível: vê-se a montagem enquanto grava.
-      canvas: preview,
-      aoProgredir: (p) => {
-        if (p.fase === 'a gravar') {
-          // Miniatura: o primeiro fotograma a partir de 1,5s, para não apanhar
-          // a passagem de entrada escura entre duas imagens.
-          if (!state._miniaturaPedida && p.segundos >= 1.5) {
-            state._miniaturaPedida = true;
-            try {
-              preview.toBlob((b) => { if (b) state._miniatura = b; }, 'image/jpeg', 0.8);
-            } catch {
-              /* sem miniatura, o painel mostra o ícone */
-            }
-          }
-          const pct = p.totalSegundos ? Math.round((p.segundos / p.totalSegundos) * 100) : 0;
-          const ciclo = p.passagens > 1 ? ` · passagem ${p.passagem} de ${p.passagens}` : '';
-          progress(true, pct, `a gravar imagem ${p.atual} de ${p.total}${ciclo} — ${Math.round(p.segundos)}s de ${Math.round(p.totalSegundos)}s`);
-          estadoVideo(
-            `a gravar… imagem ${p.atual} de ${p.total}${ciclo}. Não mude de janela. ` +
-              `${Math.round(p.segundos)}s de ${Math.round(p.totalSegundos)}s.`,
-            'wait',
-          );
-        } else {
-          progress(true, 2, `${p.fase}…`);
-          estadoVideo(`${p.fase}…`, 'wait');
-        }
-      },
-      deveParar: () => state.pararVideo,
-    });
-
-    if (!r.ok) throw new Error(r.erro);
-
-    // O motor mediu a música pelo áudio descodificado, que é a verdade. Se a
-    // página tinha medido outra coisa, fica a certa para a próxima vez (e o
-    // desvio vai para a consola, porque um desvio grande é um defeito a olhar).
-    if (r.musicaSegundos > 0 && Math.abs(r.musicaSegundos - (state.musicaSegundos || 0)) > 1) {
-      if (state.musicaSegundos > 0) {
-        console.warn(
-          `[trilha] a página mediu ${state.musicaSegundos.toFixed(2)}s e o áudio descodificado tem ` +
-            `${r.musicaSegundos.toFixed(2)}s; passei a usar o valor do áudio.`,
-        );
-      }
-      state.musicaSegundos = r.musicaSegundos;
-      state.musicaDuracao = r.musicaSegundos;
-      state.musicaMedida = true;
-      atualizarTrilha();
-      guardar();
-    }
-
-    const nome = `rebeca-video.${r.extensao}`;
-
-    // Guarda o resultado e mostra-o para se poder VER aqui dentro.
-    mostrarResultado(r, nome);
-
-    // Com a janela "Guardar como" (Chrome/Edge), o utilizador escolhe a pasta e
-    // o nome. É o passo que faltava: antes o ficheiro caía sempre na pasta das
-    // transferências sem se poder escolher. Nos browsers sem esta janela, cai
-    // numa descarga normal — o mesmo de antes.
-    const escolheu = await guardarComo(r.blob, nome, 'Vídeo WebM');
-
-    // O .srt sai dos MESMOS blocos que foram desenhados no vídeo, e também
-    // pergunta onde guardar (só depois de o vídeo estar tratado, para não abrir
-    // duas janelas de uma vez).
-    if (r.srt) {
-      const srtBlob = new Blob([r.srt], { type: 'text/plain;charset=utf-8' });
-      if (!podeEscolherOnde() || escolheu) {
-        setTimeout(() => guardarComo(srtBlob, 'rebeca-video.srt', 'Legendas (SubRip)'), 400);
-      }
-    }
-
-    estadoVideo(
-      `✅ Vídeo pronto: ${Math.round(r.duracao)}s, ${(r.blob.size / 1048576).toFixed(1)} MB, ` +
-        `formato ${r.formato}, transição "${r.transicao}", ${r.comVoz ? 'com narração' : 'sem voz'}` +
-        `${r.comMusica ? ' e com trilha' : musica ? ' e SEM trilha' : ''}. ` +
-        `${r.repetido
-          ? `🔁 As imagens passaram ${r.passagens}× (${Math.round(r.duracaoNatural)}s cada passagem).`
-          : state.modoDuracao === 'trilha'
-            ? `ℹ️ Não repeti as imagens${r.semCiclo ? `: ${r.semCiclo}` : ''}.`
-            : ''} ` +
-        `${r.legendas ? `${r.legendas} bloco(s) de legenda${r.legendasDaLetra ? ' (da letra)' : ''}. ` : ''}` +
-        `Descarregado como ${nome}${r.srt ? ' e rebeca-video.srt' : ''}.` +
-        `${r.musicaAviso ? ` ⚠️ ${r.musicaAviso}` : ''} (motor v${r.versao})` +
-        (r.codec === 'vp9'
-          ? ' · ⚠️ Gravado em VP9: o Windows pode recusar abri-lo — use o VLC, ou mude "Ficheiro" para Compatível (VP8).'
-          : ''),
-      r.musicaAviso ? 'wait' : 'ok',
-    );
-    toast(
-      `${r.comVoz ? 'Vídeo pronto' : 'Vídeo só com música'} (${Math.round(r.duracao)}s)` +
-        `${r.comMusica ? ', com trilha' : ''}${r.repetido ? `, ${r.passagens}× em ciclo` : ''}` +
-        `${r.srt ? ' + legendas .srt' : ''}.`,
-      'ok',
-    );
-  } catch (e) {
-    estadoVideo(`❌ ${e.message}`, 'err');
-    toast(e.message, 'err');
-  } finally {
-    state.busy = false;
-    state.pararVideo = false;
-    $('btn-video').disabled = false;
-    $('btn-video-parar').hidden = true;
-    setTimeout(() => progress(false), 1500);
-  }
+  return modFinal.gerarVideoFinal();
 }
 
 // Guarda o vídeo pronto na nuvem: ficheiro + miniatura + detalhes, para o
@@ -2133,6 +1958,7 @@ function guardar() {
         codec: state.codec,
         orientacao: state.orientacao,
         cenaFinal: state.cenaFinal,
+        cenaInicial: state.cenaInicial,
         musicaLigada: state.musicaLigada,
         projetoNome: $('projeto-nome') ? $('projeto-nome').value : '',
       }),
@@ -2429,6 +2255,7 @@ async function init() {
   state.orientacao = typeof c.orientacao === 'string' ? c.orientacao : '';
   state.orientacaoRotulo = '';
   state.cenaFinal = typeof c.cenaFinal === 'string' ? c.cenaFinal : '';
+  state.cenaInicial = typeof c.cenaInicial === 'string' ? c.cenaInicial : '';
   marcarMotor();
   marcarTom();
   iniciarVideo();

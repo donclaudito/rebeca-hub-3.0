@@ -18,7 +18,7 @@ import { blocoAtivo, legendasDasCenas, legendasParaSrt } from './legendas-core.m
 // Versão do motor. Aparece no resumo da página: serve para saber, sem dúvidas,
 // qual build está a correr no browser (um build antigo em cache foi uma das
 // causas de "não funcionou" que já apanhei).
-export const VERSAO_VIDEO = '3.8.0';
+export const VERSAO_VIDEO = '3.9.0';
 
 export const FORMATOS = [
   { id: '1920x1080', rotulo: 'Horizontal 1920×1080 (YouTube)', w: 1920, h: 1080 },
@@ -428,6 +428,9 @@ export async function gerarVideo({
   // cena que fecha o vídeo (índice): sai no fim como epílogo, sem repetir.
   orientacao = '',
   cenaFinal = -1,
+  // A cena que ABRE o vídeo (índice): pelo mesmo raciocínio do epílogo, sai da
+  // sequência/ciclo e volta no COMEÇO, parada, como introdução.
+  cenaInicial = -1,
   aoProgredir = () => {},
   deveParar = () => false,
 }) {
@@ -565,10 +568,20 @@ export async function gerarVideo({
   const idxFinal =
     Number.isInteger(idxFinalDado) && idxFinalDado >= 0 && idxFinalDado < cenas.length ? idxFinalDado : -1;
   const comEpilogo = Boolean(orientacao) && idxFinal >= 0 && cenas.length > 1;
+
+  // A mesma ideia no começo: a imagem inicial sai da sequência/ciclo e ABRE o
+  // vídeo, parada. Se for a MESMA imagem do epílogo, fica só com o epílogo.
+  const idxInicialDado = Number(cenaInicial);
+  const idxInicialBruto =
+    Number.isInteger(idxInicialDado) && idxInicialDado >= 0 && idxInicialDado < cenas.length ? idxInicialDado : -1;
+  const comIntro = idxInicialBruto >= 0 && cenas.length > 1 && idxInicialBruto !== idxFinal;
+  const idxInicial = comIntro ? idxInicialBruto : -1;
+
+  const fora = comEpilogo || comIntro ? (i) => i === idxFinal || i === idxInicial : () => false;
   const base = cenas
     .map((c, i) => ({ ...c, _fonte: i, _passagem: 0, _texto: c.texto || '' }))
-    .filter((_, i) => i !== (comEpilogo ? idxFinal : -1));
-  const durBase = comEpilogo ? duracoes.filter((_, i) => i !== idxFinal) : duracoes;
+    .filter((_, i) => !fora(i));
+  const durBase = comEpilogo || comIntro ? duracoes.filter((_, i) => !fora(i)) : duracoes;
 
   // Com música e epílogo: se dá para chegar ao fim da música com UMA passagem
   // a menos, reservo esse tempo para o epílogo — assim ele acaba JUNTO com a
@@ -578,7 +591,9 @@ export async function gerarVideo({
     const naturalBase = durBase.reduce((a, d) => a + d, 0);
     const cheio = Math.min(MAX_PASSAGENS, Math.max(2, Math.ceil(alvoMusica / naturalBase)));
     const menor = (cheio - 1) * naturalBase;
-    if (cheio > 1 && alvoMusica - menor >= 2.5) alvoCiclo = menor + 0.001;
+    // Um cabelo ABAIXO do alvo: o ciclo arredonda para cima, e assim fica com
+    // UMA passagem a menos — é esse tempo que sobra para o epílogo caber.
+    if (cheio > 1 && alvoMusica - menor >= 2.5) alvoCiclo = menor - 0.001;
   }
 
   const repetido = repetirAte(base, durBase, alvoCiclo);
@@ -587,8 +602,21 @@ export async function gerarVideo({
   const passagens = repetido.passagens;
   const ciclos = repetido.itens.length ? repetido.itens : base;
   const durFinal = repetido.itens.length ? repetido.duracoes : durBase;
-  const clipesFinal = ciclos.map((c) => clipes[c._fonte]);
-  const marcaFinal = ciclos.map((c) => marcaSemFala[c._fonte]);
+
+  // A introdução entra ANTES do ciclo: 5s parados (ou 2 passagens de transição
+  // + margem), com a narração dela a tocar por baixo — como o epílogo no fim.
+  let durIntro = 0;
+  if (comIntro) {
+    durIntro = Math.max(5, 2 * T + 0.4);
+    ciclos.unshift({
+      ...cenas[idxInicial],
+      _fonte: idxInicial,
+      _passagem: 0,
+      _texto: cenas[idxInicial].texto || '',
+      _intro: true,
+    });
+    durFinal.unshift(durIntro);
+  }
 
   // O epílogo entra DEPOIS do ciclo: cabe no tempo que sobra da música
   // (entre 2,5s e 12s) ou, sem música, é um epílogo de 5s.
@@ -607,6 +635,11 @@ export async function gerarVideo({
     });
     durFinal.push(durEp);
   }
+
+  // Os clipes e marcas seguem a lista FINAL (com introdução e epílogo): assim
+  // a narração deles também toca, no seu lugar exato da linha do tempo.
+  const clipesFinal = ciclos.map((c) => clipes[c._fonte]);
+  const marcaFinal = ciclos.map((c) => marcaSemFala[c._fonte]);
 
   const inicios = [];
   let soma = 0;
@@ -811,5 +844,7 @@ export async function gerarVideo({
     // Orientação aplicada e duração do epílogo (0 = sem epílogo).
     orientacao: comEpilogo ? orientacao : '',
     epilogo: comEpilogo ? durFinal[durFinal.length - 1] : 0,
+    // Duração da introdução (0 = sem introdução).
+    intro: comIntro ? durIntro : 0,
   };
 }

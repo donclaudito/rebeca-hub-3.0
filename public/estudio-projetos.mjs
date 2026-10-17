@@ -123,6 +123,8 @@ async function recolherProjeto(nome) {
       letra: state.letra,
       letraLigada: state.letraLigada,
       legendasLetra: state.legendasLetra,
+      durIntro: state.durIntro || 0,
+      durEpilogo: state.durEpilogo || 0,
       texto: { tone: $('tone').value, extra: $('extra').value, minWords: $('minWords').value, maxWords: $('maxWords').value },
     },
   };

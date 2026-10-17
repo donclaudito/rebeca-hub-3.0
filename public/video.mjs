@@ -452,6 +452,10 @@ export async function gerarVideo({
   // A cena que ABRE o vídeo (índice): pelo mesmo raciocínio do epílogo, sai da
   // sequência/ciclo e volta no COMEÇO, parada, como introdução.
   cenaInicial = -1,
+  // Tempos da introdução e do epílogo escolhidos na página (em segundos;
+  // 0 = automático: cerca de 5s na introdução, epílogo acompanha o fim da música).
+  duracaoIntro = 0,
+  duracaoEpilogo = 0,
   aoProgredir = () => {},
   deveParar = () => false,
 }) {
@@ -619,16 +623,30 @@ export async function gerarVideo({
   // o ciclo leva o número de passagens que chega mais perto do fim da música
   // deixando o epílogo caber, e o epílogo leva EXATAMENTE o tempo que falta —
   // assim a música acaba junto com o epílogo, sem recomeçar por baixo dele.
+  // Tempos FIXOS escolhidos na página (limitados a 1–60s por segurança).
+  const durIntroEscolhida = Math.min(60, Math.max(0, Number(duracaoIntro) || 0));
+  const durEpEscolhida = Math.min(60, Math.max(0, Number(duracaoEpilogo) || 0));
+
   let alvoCiclo = alvoMusica;
   let alvoEp = 0;
   if (comEpilogo && alvoMusica > 0) {
-    const durEp0 = Math.max(5, 2 * T + 0.4);
-    const reservado = comIntro ? Math.max(5, 2 * T + 0.4) : 0;
-    const naturalBase = durBase.reduce((a, d) => a + d, 0) || 1;
-    const nEp = Math.min(MAX_PASSAGENS, Math.max(1, Math.floor((alvoMusica - durEp0 - reservado) / naturalBase)));
-    // Um cabelo abaixo do alvo: o ciclo arredonda para cima e fica com nEp.
-    alvoCiclo = nEp * naturalBase - 0.001;
-    alvoEp = alvoMusica - reservado - nEp * naturalBase;
+    if (durEpEscolhida > 0) {
+      // Com tempo FIXO no epílogo, o ciclo é contado para a música caber nele —
+      // e a música acaba JUNTO com o vídeo (o excesso é cortado no fim).
+      const durEp0 = durEpEscolhida;
+      const reservado = (comIntro ? durIntroEscolhida || Math.max(5, 2 * T + 0.4) : 0) + durEp0;
+      const naturalBase = durBase.reduce((a, d) => a + d, 0) || 1;
+      const nEp = Math.min(MAX_PASSAGENS, Math.max(0, Math.floor((alvoMusica - reservado) / naturalBase)));
+      // Um cabelo abaixo do alvo: o ciclo arredonda para cima e fica com nEp.
+      alvoCiclo = nEp > 0 ? nEp * naturalBase - 0.001 : 0;
+    } else {
+      const durEp0 = Math.max(5, 2 * T + 0.4);
+      const reservado = comIntro ? Math.max(5, 2 * T + 0.4) : 0;
+      const naturalBase = durBase.reduce((a, d) => a + d, 0) || 1;
+      const nEp = Math.min(MAX_PASSAGENS, Math.max(1, Math.floor((alvoMusica - durEp0 - reservado) / naturalBase)));
+      alvoCiclo = nEp * naturalBase - 0.001;
+      alvoEp = alvoMusica - reservado - nEp * naturalBase;
+    }
   }
 
   const repetido = repetirAte(base, durBase, alvoCiclo);
@@ -642,7 +660,7 @@ export async function gerarVideo({
   // + margem), com a narração dela a tocar por baixo — como o epílogo no fim.
   let durIntro = 0;
   if (comIntro) {
-    durIntro = Math.max(5, 2 * T + 0.4);
+    durIntro = durIntroEscolhida > 0 ? durIntroEscolhida : Math.max(5, 2 * T + 0.4);
     ciclos.unshift({
       ...cenas[idxInicial],
       _fonte: idxInicial,
@@ -656,10 +674,10 @@ export async function gerarVideo({
   // O epílogo entra DEPOIS do ciclo: cabe no tempo que sobra da música
   // (entre 2,5s e 12s) ou, sem música, é um epílogo de 5s.
   if (comEpilogo) {
-    let durEp = Math.max(5, 2 * T + 0.4);
-    // Com música: o epílogo leva EXATAMENTE o que falta até o vídeo acabar no
-    // segundo em que a música (em ciclo) acaba — é a sincronização pedida.
-    if (alvoEp > 0) durEp = Math.max(2.5, Math.min(12, alvoEp));
+    let durEp = durEpEscolhida > 0 ? durEpEscolhida : Math.max(5, 2 * T + 0.4);
+    // Com música e tempo AUTOMÁTICO: o epílogo leva EXATAMENTE o que falta até
+    // o vídeo acabar no segundo em que a música (em ciclo) acaba.
+    if (durEpEscolhida <= 0 && alvoEp > 0) durEp = Math.max(2.5, Math.min(12, alvoEp));
     ciclos.push({
       ...cenas[idxFinal],
       _fonte: idxFinal,
@@ -715,8 +733,11 @@ export async function gerarVideo({
   // música chegar ao fim. Só então o vídeo acaba. As legendas foram calculadas
   // ANTES deste acréscimo, de propósito: os blocos da narração ficam no tempo
   // da fala real, sem se esticarem pelo tempo extra de silêncio.
+  // Tempo FIXO no epílogo manda: não se estica a última cena para a música
+  // acabar junto — a trilha, em ciclo, é parada exatamente no fim do vídeo.
+  const epilogoFixo = comEpilogo && durEpEscolhida > 0;
   let acrescentoFim = 0;
-  if (duracaoMusica > 0 && total < duracaoMusica) {
+  if (duracaoMusica > 0 && total < duracaoMusica && !epilogoFixo) {
     acrescentoFim = duracaoMusica - total;
     durFinal[durFinal.length - 1] += acrescentoFim;
     inicios.length = 0;

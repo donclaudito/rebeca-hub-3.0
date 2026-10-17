@@ -41,6 +41,9 @@ const state = {
   // Imagem inicial (introdução), pelo nome do ficheiro — o mesmo raciocínio do
   // epílogo: sai da sequência e abre o vídeo, parada.
   cenaInicial: '',
+  // Tempo escolhido da introdução e do epílogo (0 = automático).
+  durIntro: 0,
+  durEpilogo: 0,
   // A duração da música foi lida? Se não, o ciclo não pode ser calculado.
   musicaMedida: false,
   // Letra da música: o texto colado e se está a ser usada como legenda.
@@ -1197,19 +1200,26 @@ function atualizarSeletorCenaFinal() {
 function notaEpilogo() {
   if (!state.orientacao) return '';
   const nome = state.cenaFinal || 'a última cena';
-  return ` 🎬 Encerramento "${state.orientacaoRotulo || state.orientacao}": o vídeo acaba em ${nome}, parada como epílogo, sem repetir a sequência.`;
+  const tempo = Number(state.durEpilogo) > 0 ? `, durante ${state.durEpilogo}s` : '';
+  return ` 🎬 Encerramento "${state.orientacaoRotulo || state.orientacao}": o vídeo acaba em ${nome}, parada como epílogo${tempo}, sem repetir a sequência.`;
 }
 
 // Nota da introdução: a imagem que abre o vídeo, parada, e que não repete.
 function notaIntro() {
   if (!state.cenaInicial) return '';
-  return ` 🎬 Introdução: o vídeo abre com "${state.cenaInicial}", parada, antes da sequência — ela não volta no meio.`;
+  const tempo = Number(state.durIntro) > 0 ? ` durante ${state.durIntro}s` : '';
+  return ` 🎬 Introdução: o vídeo abre com "${state.cenaInicial}"${tempo}, parada, antes da sequência — ela não volta no meio.`;
 }
 
 // Nota do fecho: com trilha sonora, o vídeo acaba quando a música acaba — a
 // última cena fica o tempo que faltar e, no fim, som e imagem apagam suaves.
 function notaFecho() {
   if (!state.musicaFicheiro || !state.musicaLigada) return '';
+  // Com epílogo de tempo ESCOLHIDO, a escolha manda: a música (em ciclo) é
+  // parada no fim do vídeo, em vez de a última cena se esticar até ela acabar.
+  if (Number(state.durEpilogo) > 0 && state.orientacao) {
+    return ' 🎬 Fecho: o tempo do epílogo foi escolhido — a música toca em ciclo e é parada exatamente no fim do vídeo.';
+  }
   return ' 🎬 Fecho: o vídeo acaba quando a música acaba — a última cena fica o tempo que faltar, com som e imagem a apagar suavemente no fim.';
 }
 
@@ -1344,6 +1354,10 @@ function aplicarPreferenciasNaInterface() {
   if (selFinal) selFinal.value = state.cenaFinal || '';
   const selIni = $('vid-cena-inicial');
   if (selIni) selIni.value = state.cenaInicial || '';
+  const selDurIntro = $('vid-intro-dur');
+  if (selDurIntro) selDurIntro.value = String(Number(state.durIntro) || '');
+  const selDurEp = $('vid-epilogo-dur');
+  if (selDurEp) selDurEp.value = String(Number(state.durEpilogo) || '');
   marcar('velocidades', state.velocidade, 'r');
   $('cfg-servico').value = state.servico;
   $('cfg-modelo').value = state.modelo || '';
@@ -1823,6 +1837,35 @@ async function iniciarVideo() {
     };
   }
 
+  // Tempo da introdução e do epílogo: automático, ou um valor fixo que o motor
+  // respeita exatamente (a trilha, se houver, é parada no fim do vídeo).
+  const TEMPOS_EXTRA = [3, 5, 8, 10, 15, 20, 30];
+  const preencherTempo = (id, rotuloAuto) => {
+    const s = $(id);
+    if (!s) return null;
+    s.innerHTML = '';
+    const auto = document.createElement('option');
+    auto.value = '';
+    auto.textContent = rotuloAuto;
+    s.append(auto);
+    TEMPOS_EXTRA.forEach((n) => {
+      const o = document.createElement('option');
+      o.value = String(n);
+      o.textContent = `${n}s`;
+      s.append(o);
+    });
+    s.onchange = () => {
+      state[id === 'vid-intro-dur' ? 'durIntro' : 'durEpilogo'] = Number(s.value) || 0;
+      guardar();
+      resumoVideo();
+    };
+    return s;
+  };
+  const selTempoIntro = preencherTempo('vid-intro-dur', 'Automático (cerca de 5s)');
+  if (selTempoIntro) selTempoIntro.value = String(Number(state.durIntro) || '');
+  const selTempoEp = preencherTempo('vid-epilogo-dur', 'Automático (acompanha a música)');
+  if (selTempoEp) selTempoEp.value = String(Number(state.durEpilogo) || '');
+
   atualizarTrilha();
 
   // Suporte do browser
@@ -1979,6 +2022,8 @@ function guardar() {
         orientacao: state.orientacao,
         cenaFinal: state.cenaFinal,
         cenaInicial: state.cenaInicial,
+        durIntro: state.durIntro,
+        durEpilogo: state.durEpilogo,
         musicaLigada: state.musicaLigada,
         projetoNome: $('projeto-nome') ? $('projeto-nome').value : '',
       }),
@@ -2286,6 +2331,8 @@ async function init() {
   state.orientacaoRotulo = '';
   state.cenaFinal = typeof c.cenaFinal === 'string' ? c.cenaFinal : '';
   state.cenaInicial = typeof c.cenaInicial === 'string' ? c.cenaInicial : '';
+  state.durIntro = Number(c.durIntro) || 0;
+  state.durEpilogo = Number(c.durEpilogo) || 0;
   marcarMotor();
   marcarTom();
   await iniciarVideo();

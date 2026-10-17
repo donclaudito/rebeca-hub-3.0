@@ -161,6 +161,9 @@ export async function gerarVideoFinal() {
       cenaFinal: idxFinal,
       // A cena que abre o vídeo (introdução), pelo mesmo raciocínio do epílogo.
       cenaInicial: idxInicial,
+      // Tempos escolhidos na página para a introdução e o epílogo (0 = automático).
+      duracaoIntro: Number(state.durIntro) || 0,
+      duracaoEpilogo: Number(state.durEpilogo) || 0,
       // Desenha no canvas visível: vê-se a montagem enquanto grava.
       canvas: preview,
       aoProgredir: (p) => {

@@ -63,14 +63,18 @@ export default async function (req) {
     // Só letra pura: sem marcações de seção ([Verso 1], [Refrão]…), sem negrito
     // e sem linhas vazias dobradas. A defesa fica aqui porque nem toda a IA
     // obedece ao pedido, e uma marcação vira legenda no vídeo.
-    const soLetraPura = (letra) =>
-      String(letra || '')
+    const soLetraPura = (letra) => {
+      const SECAO = /pre[- ]?chorus|pré[- ]?refrão|pré[- ]?refrao|interlúdio|interlude|instrumental|refrão|refrao|chorus|verse|verso|bridge|ponte|outro|intro|solo|drop/i;
+      return String(letra || '')
         .split('\n')
-        .filter((l) => !/^\s*[\*_`>#()\s]*\[[^\]]+\][\*_`>#()\s]*$/.test(l)) // linhas só de marcação
-        .map((l) => l.replace(/\*\*/g, '').trim())
+        .map((l) => l.replace(/\*\*|__|`/g, '').replace(/\s+/g, ' ').trim())
+        // Linhas só de marcação ([Verso 2], (Refrão)…) saem da letra.
+        .filter((l) => !(/^\[[^\]]*\]$/.test(l) || (/^\([^\)]*\)$/.test(l) && SECAO.test(l))))
+        .filter(Boolean)
         .join('\n')
         .replace(/\n{3,}/g, '\n\n')
         .trim();
+    };
     const letraBruta = corte(resposta?.musicaLetra, 6000);
     const promptImagem = corte(resposta?.promptImagem, 2000);
     const musicaEstilo = corte(resposta?.musicaEstilo, 600);

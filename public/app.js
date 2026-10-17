@@ -1482,6 +1482,11 @@ function mostrarResultado(r, nome) {
     btnNuvem.disabled = false;
     btnNuvem.textContent = '☁️ Guardar na nuvem';
   }
+  const btnAnalise = $('btn-video-analise');
+  if (btnAnalise) {
+    btnAnalise.hidden = false;
+    btnAnalise.disabled = false;
+  }
   const caixa = $('vid-resultado');
   if (!caixa) return;
   caixa.hidden = false;
@@ -1535,6 +1540,7 @@ const iniciarProjetos = () => modProjetosUI?.iniciarProjetos();
 let modUtilizadorUI = null;
 let modVideoCarregado = null;
 let modCenasEdit = null;
+let modAnalise = null;
 const iniciarUtilizador = () => modUtilizadorUI?.iniciarUtilizador({ toast });
 
 // ---------------------------------------------------------------- trilha sonora
@@ -1844,6 +1850,7 @@ async function iniciarVideo() {
     if (ok) toast('Legendas guardadas onde escolheu.', 'ok');
   };
   $('btn-video-nuvem').onclick = guardarNaNuvem;
+  $('btn-video-analise').onclick = () => modAnalise?.analisarDiretor();
   rotularBotoesGuardar();
 }
 
@@ -2071,6 +2078,12 @@ async function carregarModulosExtras() {
     modCenasEdit.iniciar({ state, toast, renderThumbs, renderScenes, resumoVideo, guardar });
   } catch (e) {
     console.warn('módulo da edição de cenas não chegou:', e && e.message);
+  }
+  try {
+    modAnalise = await import('./estudio-analise.mjs');
+    modAnalise.iniciarAnalise({ state, $, toast, clienteBase44, videoAtual: () => resultadoVideo });
+  } catch (e) {
+    console.warn('módulo da análise não chegou:', e && e.message);
   }
 }
 

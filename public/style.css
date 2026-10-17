@@ -425,3 +425,8 @@ main { padding: 18px 22px 60px; }
 @media (max-width: 640px) {
   .cve-linha input[type="range"] { width: 110px; }
 }
+
+/* ---------- análise do diretor ---------- */
+.analise-titulo { margin: 14px 0 4px; font-size: 13.5px; color: var(--accent-2); }
+.analise-texto { margin: 0; font-size: 13.5px; line-height: 1.55; white-space: pre-wrap; }
+.analise-lista { margin: 4px 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; font-size: 13.5px; line-height: 1.5; }

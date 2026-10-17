@@ -368,6 +368,7 @@
                 </div>
                 <div class="trilha-linha">
                   <button id="btn-video-ver" class="ghost small" type="button">▶️ Ver o vídeo aqui</button>
+                  <button id="btn-video-analise" class="ghost small" type="button" hidden>🎥 Análise do Diretor</button>
                   <button id="btn-video-nuvem" class="primary small" type="button" hidden>☁️ Guardar na nuvem</button>
                   <button id="btn-video-painel" class="ghost small" type="button" hidden>📺 Ver no painel</button>
                   <button id="btn-video-guardar" class="ghost small" type="button">⬇️ Descarregar outra vez</button>
@@ -623,6 +624,32 @@
           Tudo é editável: mude o texto aqui e copie como ficou. Cole o prompt de imagem no gerador de imagens e o estilo + a letra no gerador de música.
         </p>
       </form>
+    </dialog>
+
+    <!-- Análise do diretor: feedback estruturado do vídeo gerado -->
+    <dialog id="dlg-analise" class="dlg">
+      <div class="dlg-form">
+        <div class="dlg-cabeca">
+          <h2>🎥 Análise do Diretor</h2>
+          <button id="btn-analise-fechar" class="ghost small" type="button">Fechar</button>
+        </div>
+        <div id="analise-estado" class="cfg-result" hidden></div>
+        <div id="analise-corpo" hidden>
+          <h3 class="analise-titulo">Composição e ritmo visual</h3>
+          <p id="analise-composicao" class="analise-texto"></p>
+          <h3 class="analise-titulo">Sincronização com o áudio/música</h3>
+          <p id="analise-sincronia" class="analise-texto"></p>
+          <h3 class="analise-titulo">Melhorias para a edição (pós-produção)</h3>
+          <ul id="analise-melhorias" class="analise-lista"></ul>
+          <label class="field wide">
+            <span>🎬 Prompt refinado (em inglês, para regerar as imagens)</span>
+            <textarea id="analise-prompt" rows="6" spellcheck="false"></textarea>
+          </label>
+          <div class="dlg-acoes">
+            <button id="btn-analise-copiar" class="ghost small" type="button">📋 Copiar o prompt refinado</button>
+          </div>
+        </div>
+      </div>
     </dialog>
 
     <!-- ============================================================ -->

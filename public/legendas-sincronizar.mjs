@@ -1,13 +1,13 @@
 import { versosDaLetra } from './legendas-core.mjs';
 import { chaveDaLetra, erroNosTempos } from './legendas-tempos.mjs';
 
-export default function iniciarSincronia({ state, clienteBase44, guardar, atualizarLetra, resumoVideo }) {
+export default function iniciarSincronia({ state, clienteBase44, guardar, atualizarLetra, resumoVideo, validar }) {
   const botao = document.getElementById('btn-legendas-sincronizar');
   const status = document.getElementById('legendas-sincronia-estado');
   const avisar = (texto, erro = false) => { status.textContent = texto; status.className = `cfg-result ${erro ? 'err' : 'ok'}`; };
   const atualizar = () => { botao.disabled = Boolean(state.busy || state.sincronizandoLetra || !state.musicaFicheiro || !versosDaLetra(state.letra).length || !state.musicaSegundos); };
   botao.onclick = async () => {
-    if (state.busy || state.sincronizandoLetra) return;
+    if (state.busy || state.sincronizandoLetra || !validar()) return;
     const ficheiro = state.musicaFicheiro, chave = chaveDaLetra(state), anterior = state.legendasLetra;
     if (!ficheiro || !versosDaLetra(state.letra).length) return;
     state.sincronizandoLetra = true;

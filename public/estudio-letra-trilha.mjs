@@ -33,7 +33,7 @@ export function iniciar(ctx) {
   leg = ctx.leg;
   previaLegendas = iniciarPreviaLegendas({ state, cuesDaLetra });
   editorLegendas = iniciarEditorLegendas({ state, guardar, atualizarLetra, resumoVideo });
-  sincronia = iniciarSincronia({ ...ctx, atualizarLetra });
+  sincronia = iniciarSincronia({ ...ctx, atualizarLetra, validar: () => editorLegendas.validar() });
 }
 
 // ---------------------------------------------------------------- trilha sonora

@@ -18,7 +18,7 @@ import { blocoAtivo, legendasDasCenas, legendasParaSrt } from './legendas-core.m
 // Versão do motor. Aparece no resumo da página: serve para saber, sem dúvidas,
 // qual build está a correr no browser (um build antigo em cache foi uma das
 // causas de "não funcionou" que já apanhei).
-export const VERSAO_VIDEO = '3.9.1';
+export const VERSAO_VIDEO = '3.9.2';
 
 export const FORMATOS = [
   { id: '1920x1080', rotulo: 'Horizontal 1920×1080 (YouTube)', w: 1920, h: 1080 },
@@ -583,13 +583,21 @@ export async function gerarVideo({
     .filter((_, i) => !fora(i));
   const durBase = comEpilogo || comIntro ? duracoes.filter((_, i) => !fora(i)) : duracoes;
 
-  // Com música e epílogo, o epílogo entra NO LUGAR de uma passagem do ciclo:
-  // o ciclo é encurtado do tempo dele e o epílogo fecha o vídeo por cima do
-  // fim da música — sem nunca cortar o vídeo a meio de uma cena (a trilha
-  // toca em ciclo até à última cena).
-  const alvoCiclo = comEpilogo && alvoMusica > 0
-    ? alvoMusica - Math.max(5, 2 * T + 0.4)
-    : alvoMusica;
+  // Com música e epílogo, o epílogo fecha o vídeo EM CIMA DO FIM da música:
+  // o ciclo leva o número de passagens que chega mais perto do fim da música
+  // deixando o epílogo caber, e o epílogo leva EXATAMENTE o tempo que falta —
+  // assim a música acaba junto com o epílogo, sem recomeçar por baixo dele.
+  let alvoCiclo = alvoMusica;
+  let alvoEp = 0;
+  if (comEpilogo && alvoMusica > 0) {
+    const durEp0 = Math.max(5, 2 * T + 0.4);
+    const reservado = comIntro ? Math.max(5, 2 * T + 0.4) : 0;
+    const naturalBase = durBase.reduce((a, d) => a + d, 0) || 1;
+    const nEp = Math.min(MAX_PASSAGENS, Math.max(1, Math.floor((alvoMusica - durEp0 - reservado) / naturalBase)));
+    // Um cabelo abaixo do alvo: o ciclo arredonda para cima e fica com nEp.
+    alvoCiclo = nEp * naturalBase - 0.001;
+    alvoEp = alvoMusica - reservado - nEp * naturalBase;
+  }
 
   const repetido = repetirAte(base, durBase, alvoCiclo);
   const semCiclo = explicarSemCiclo(modoDuracao, alvoMusica, natural);
@@ -617,10 +625,9 @@ export async function gerarVideo({
   // (entre 2,5s e 12s) ou, sem música, é um epílogo de 5s.
   if (comEpilogo) {
     let durEp = Math.max(5, 2 * T + 0.4);
-    if (alvoMusica > 0) {
-      const antes = durFinal.reduce((a, d) => a + d, 0);
-      durEp = Math.max(2.5, Math.min(12, alvoMusica - antes));
-    }
+    // Com música: o epílogo leva EXATAMENTE o que falta até o vídeo acabar no
+    // segundo em que a música (em ciclo) acaba — é a sincronização pedida.
+    if (alvoEp > 0) durEp = Math.max(2.5, Math.min(12, alvoEp));
     ciclos.push({
       ...cenas[idxFinal],
       _fonte: idxFinal,
@@ -683,6 +690,16 @@ export async function gerarVideo({
   // epílogo); a trilha, que toca em ciclo, continua por baixo e é parada
   // exatamente nesse instante — a música termina junto com a última cena.
   const totalEfetivo = total;
+
+  // E acaba SUAVE: nos últimos 2s a trilha esmaece até ao silêncio, terminando
+  // exatamente no fim da última cena (ou do epílogo) — sem corte a seco.
+  if (trilha && trilha.comecou && trilha.esmaecerAte) {
+    try {
+      trilha.esmaecerAte(trilha.comecouEm + totalEfetivo, Math.min(2, Math.max(0.3, totalEfetivo)));
+    } catch {
+      /* sem esmaecimento é melhor do que sem gravação */
+    }
+  }
 
   // Repete as imagens na mesma ordem da primeira passagem (a imagem de cada
   // cena vem do ficheiro original; `ciclos` só diz qual toca em cada momento).

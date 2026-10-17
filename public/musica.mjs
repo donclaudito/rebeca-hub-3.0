@@ -134,6 +134,19 @@ export function tocarTrilha({ ctx, destino, musica }) {
     // O instante (no relógio do AudioContext) em que a música começou. É o que
     // permite ao motor saber o segundo EXATO em que ela vai acabar.
     comecouEm,
+    // Esmaece a música até ao instante `fimEm` (no relógio do AudioContext):
+    // o volume desce a zero nos últimos `duracao` segundos e a música acaba
+    // suave, em vez de ser cortada a seco no fim do vídeo.
+    esmaecerAte(fimEm, duracao = 2) {
+      try {
+        const d = Math.max(0.3, Number(duracao) || 2);
+        ganho.gain.cancelScheduledValues(comecouEm);
+        ganho.gain.setValueAtTime(VOLUME_TRILHA, fimEm - d);
+        ganho.gain.linearRampToValueAtTime(0.0001, fimEm);
+      } catch {
+        /* sem esmaecimento é melhor do que sem gravação */
+      }
+    },
     parar() {
       try {
         if (comecou) fonte.stop();

@@ -32,6 +32,12 @@ const state = {
   modoDuracao: 'natural',
   // Codec do ficheiro: 'vp8' (compatível) ou 'vp9' (mais pequeno).
   codec: 'vp8',
+  // Orientação do encerramento: '' (sem), 'natureza', 'narrativa' ou 'clipe'.
+  // A imagem final (cenaFinal, pelo nome do ficheiro) sai no fim como epílogo,
+  // parada e sem repetir a sequência.
+  orientacao: '',
+  orientacaoRotulo: '',
+  cenaFinal: '',
   // A duração da música foi lida? Se não, o ciclo não pode ser calculado.
   musicaMedida: false,
   // Letra da música: o texto colado e se está a ser usada como legenda.
@@ -231,6 +237,7 @@ function renderThumbs() {
     ul.append(li);
   });
   updateLayout();
+  atualizarSeletorCenaFinal();
   $('btn-generate').disabled = !state.images.length || state.busy;
 }
 
@@ -1119,6 +1126,49 @@ function marcarModoVideo() {
   if (grupo) grupo.hidden = querVoz();
 }
 
+// Marca a orientação de encerramento escolhida e mostra/esconde a linha da
+// imagem final (o epílogo só se aplica com orientação).
+function marcarOrientacao() {
+  const co = $('vid-orientacao');
+  if (co) [...co.children].forEach((x) => x.classList.toggle('on', x.dataset.id === state.orientacao));
+  const linha = $('linha-cena-final');
+  if (linha) linha.hidden = !state.orientacao;
+  guardar();
+}
+
+// O seletor da imagem final (epílogo) segue a lista de imagens: refaz as
+// opções a cada mudança e preserva a escolha quando o nome ainda existe.
+function atualizarSeletorCenaFinal() {
+  const sel = $('vid-cena-final');
+  if (!sel) return;
+  const escolhidoAntes = state.cenaFinal;
+  sel.innerHTML = '';
+  const auto = document.createElement('option');
+  auto.value = '';
+  auto.textContent = 'A última cena do vídeo';
+  sel.append(auto);
+  const nomes = state.images.map((img) => (img.video ? `🎬 ${img.name}` : img.name));
+  nomes.forEach((nome, i) => {
+    const o = document.createElement('option');
+    o.value = nome;
+    o.textContent = `${i + 1}. ${nome}`;
+    sel.append(o);
+  });
+  if (escolhidoAntes && nomes.includes(escolhidoAntes)) {
+    sel.value = escolhidoAntes;
+  } else {
+    state.cenaFinal = '';
+    sel.value = '';
+  }
+}
+
+// Nota do epílogo, para o resumo: diz qual imagem fecha o vídeo e como.
+function notaEpilogo() {
+  if (!state.orientacao) return '';
+  const nome = state.cenaFinal || 'a última cena';
+  return ` 🎬 Encerramento "${state.orientacaoRotulo || state.orientacao}": o vídeo acaba em ${nome}, parada como epílogo, sem repetir a sequência.`;
+}
+
 // Nota da letra, para o resumo: diz quantos versos e quanto tempo cada um leva.
 function notaLetra() {
   if (!state.letraLigada) return '';
@@ -1144,7 +1194,7 @@ function resumoVideo() {
     return estadoVideo(
       `Vai sair um vídeo de ${n} imagem(ns), cerca de ${formatarMinutos(seg)}, com a trilha ` +
         `"${state.musicaFicheiro.name}" em ciclo e sem voz. Transição "${transicaoRotulo()}".` +
-        `${nota}${notaCiclo()} Demora cerca de ${formatarMinutos(vezesQueRepete().total || seg)} a gravar.`,
+        `${nota}${notaEpilogo()}${notaCiclo()} Demora cerca de ${formatarMinutos(vezesQueRepete().total || seg)} a gravar.`,
       '',
     );
   }
@@ -1164,7 +1214,7 @@ function resumoVideo() {
     return estadoVideo(
       `Pronto para o vídeo de letra: ${state.images.length} imagem(ns), transição "${transicaoRotulo()}", ` +
         `trilha "${state.musicaFicheiro.name}".` +
-        `${nota}${notaCiclo()} A gravação demora o tempo do vídeo.`,
+        `${nota}${notaEpilogo()}${notaCiclo()} A gravação demora o tempo do vídeo.`,
       '',
     );
   }
@@ -1189,7 +1239,7 @@ function resumoVideo() {
     `Pronto: ${n} imagem(ns), transição "${transicaoRotulo()}", ${m.rotulo.toLowerCase()}` +
       `${semAudio ? ` — ${semAudio} cena(s) sem áudio` : ''}` +
       `${musica ? `, trilha "${state.musicaFicheiro.name}"` : state.videoModo === 'ambos' ? ' (sem trilha escolhida)' : ''}.` +
-      `${nota}${notaCiclo()} A gravação demora o tempo do vídeo.`,
+      `${nota}${notaEpilogo()}${notaCiclo()} A gravação demora o tempo do vídeo.`,
     semAudio ? 'wait' : '',
   );
 }
@@ -1243,6 +1293,12 @@ function aplicarPreferenciasNaInterface() {
   marcar('vid-legendas', String(Boolean(state.legendas)));
   marcar('vid-modos', state.videoModo);
   marcar('vid-codec', state.codec);
+  marcar('vid-orientacao', state.orientacao);
+  const linhaF = $('linha-cena-final');
+  if (linhaF) linhaF.hidden = !state.orientacao;
+  atualizarSeletorCenaFinal();
+  const selFinal = $('vid-cena-final');
+  if (selFinal) selFinal.value = state.cenaFinal || '';
   marcar('velocidades', state.velocidade, 'r');
   $('cfg-servico').value = state.servico;
   $('cfg-modelo').value = state.modelo || '';
@@ -1671,6 +1727,41 @@ async function iniciarVideo() {
   state.codec = codecEscolhido.id;
   [...cc.children].forEach((x) => x.classList.toggle('on', x.dataset.id === state.codec));
 
+  // Orientação do encerramento: chips + seletor da imagem final (epílogo).
+  if (!mod.ORIENTACOES.some((o) => o.id === state.orientacao)) {
+    state.orientacao = '';
+    state.orientacaoRotulo = '';
+  } else {
+    state.orientacaoRotulo = mod.ORIENTACOES.find((o) => o.id === state.orientacao).rotulo;
+  }
+  const cor = $('vid-orientacao');
+  cor.innerHTML = '';
+  mod.ORIENTACOES.forEach((o) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'chip';
+    b.dataset.id = o.id;
+    b.textContent = o.rotulo;
+    b.title = o.nota;
+    b.onclick = () => {
+      state.orientacao = o.id;
+      state.orientacaoRotulo = o.rotulo;
+      marcarOrientacao();
+      atualizarSeletorCenaFinal();
+      resumoVideo();
+    };
+    cor.append(b);
+  });
+  marcarOrientacao();
+  atualizarSeletorCenaFinal();
+  const selFinal = $('vid-cena-final');
+  selFinal.value = state.cenaFinal || '';
+  selFinal.onchange = () => {
+    state.cenaFinal = selFinal.value;
+    guardar();
+    resumoVideo();
+  };
+
   atualizarTrilha();
 
   // Suporte do browser
@@ -1759,6 +1850,14 @@ async function gerarVideoFinal() {
   // Uma cena por imagem que tenha ficheiro conhecido. No modo com voz, são as
   // cenas narradas; no modo só música, são TODAS as imagens importadas.
   const lista = comVoz ? comTexto : state.images;
+
+  // Orientação do encerramento: qual cena fica como epílogo no fim (por nome;
+  // sem escolha explícita, é a última).
+  const nomesNaLista = lista.map((s) => (comVoz ? s.filename : s.name));
+  const nomeFinal = String(state.cenaFinal || '');
+  const idxFinal = nomeFinal && nomesNaLista.includes(nomeFinal)
+    ? nomesNaLista.indexOf(nomeFinal)
+    : lista.length - 1;
   const cenas = [];
   for (const s of lista) {
     const imagem = comVoz ? imagemDaCena(s) : s.url;
@@ -1821,6 +1920,9 @@ async function gerarVideoFinal() {
       codec: state.codec,
       modoDuracao: state.modoDuracao,
       musicaSegundos: state.musicaSegundos,
+      // Orientação do encerramento + a cena que fecha o vídeo (epílogo).
+      orientacao: state.orientacao,
+      cenaFinal: idxFinal,
       // Desenha no canvas visível: vê-se a montagem enquanto grava.
       canvas: preview,
       aoProgredir: (p) => {
@@ -2029,6 +2131,8 @@ function guardar() {
         letraLigada: state.letraLigada,
         modoDuracao: state.modoDuracao,
         codec: state.codec,
+        orientacao: state.orientacao,
+        cenaFinal: state.cenaFinal,
         musicaLigada: state.musicaLigada,
         projetoNome: $('projeto-nome') ? $('projeto-nome').value : '',
       }),
@@ -2322,6 +2426,9 @@ async function init() {
   state.modoDuracao = c.modoDuracao === 'trilha' ? 'trilha' : 'natural';
   state.codec = c.codec === 'vp9' ? 'vp9' : 'vp8';
   state.musicaLigada = c.musicaLigada !== false;
+  state.orientacao = typeof c.orientacao === 'string' ? c.orientacao : '';
+  state.orientacaoRotulo = '';
+  state.cenaFinal = typeof c.cenaFinal === 'string' ? c.cenaFinal : '';
   marcarMotor();
   marcarTom();
   iniciarVideo();

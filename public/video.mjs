@@ -18,7 +18,7 @@ import { blocoAtivo, legendasDasCenas, legendasParaSrt } from './legendas-core.m
 // Versão do motor. Aparece no resumo da página: serve para saber, sem dúvidas,
 // qual build está a correr no browser (um build antigo em cache foi uma das
 // causas de "não funcionou" que já apanhei).
-export const VERSAO_VIDEO = '3.7.0';
+export const VERSAO_VIDEO = '3.8.0';
 
 export const FORMATOS = [
   { id: '1920x1080', rotulo: 'Horizontal 1920×1080 (YouTube)', w: 1920, h: 1080 },
@@ -62,6 +62,20 @@ export const DURACAO_SEM_VOZ = 3.5;
 export const MODOS_DURACAO = [
   { id: 'natural', rotulo: 'As imagens' },
   { id: 'trilha', rotulo: 'Até acabar a música' },
+];
+
+// Orientação do encerramento: COMO o vídeo acaba. Com orientação escolhida e
+// uma imagem final designada, essa imagem é TIRADA do ciclo (não repete) e
+// aparece no FIM, parada, como epílogo — cada opção dá-lhe um movimento:
+//  - 'natureza': aproximação lenta (a luz instala-se na imagem de fecho);
+//  - 'narrativa': a câmara sobe e revela a imagem final parada;
+//  - 'clipe': a imagem fica quieta e apaga suavemente para preto com o fim
+//    da música (ou do vídeo).
+export const ORIENTACOES = [
+  { id: '', rotulo: 'Sem orientação', nota: 'a montagem acaba como sempre' },
+  { id: 'natureza', rotulo: '🌿 Natureza / Cinematográfico', nota: 'termina numa imagem de fecho parada, em epílogo, com aproximação lenta' },
+  { id: 'narrativa', rotulo: '🧒 Narrativa / Personagem', nota: 'a câmara sobe e revela a imagem final parada, como epílogo da história' },
+  { id: 'clipe', rotulo: '🎵 Clipe Musical / Minimalista', nota: 'termina numa imagem só e apaga suavemente para preto com o fim da música' },
 ];
 
 // Limite de segurança: 100 passagens. Sem isto, uma música de 3 horas com
@@ -206,13 +220,47 @@ const carregarVideo = (url) =>
 
 // Desenha a imagem (ou o fotograma atual do vídeo) a cobrir o canvas inteiro
 // (recorta o que sobra), sem deformar.
-function desenharCobrindo(ctx, img, w, h, escala = 1, deslocamentoX = 0) {
+function desenharCobrindo(ctx, img, w, h, escala = 1, deslocamentoX = 0, deslocamentoY = 0) {
   const mw = img.naturalWidth || img.videoWidth || 1;
   const mh = img.naturalHeight || img.videoHeight || 1;
   const proporcao = Math.max(w / mw, h / mh) * escala;
   const dw = mw * proporcao;
   const dh = mh * proporcao;
-  ctx.drawImage(img, (w - dw) / 2 + deslocamentoX, (h - dh) / 2, dw, dh);
+  ctx.drawImage(img, (w - dw) / 2 + deslocamentoX, (h - dh) / 2 + deslocamentoY, dw, dh);
+}
+
+// Desenha o EPILOGO: a imagem final, parada no essencial, com o movimento
+// da orientação escolhida. p vai de 0 (começo do epílogo) a 1 (fim).
+function desenharEpilogo(ctx, w, h, de, img, tLocal, dur, orientacao, T) {
+  const p = dur > 0 ? Math.min(1, Math.max(0, tLocal / dur)) : 1;
+  ctx.save();
+  // ENTRADA: a imagem final chega a esbater da anterior (nos primeiros T s).
+  if (de && T > 0 && tLocal < T) {
+    desenharCobrindo(ctx, de, w, h);
+    ctx.globalAlpha = Math.min(1, Math.max(0, tLocal / T));
+  } else {
+    ctx.globalAlpha = 1;
+  }
+  if (orientacao === 'natureza') {
+    // Aproximação lenta: a imagem de fecho instala-se (push-in suave).
+    desenharCobrindo(ctx, img, w, h, 1 + 0.1 * p);
+  } else if (orientacao === 'narrativa') {
+    // A câmara sobe e assenta na imagem final parada (plano-herói).
+    const escala = Math.max(1.04, 1.28 - 0.24 * p);
+    const deslocamentoY = h * 0.1 * (1 - p);
+    desenharCobrindo(ctx, img, w, h, escala, 0, deslocamentoY);
+  } else if (orientacao === 'clipe') {
+    // Imagem única, quieta; apaga para preto nos últimos 1,5s.
+    desenharCobrindo(ctx, img, w, h);
+    const restante = dur - tLocal;
+    if (restante < 1.5) {
+      ctx.fillStyle = `rgba(0,0,0,${(1 - Math.max(0, restante) / 1.5).toFixed(3)})`;
+      ctx.fillRect(0, 0, w, h);
+    }
+  } else {
+    desenharCobrindo(ctx, img, w, h);
+  }
+  ctx.restore();
 }
 
 // Desenha um instante da passagem entre a imagem `de` e a imagem `para`.
@@ -269,7 +317,7 @@ function desenharTransicao(ctx, w, h, de, para, t, tipo) {
 // A legenda é desenhada por cima, já depois de a imagem estar no sítio. Liga-se
 // e desliga-se por instante (nada de guardar estado), para que um bloco que
 // atravesse uma transição continue a aparecer.
-function criarDesenhador({ ctx, w, h, imagens, inicios, duracoes, T, transicao, legendas = [], desenharLegenda = null }) {
+function criarDesenhador({ ctx, w, h, imagens, inicios, duracoes, T, transicao, legendas = [], desenharLegenda = null, epilogoEm = -1, orientacaoEpilogo = '' }) {
   const corte = transicao === 'corte';
   const n = imagens.length;
   const querLegenda = Boolean(desenharLegenda && legendas.length);
@@ -278,6 +326,17 @@ function criarDesenhador({ ctx, w, h, imagens, inicios, duracoes, T, transicao, 
     const inicio = inicios[k];
     const dur = duracoes[k];
     const tLocal = agora - inicio;
+
+    // EPILOGO: a imagem final, com o movimento da orientação — não passa
+    // pelas passagens de transição nem repete nada.
+    if (k === epilogoEm && orientacaoEpilogo) {
+      desenharEpilogo(ctx, w, h, k > 0 ? imagens[k - 1] : null, imagens[k], tLocal, dur, orientacaoEpilogo, T);
+      if (querLegenda) {
+        const bloco = blocoAtivo(legendas, agora);
+        if (bloco) desenharLegenda(ctx, bloco.texto, w, h);
+      }
+      return;
+    }
 
     // Passagem de ENTRADA (ainda a acabar a da cena anterior).
     if (k > 0 && !corte && tLocal < T) {
@@ -365,6 +424,10 @@ export async function gerarVideo({
   // Duração da música, para saber quantas passagens dar. Vem da página, que a
   // mede ao escolher o ficheiro (medir aqui obrigava a descodificar antes).
   musicaSegundos = 0,
+  // Orientação do encerramento ('' | 'natureza' | 'narrativa' | 'clipe') e a
+  // cena que fecha o vídeo (índice): sai no fim como epílogo, sem repetir.
+  orientacao = '',
+  cenaFinal = -1,
   aoProgredir = () => {},
   deveParar = () => false,
 }) {
@@ -495,14 +558,55 @@ export async function gerarVideo({
   // música cortada a meio, sem ninguém saber porquê.
   const duracaoMusica = musicaReal > 0 ? musicaReal : Number(musicaSegundos) || 0;
   const alvoMusica = modoDuracao === 'trilha' ? duracaoMusica : 0;
-  const repetido = repetirAte(cenas, duracoes, alvoMusica);
+
+  // Orientação do encerramento: a imagem final é TIRADA da sequência/ciclo e
+  // volta no FIM, parada, como epílogo — nunca repete com as outras.
+  const idxFinalDado = Number(cenaFinal);
+  const idxFinal =
+    Number.isInteger(idxFinalDado) && idxFinalDado >= 0 && idxFinalDado < cenas.length ? idxFinalDado : -1;
+  const comEpilogo = Boolean(orientacao) && idxFinal >= 0 && cenas.length > 1;
+  const base = cenas
+    .map((c, i) => ({ ...c, _fonte: i, _passagem: 0, _texto: c.texto || '' }))
+    .filter((_, i) => i !== (comEpilogo ? idxFinal : -1));
+  const durBase = comEpilogo ? duracoes.filter((_, i) => i !== idxFinal) : duracoes;
+
+  // Com música e epílogo: se dá para chegar ao fim da música com UMA passagem
+  // a menos, reservo esse tempo para o epílogo — assim ele acaba JUNTO com a
+  // música, em vez de ser cortado a meio.
+  let alvoCiclo = alvoMusica;
+  if (comEpilogo && alvoMusica > 0) {
+    const naturalBase = durBase.reduce((a, d) => a + d, 0);
+    const cheio = Math.min(MAX_PASSAGENS, Math.max(2, Math.ceil(alvoMusica / naturalBase)));
+    const menor = (cheio - 1) * naturalBase;
+    if (cheio > 1 && alvoMusica - menor >= 2.5) alvoCiclo = menor + 0.001;
+  }
+
+  const repetido = repetirAte(base, durBase, alvoCiclo);
   const semCiclo = explicarSemCiclo(modoDuracao, alvoMusica, natural);
 
   const passagens = repetido.passagens;
-  const ciclos = repetido.itens.length ? repetido.itens : cenas.map((c) => ({ ...c, _passagem: 0, _texto: c.texto || '' }));
-  const durFinal = repetido.itens.length ? repetido.duracoes : duracoes;
-  const clipesFinal = ciclos.map((c, i) => clipes[i % cenas.length]);
-  const marcaFinal = ciclos.map((c, i) => marcaSemFala[i % cenas.length]);
+  const ciclos = repetido.itens.length ? repetido.itens : base;
+  const durFinal = repetido.itens.length ? repetido.duracoes : durBase;
+  const clipesFinal = ciclos.map((c) => clipes[c._fonte]);
+  const marcaFinal = ciclos.map((c) => marcaSemFala[c._fonte]);
+
+  // O epílogo entra DEPOIS do ciclo: cabe no tempo que sobra da música
+  // (entre 2,5s e 12s) ou, sem música, é um epílogo de 5s.
+  if (comEpilogo) {
+    let durEp = Math.max(5, 2 * T + 0.4);
+    if (alvoMusica > 0) {
+      const antes = durFinal.reduce((a, d) => a + d, 0);
+      durEp = Math.max(2.5, Math.min(12, alvoMusica - antes));
+    }
+    ciclos.push({
+      ...cenas[idxFinal],
+      _fonte: idxFinal,
+      _passagem: 0,
+      _texto: cenas[idxFinal].texto || '',
+      _epilogo: true,
+    });
+    durFinal.push(durEp);
+  }
 
   const inicios = [];
   let soma = 0;
@@ -571,12 +675,14 @@ export async function gerarVideo({
 
   // Repete as imagens na mesma ordem da primeira passagem (a imagem de cada
   // cena vem do ficheiro original; `ciclos` só diz qual toca em cada momento).
-  const imagensFinal = ciclos.map((c, i) => imagens[i % imagens.length]);
+  const imagensFinal = ciclos.map((c) => imagens[c._fonte]);
 
   // O primeiro fotograma tem de existir antes de gravar, senão o vídeo começa preto.
   const desenhar = criarDesenhador({
     ctx, w: alvo.w, h: alvo.h, imagens: imagensFinal, inicios, duracoes: durFinal, T, transicao,
     legendas: listaCues, desenharLegenda,
+    epilogoEm: comEpilogo ? ciclos.length - 1 : -1,
+    orientacaoEpilogo: comEpilogo ? orientacao : '',
   });
   desenhar(0, 0);
 
@@ -611,7 +717,7 @@ export async function gerarVideo({
       if (cenaDeVideo) {
         try {
           // Começa no INÍCIO do corte escolhido (não no começo do ficheiro).
-          fonteAtual.currentTime = Math.max(0, Number(cenas[i % cenas.length].videoInicio) || 0);
+          fonteAtual.currentTime = Math.max(0, Number(cenas[ciclos[i]._fonte].videoInicio) || 0);
           await fonteAtual.play();
         } catch {
           /* segue com o fotograma parado; a cena continua */
@@ -637,7 +743,7 @@ export async function gerarVideo({
           desenhar(i, agora);
           aoProgredir({
             fase: 'a gravar',
-            atual: (i % cenas.length) + 1,
+            atual: (Number.isInteger(ciclos[i]._fonte) ? ciclos[i]._fonte : i % cenas.length) + 1,
             total: cenas.length,
             passagem: (ciclos[i]._passagem || 0) + 1,
             passagens,
@@ -702,5 +808,8 @@ export async function gerarVideo({
     semCiclo,
     // A duração da música que o motor realmente usou (do áudio descodificado).
     musicaSegundos: duracaoMusica,
+    // Orientação aplicada e duração do epílogo (0 = sem epílogo).
+    orientacao: comEpilogo ? orientacao : '',
+    epilogo: comEpilogo ? durFinal[durFinal.length - 1] : 0,
   };
 }

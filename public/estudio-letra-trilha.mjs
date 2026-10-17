@@ -7,6 +7,7 @@
 // ============================================================
 
 import { cuesDaLetra as obterCues, temposManuais, formatarTempo } from './legendas-tempos.mjs';
+import { analisarVoz } from './musica.mjs';
 import iniciarEditorLegendas from './estudio-legendas.mjs';
 import iniciarPreviaLegendas from './legendas-previa.mjs';
 import iniciarSincronia from './legendas-sincronizar.mjs';
@@ -144,9 +145,17 @@ async function escolherTrilha() {
   guardar();
   aoMudarTrilha();
 
-  // Apenas medir a duração. Volume alto não distingue voz de instrumentos;
-  // os tempos vêm do alinhamento das palavras ou da edição confirmada.
-  aoMudarTrilha();
+  // Localizar os TRECHOS DE CANTO (analisarVoz, em musica.mjs): é o que faz o
+  // rascunho da letra entrar JUNTO com a voz e saltar as pausas instrumentais
+  // (intro, interlúdios, ponte). A análise é grosseira — a exatidão palavra a
+  // palavra continua a vir do botão "Sincronizar com o canto" ou da edição.
+  const analise = await analisarVoz(f).catch(() => null);
+  if (state.musicaFicheiro === f) {
+    state.musicaVoz = analise || null;
+    guardar();
+    atualizarLetra();
+    resumoVideo();
+  }
 
   if (!dur) {
     toast(
@@ -258,9 +267,12 @@ function atualizarLetra() {
   const cues = cuesDaLetra();
   const inicio = cues.length ? formatarTempo(cues[0].inicio) : '00:00.000';
   const fim = cues.length ? formatarTempo(cues[cues.length - 1].fim) : '00:00.000';
+  const temTrechos = Boolean(state.musicaVoz?.secoes?.length);
   const origem = temposManuais(state)
     ? state.legendasLetra.confirmado === false ? 'alinhamento aguardando conferência e aplicação' : 'tempos conferidos e aplicados'
-    : 'rascunho não sincronizado: alinhe com o canto ou ajuste manualmente';
+    : temTrechos
+      ? 'rascunho nos trechos de canto (pausas instrumentais saltadas): confira na prévia e alinhe ou ajuste manualmente'
+      : 'rascunho não sincronizado: alinhe com o canto ou ajuste manualmente';
   estadoLetra(
     `${versos.length} verso(s) · de ${inicio} a ${fim} · ${origem}. Revise na aba Legendas.` +
       `${state.letraLigada ? ' · em uso como legenda' : ''}`,

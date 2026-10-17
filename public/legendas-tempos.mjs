@@ -11,8 +11,13 @@ export function temposManuais(state) {
 export function cuesDaLetra(state) {
   const manual = temposManuais(state);
   if (manual) return manual.map((c) => ({ ...c }));
-  // Rascunho para edição apenas: volume instrumental não identifica canto.
-  return legendasDaLetra(versosDaLetra(state.letra), state.musicaSegundos);
+  // Rascunho: os versos seguem os TRECHOS DE CANTO (de analisarVoz, em
+  // musica.mjs) — o texto entra quando a voz entra e as pausas instrumentais
+  // (intro, interlúdio) ficam sem legenda. Sem trechos úteis (canto contínuo,
+  // análise falhada ou faltando), divisão igual de sempre.
+  return legendasDaLetra(versosDaLetra(state.letra), state.musicaSegundos, {
+    secoes: state.musicaVoz?.secoes || null,
+  });
 }
 export function erroNosTempos(cues, duracao = Infinity) {
   for (let i = 0; i < cues.length; i++) {

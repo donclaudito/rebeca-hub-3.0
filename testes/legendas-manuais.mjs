@@ -5,7 +5,9 @@ import { blocoAtivo, legendasParaSrt } from '../public/legendas-core.mjs';
 const state = { letra: 'Primeiro verso\nSegundo verso', musicaSegundos: 111,
   musicaFicheiro: { name: 'musica.wav', size: 100, lastModified: 123 },
   musicaVoz: { secoes: [{ inicio: 32, fim: 100 }] } };
-assert.equal(cuesDaLetra(state)[0].inicio, 0, 'volume alto não é aceito como reconhecimento de canto: apenas rascunho para edição');
+const rascunho = cuesDaLetra(state);
+assert.equal(rascunho[0].inicio, 32, 'o rascunho entra junto com a voz (32s), nunca durante a pausa instrumental');
+assert.ok(rascunho.every((c) => c.inicio >= 32 - 0.01 && c.fim <= 100 + 0.01), 'nenhum verso aparece fora dos trechos de canto');
 const cues = [{ texto: 'Primeiro verso', inicio: 32.5, fim: 32.7 }, { texto: 'Segundo verso', inicio: 35, fim: 38 }];
 state.legendasLetra = { chave: chaveDaLetra(state), cues };
 assert.deepEqual(cuesDaLetra(state), cues);

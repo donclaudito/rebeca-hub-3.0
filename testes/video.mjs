@@ -995,7 +995,7 @@ console.log('\n[26] Letra após intro instrumental: um único relógio e pausas 
   check(perto(r.duracao, 6, 0.04), 'duração acompanha o áudio apesar da deriva do relógio visual', String(r.duracao));
   const tempos = await import(BASE + 'legendas-tempos.mjs');
   const state = { letra: 'Primeiro canto\nCanto seguinte', musicaSegundos: 6, musicaFicheiro: { name: 'teste.wav', size: 20, lastModified: 1 }, musicaVoz: { secoes: [{ inicio: 2, fim: 6 }] } };
-  check(tempos.cuesDaLetra(state)[0].inicio === 0, 'volume instrumental não gera falsos tempos vocais: apenas rascunho', 'ainda usa estimativas por volume');
+  check(tempos.cuesDaLetra(state)[0].inicio === 2, 'o rascunho entra quando a voz entra (2s), nunca na intro instrumental', JSON.stringify(tempos.cuesDaLetra(state)));
   state.legendasLetra = { chave: tempos.chaveDaLetra(state), cues, confirmado: true };
   check(JSON.stringify(tempos.cuesDaLetra(state)) === JSON.stringify(cues), 'tempos aplicados substituem o rascunho sem recalcular', 'recalculou tempos confirmados');
 }

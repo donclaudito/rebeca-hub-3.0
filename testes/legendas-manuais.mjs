@@ -5,7 +5,7 @@ import { blocoAtivo, legendasParaSrt } from '../public/legendas-core.mjs';
 const state = { letra: 'Primeiro verso\nSegundo verso', musicaSegundos: 111,
   musicaFicheiro: { name: 'musica.wav', size: 100, lastModified: 123 },
   musicaVoz: { secoes: [{ inicio: 32, fim: 100 }] } };
-assert.equal(cuesDaLetra(state)[0].inicio, 32);
+assert.equal(cuesDaLetra(state)[0].inicio, 0, 'volume alto não é aceito como reconhecimento de canto: apenas rascunho para edição');
 const cues = [{ texto: 'Primeiro verso', inicio: 32.5, fim: 32.7 }, { texto: 'Segundo verso', inicio: 35, fim: 38 }];
 state.legendasLetra = { chave: chaveDaLetra(state), cues };
 assert.deepEqual(cuesDaLetra(state), cues);

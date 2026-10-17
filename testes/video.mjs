@@ -972,5 +972,33 @@ console.log('\n[25] Fecho com a música: a última cena fica até ela acabar');
   check(perto(r.musicaSegundos, 10, 0.01), `a duração usada da música é a descodificada (${r.musicaSegundos}s)`, String(r.musicaSegundos));
 }
 
+console.log('\n[26] Letra após intro instrumental: um único relógio e pausas preservadas');
+{
+  instalarAmbiente([], { musicaSegundos: 6 });
+  // O relógio visual corre três vezes mais rápido: a legenda deve ignorá-lo
+  // e acompanhar exclusivamente o AudioContext da música gravada.
+  globalThis.performance = { now: () => relogioMs * 3 };
+  const cues = [{ texto: 'Primeiro canto', inicio: 3, fim: 4 }, { texto: 'Canto seguinte', inicio: 5, fim: 5.5 }];
+  const r = await correrCom(mod.gerarVideo({
+    cenas: [{ imagem: 'intro', audio: null }], musica: { arrayBuffer: async () => new ArrayBuffer(8) },
+    duracaoCena: 6, legendas: true, legendasExternas: cues,
+  }));
+  const inicioMusica = fontesEmCiclo[0].quando;
+  const letras = legendasDesenhadas.filter((d) => d.tipo === 'preenchimento');
+  const primeira = letras.find((d) => d.texto.includes('Primeiro'));
+  const segunda = letras.find((d) => d.texto.includes('seguinte'));
+  check(r.ok, 'gravação com letra concluída', 'não gravou');
+  check(primeira && perto(primeira.t - inicioMusica, 3, 0.04), 'primeiro verso entra aos 3s do áudio, nunca na intro', JSON.stringify(primeira));
+  check(segunda && perto(segunda.t - inicioMusica, 5, 0.04), 'segundo verso entra aos 5s sem repartir a pausa instrumental', JSON.stringify(segunda));
+  check(!letras.some((d) => d.t - inicioMusica < 3 || (d.t - inicioMusica > 4.04 && d.t - inicioMusica < 5)), 'nenhuma legenda nos intervalos instrumentais', 'letra invadiu o instrumental');
+  check(r.srt.includes('00:00:03,000 --> 00:00:04,000') && r.srt.includes('00:00:05,000 --> 00:00:05,500'), 'SRT preserva os mesmos tempos sem escala ou deslocamento', r.srt);
+  check(perto(r.duracao, 6, 0.04), 'duração acompanha o áudio apesar da deriva do relógio visual', String(r.duracao));
+  const tempos = await import(BASE + 'legendas-tempos.mjs');
+  const state = { letra: 'Primeiro canto\nCanto seguinte', musicaSegundos: 6, musicaFicheiro: { name: 'teste.wav', size: 20, lastModified: 1 }, musicaVoz: { secoes: [{ inicio: 2, fim: 6 }] } };
+  check(tempos.cuesDaLetra(state)[0].inicio === 0, 'volume instrumental não gera falsos tempos vocais: apenas rascunho', 'ainda usa estimativas por volume');
+  state.legendasLetra = { chave: tempos.chaveDaLetra(state), cues, confirmado: true };
+  check(JSON.stringify(tempos.cuesDaLetra(state)) === JSON.stringify(cues), 'tempos aplicados substituem o rascunho sem recalcular', 'recalculou tempos confirmados');
+}
+
 console.log(falhas.length ? `\n=== ${falhas.length} FALHA(S) ===` : '\n=== GERAÇÃO DE VÍDEO OK ===');
 process.exit(falhas.length ? 1 : 0);

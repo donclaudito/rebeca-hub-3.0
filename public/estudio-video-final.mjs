@@ -86,10 +86,14 @@ export async function gerarVideoFinal() {
   // Encerramento e introdução (por nome do ficheiro; sem escolha, o epílogo é
   // a última cena e não há introdução).
   const nomesNaLista = lista.map((s) => (comVoz ? s.filename : s.name));
-  const nomeFinal = String(state.cenaFinal || '');
-  const idxFinal = nomeFinal && nomesNaLista.includes(nomeFinal)
-    ? nomesNaLista.indexOf(nomeFinal)
-    : lista.length - 1;
+  // Epílogo: VÁRIAS cenas, pela ordem do projeto (projetos antigos tinham uma).
+  const nomesFinais = (Array.isArray(state.cenasFinais) && state.cenasFinais.length
+    ? state.cenasFinais
+    : [String(state.cenaFinal || '')]
+  ).filter(Boolean);
+  const idxsFinais = [...new Set(nomesFinais.map((n) => nomesNaLista.indexOf(n)).filter((i) => i >= 0))]
+    .sort((a, b) => a - b);
+  const idxFinal = idxsFinais.length ? idxsFinais.at(-1) : lista.length - 1;
   const nomeInicial = String(state.cenaInicial || '');
   const idxInicial = nomeInicial && nomesNaLista.includes(nomeInicial)
     ? nomesNaLista.indexOf(nomeInicial)
@@ -159,6 +163,7 @@ export async function gerarVideoFinal() {
       // Orientação do encerramento + a cena que fecha o vídeo (epílogo).
       orientacao: state.orientacao,
       cenaFinal: idxFinal,
+      cenasFinais: idxsFinais,
       // A cena que abre o vídeo (introdução), pelo mesmo raciocínio do epílogo.
       cenaInicial: idxInicial,
       // Tempos escolhidos na página para a introdução e o epílogo (0 = automático).

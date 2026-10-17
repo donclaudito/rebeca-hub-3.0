@@ -125,6 +125,8 @@ async function recolherProjeto(nome) {
       legendasLetra: state.legendasLetra,
       durIntro: state.durIntro || 0,
       durEpilogo: state.durEpilogo || 0,
+      orientacao: state.orientacao || '',
+      cenasFinais: [...(state.cenasFinais || [])],
       texto: { tone: $('tone').value, extra: $('extra').value, minWords: $('minWords').value, maxWords: $('maxWords').value },
     },
   };

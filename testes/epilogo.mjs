@@ -220,5 +220,32 @@ console.log('\n[4] Sem orientação: comportamento de sempre');
   check(r.orientacao === '' && r.epilogo === 0, 'sem epílogo', JSON.stringify({ o: r.orientacao, e: r.epilogo }));
 }
 
+// ---------------------------------------------------------------- [5] várias cenas no epílogo
+console.log('\n[5] Várias cenas no epílogo: ordem do projeto, duração dividida');
+{
+  // 4 cenas (2s, 3s, 2s, 3s); epílogo = cenas 0 e 2, tempo fixo de 8s → 4s cada.
+  instalarAmbiente([2, 3, 2, 3]);
+  const r = await correrCom(mod.gerarVideo({
+    cenas: cenasDe(4),
+    formato: '1280x720',
+    orientacao: 'natureza',
+    cenasFinais: [0, 2],
+    duracaoEpilogo: 8,
+  }));
+  check(r.ok === true, 'devolveu ok', JSON.stringify(r).slice(0, 200));
+  mostrarResultado('5', r);
+  check(r.cenasEpilogo === 2, 'duas cenas no epílogo', String(r.cenasEpilogo));
+  check(r.epilogo > 7 && r.epilogo < 9, `duração total do epílogo ≈ 8s: ${r.epilogo?.toFixed(1)}s`, String(r.epilogo));
+  check(perto(r.duracao, 14, 0.8), `duração do vídeo ≈ 14s (sequência 6s + epílogo 8s): ${r.duracao?.toFixed(1)}s`, String(r.duracao));
+  // As cenas do epílogo não entraram no ciclo (a sequência é só c2 e c4) e o
+  // vídeo acaba na última do projeto (c3), parada.
+  const fimDesenhado = desenhos.filter((d) => d.t >= r.duracao - 1).map((d) => d.img);
+  check(fimDesenhado.includes('c3'), `a última cena do projeto (c3) fecha o vídeo: ${[...new Set(fimDesenhado)].join(',')}`, JSON.stringify(fimDesenhado));
+  // A fala das cenas do epílogo toca no fim, pela ordem do projeto.
+  const doisUltimos = agendamentos.slice(-2);
+  check(perto(doisUltimos[0].clipe, 2, 0.05) && perto(doisUltimos[1].clipe, 2, 0.05), 'as duas falas do fim são as das cenas do epílogo (2s cada)', JSON.stringify(doisUltimos));
+  check(perto(doisUltimos[1].quando - doisUltimos[0].quando, 4, 0.2), 'cada cena do epílogo ficou com 4s (8s divididos)', JSON.stringify(doisUltimos));
+}
+
 console.log(falhas.length ? `\n${falhas.length} falha(s)` : '\nTUDO OK');
 process.exit(falhas.length ? 1 : 0);

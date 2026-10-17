@@ -449,6 +449,10 @@ export async function gerarVideo({
   // cena que fecha o vídeo (índice): sai no fim como epílogo, sem repetir.
   orientacao = '',
   cenaFinal = -1,
+  // VÁRIAS cenas de epílogo (índices, pela ordem do projeto). Quando vêm,
+  // substituem a cena única: todas saem do ciclo e voltam no fim, e a duração
+  // total do epílogo divide-se entre elas.
+  cenasFinais = [],
   // A cena que ABRE o vídeo (índice): pelo mesmo raciocínio do epílogo, sai da
   // sequência/ciclo e volta no COMEÇO, parada, como introdução.
   cenaInicial = -1,
@@ -598,22 +602,31 @@ export async function gerarVideo({
   const duracaoMusica = musicaReal > 0 ? musicaReal : Number(musicaSegundos) || 0;
   const alvoMusica = modoDuracao === 'trilha' ? duracaoMusica : 0;
 
-  // Orientação do encerramento: a imagem final é TIRADA da sequência/ciclo e
-  // volta no FIM, parada, como epílogo — nunca repete com as outras.
+  // Orientação do encerramento: as cenas finais são TIRADAS da sequência/ciclo
+  // e voltam no FIM, pela ordem do projeto — nunca repetem com as outras.
+  // Uma só cena (projetos antigos, `cenaFinal`) vale como lista de uma.
   const idxFinalDado = Number(cenaFinal);
-  const idxFinal =
+  const idxFinal0 =
     Number.isInteger(idxFinalDado) && idxFinalDado >= 0 && idxFinalDado < cenas.length ? idxFinalDado : -1;
-  const comEpilogo = Boolean(orientacao) && idxFinal >= 0 && cenas.length > 1;
+  const finaisDadas = (Array.isArray(cenasFinais) ? cenasFinais : [])
+    .map((i) => Number(i))
+    .filter((i) => Number.isInteger(i) && i >= 0 && i < cenas.length);
+  const finais = finaisDadas.length
+    ? [...new Set(finaisDadas)].sort((a, b) => a - b)
+    : idxFinal0 >= 0
+      ? [idxFinal0]
+      : [];
+  const comEpilogo = Boolean(orientacao) && finais.length >= 1 && cenas.length > finais.length;
 
   // A mesma ideia no começo: a imagem inicial sai da sequência/ciclo e ABRE o
-  // vídeo, parada. Se for a MESMA imagem do epílogo, fica só com o epílogo.
+  // vídeo, parada. Se for uma das imagens do epílogo, fica só com o epílogo.
   const idxInicialDado = Number(cenaInicial);
   const idxInicialBruto =
     Number.isInteger(idxInicialDado) && idxInicialDado >= 0 && idxInicialDado < cenas.length ? idxInicialDado : -1;
-  const comIntro = idxInicialBruto >= 0 && cenas.length > 1 && idxInicialBruto !== idxFinal;
+  const comIntro = idxInicialBruto >= 0 && cenas.length > 1 && !finais.includes(idxInicialBruto);
   const idxInicial = comIntro ? idxInicialBruto : -1;
 
-  const fora = comEpilogo || comIntro ? (i) => i === idxFinal || i === idxInicial : () => false;
+  const fora = comEpilogo || comIntro ? (i) => finais.includes(i) || i === idxInicial : () => false;
   const base = cenas
     .map((c, i) => ({ ...c, _fonte: i, _passagem: 0, _texto: c.texto || '' }))
     .filter((_, i) => !fora(i));
@@ -672,20 +685,25 @@ export async function gerarVideo({
   }
 
   // O epílogo entra DEPOIS do ciclo: cabe no tempo que sobra da música
-  // (entre 2,5s e 12s) ou, sem música, é um epílogo de 5s.
+  // (entre 2,5s e 12s) ou, sem música, é um epílogo de 5s. VÁRIAS cenas: a
+  // duração TOTAL é a mesma e divide-se por igual entre elas, pela ordem do
+  // projeto; só a ÚLTIMA recebe o movimento da orientação.
   if (comEpilogo) {
     let durEp = durEpEscolhida > 0 ? durEpEscolhida : Math.max(5, 2 * T + 0.4);
     // Com música e tempo AUTOMÁTICO: o epílogo leva EXATAMENTE o que falta até
     // o vídeo acabar no segundo em que a música (em ciclo) acaba.
     if (durEpEscolhida <= 0 && alvoEp > 0) durEp = Math.max(2.5, Math.min(12, alvoEp));
-    ciclos.push({
-      ...cenas[idxFinal],
-      _fonte: idxFinal,
-      _passagem: 0,
-      _texto: cenas[idxFinal].texto || '',
-      _epilogo: true,
-    });
-    durFinal.push(durEp);
+    const durCada = durEp / finais.length;
+    for (const fi of finais) {
+      ciclos.push({
+        ...cenas[fi],
+        _fonte: fi,
+        _passagem: 0,
+        _texto: cenas[fi].texto || '',
+        _epilogo: true,
+      });
+      durFinal.push(durCada);
+    }
   }
 
   // Os clipes e marcas seguem a lista FINAL (com introdução e epílogo): assim
@@ -920,7 +938,9 @@ export async function gerarVideo({
     musicaSegundos: duracaoMusica,
     // Orientação aplicada e duração do epílogo (0 = sem epílogo).
     orientacao: comEpilogo ? orientacao : '',
-    epilogo: comEpilogo ? durFinal[durFinal.length - 1] : 0,
+    // Duração TOTAL do epílogo (somadas as cenas finais) e quantas foram.
+    epilogo: comEpilogo ? durFinal.slice(-finais.length).reduce((a, d) => a + d, 0) : 0,
+    cenasEpilogo: comEpilogo ? finais.length : 0,
     // Duração da introdução (0 = sem introdução).
     intro: comIntro ? durIntro : 0,
   };

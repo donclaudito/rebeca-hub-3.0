@@ -40,6 +40,8 @@ const state = {
   orientacao: '',
   orientacaoRotulo: '',
   cenaFinal: '',
+  // VÁRIAS cenas no epílogo, pela ordem do projeto (nomes de ficheiro).
+  cenasFinais: [],
   // Imagem inicial (introdução), pelo nome do ficheiro — o mesmo raciocínio do
   // epílogo: sai da sequência e abre o vídeo, parada.
   cenaInicial: '',
@@ -1153,26 +1155,34 @@ function marcarOrientacao() {
 function atualizarSeletorCenaFinal() {
   const nomes = state.images.map((img) => (img.video ? `🎬 ${img.name}` : img.name));
 
-  const sel = $('vid-cena-final');
-  if (sel) {
-    const escolhidoAntes = state.cenaFinal;
-    sel.innerHTML = '';
-    const auto = document.createElement('option');
-    auto.value = '';
-    auto.textContent = 'A última cena do vídeo';
-    sel.append(auto);
+  // Epílogo: VÁRIAS cenas, marcadas numa lista de caixas; a ordem é sempre a
+  // do projeto. Sem nenhuma marcada, o epílogo é a última cena (como antes).
+  const caixa = $('vid-cenas-finais');
+  if (caixa) {
+    caixa.innerHTML = '';
+    state.cenasFinais = (state.cenasFinais || []).filter((n) => nomes.includes(n));
     nomes.forEach((nome, i) => {
-      const o = document.createElement('option');
-      o.value = nome;
-      o.textContent = `${i + 1}. ${nome}`;
-      sel.append(o);
+      const lab = document.createElement('label');
+      lab.className = 'chip';
+      const c = document.createElement('input');
+      c.type = 'checkbox';
+      c.value = nome;
+      const marcada = state.cenasFinais.includes(nome);
+      c.checked = marcada;
+      lab.classList.toggle('on', marcada);
+      lab.append(c, document.createTextNode(` ${i + 1}. ${nome}`));
+      c.onchange = () => {
+        state.cenasFinais = [...caixa.querySelectorAll('input:checked')].map((x) => x.value);
+        // Compatibilidade: a primeira marcada segue a valer como "cena final".
+        state.cenaFinal = state.cenasFinais[0] || '';
+        [...caixa.querySelectorAll('label')].forEach((l) =>
+          l.classList.toggle('on', l.querySelector('input')?.checked),
+        );
+        guardar();
+        resumoVideo();
+      };
+      caixa.append(lab);
     });
-    if (escolhidoAntes && nomes.includes(escolhidoAntes)) {
-      sel.value = escolhidoAntes;
-    } else {
-      state.cenaFinal = '';
-      sel.value = '';
-    }
   }
 
   const si = $('vid-cena-inicial');
@@ -1201,9 +1211,15 @@ function atualizarSeletorCenaFinal() {
 // Nota do epílogo, para o resumo: diz qual imagem fecha o vídeo e como.
 function notaEpilogo() {
   if (!state.orientacao) return '';
-  const nome = state.cenaFinal || 'a última cena';
-  const tempo = Number(state.durEpilogo) > 0 ? `, durante ${state.durEpilogo}s` : '';
-  return ` 🎬 Encerramento "${state.orientacaoRotulo || state.orientacao}": o vídeo acaba em ${nome}, parada como epílogo${tempo}, sem repetir a sequência.`;
+  const finais = (state.cenasFinais || []).filter(Boolean);
+  const nome = finais.length
+    ? finais.length === 1 ? finais[0] : `${finais.slice(0, -1).join(', ')} e ${finais.at(-1)}`
+    : 'a última cena';
+  const plural = finais.length > 1 ? 's' : '';
+  const tempo = Number(state.durEpilogo) > 0
+    ? finais.length > 1 ? `, durante ${state.durEpilogo}s (divididos entre elas)` : `, durante ${state.durEpilogo}s`
+    : '';
+  return ` 🎬 Encerramento "${state.orientacaoRotulo || state.orientacao}": o vídeo acaba em ${nome}, parada${plural} como epílogo${tempo}, sem repetir a sequência.`;
 }
 
 // Nota da introdução: a imagem que abre o vídeo, parada, e que não repete.
@@ -1352,8 +1368,6 @@ function aplicarPreferenciasNaInterface() {
   const linhaF = $('linha-cena-final');
   if (linhaF) linhaF.hidden = !state.orientacao;
   atualizarSeletorCenaFinal();
-  const selFinal = $('vid-cena-final');
-  if (selFinal) selFinal.value = state.cenaFinal || '';
   const selIni = $('vid-cena-inicial');
   if (selIni) selIni.value = state.cenaInicial || '';
   const selDurIntro = $('vid-intro-dur');
@@ -1821,13 +1835,6 @@ async function iniciarVideo() {
   });
   marcarOrientacao();
   atualizarSeletorCenaFinal();
-  const selFinal = $('vid-cena-final');
-  selFinal.value = state.cenaFinal || '';
-  selFinal.onchange = () => {
-    state.cenaFinal = selFinal.value;
-    guardar();
-    resumoVideo();
-  };
   // A introdução: escolher a imagem que abre o vídeo (ou nenhum).
   const selInicial = $('vid-cena-inicial');
   if (selInicial) {
@@ -2023,6 +2030,7 @@ function guardar() {
         codec: state.codec,
         orientacao: state.orientacao,
         cenaFinal: state.cenaFinal,
+        cenasFinais: state.cenasFinais,
         cenaInicial: state.cenaInicial,
         durIntro: state.durIntro,
         durEpilogo: state.durEpilogo,
@@ -2331,7 +2339,12 @@ async function init() {
   state.musicaLigada = c.musicaLigada !== false;
   state.orientacao = typeof c.orientacao === 'string' ? c.orientacao : '';
   state.orientacaoRotulo = '';
-  state.cenaFinal = typeof c.cenaFinal === 'string' ? c.cenaFinal : '';
+  // Epílogo com VÁRIAS cenas: lista nova; projetos antigos tinham uma só.
+  const finaisGuardadas = Array.isArray(c.cenasFinais)
+    ? c.cenasFinais.filter((x) => typeof x === 'string' && x)
+    : [];
+  state.cenasFinais = finaisGuardadas.length ? finaisGuardadas : (typeof c.cenaFinal === 'string' && c.cenaFinal ? [c.cenaFinal] : []);
+  state.cenaFinal = state.cenasFinais[0] || '';
   state.cenaInicial = typeof c.cenaInicial === 'string' ? c.cenaInicial : '';
   state.durIntro = Number(c.durIntro) || 0;
   state.durEpilogo = Number(c.durEpilogo) || 0;

@@ -13,12 +13,12 @@
 //  de 2 minutos leva 2 minutos a gravar.
 // ============================================================
 
-import { blocoAtivo, legendasDasCenas, legendasParaSrt } from './legendas-core.mjs';
+import { blocoAtivo, legendasDaLetra, legendasDasCenas, legendasParaSrt } from './legendas-core.mjs';
 
 // Versão do motor. Aparece no resumo da página: serve para saber, sem dúvidas,
 // qual build está a correr no browser (um build antigo em cache foi uma das
 // causas de "não funcionou" que já apanhei).
-export const VERSAO_VIDEO = '3.9.4';
+export const VERSAO_VIDEO = '3.9.5';
 
 // Duração do FECHO: nos últimos segundos do vídeo (quando há trilha), a música
 // esmaece até ao silêncio e a imagem apaga suavemente para preto.
@@ -699,6 +699,22 @@ export async function gerarVideo({
         ? musicaReal / musicaSegundos
         : 1;
     listaCues = externas.map((c) => ({ texto: c.texto, inicio: c.inicio * fator, fim: c.fim * fator }));
+    // RESSINCRONIA NO MOTOR: a letra chega distribuída pela análise da PÁGINA.
+    // Se essa análise faltou (página recarregada, análise ainda a correr ou
+    // falhada), os versos saem em fatias iguais desde o segundo zero —
+    // aparece a letra DURANTE a intro instrumental, antes de alguém cantar.
+    // Com a música JÁ descodificada aqui, a análise é refeita no motor: os
+    // versos passam a acompanhar o canto real, sempre.
+    try {
+      const analise =
+        musicaBuffer && modTrilha?.analisarVozDeBuffer ? modTrilha.analisarVozDeBuffer(musicaBuffer) : null;
+      if (analise && analise.secoes && analise.secoes.length) {
+        const refeitas = legendasDaLetra(externas.map((c) => c.texto), musicaReal, { secoes: analise.secoes });
+        if (refeitas.length === externas.length) listaCues = refeitas;
+      }
+    } catch (e) {
+      console.warn('a ressincronia da letra falhou (fico com a da página):', e && e.message);
+    }
   } else if (querLegendas) {
     listaCues = legendasDasCenas(ciclos.map((c) => c._texto || ''), durFinal, inicios);
   }

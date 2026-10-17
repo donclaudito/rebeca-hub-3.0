@@ -141,6 +141,15 @@ export async function analisarVoz(ficheiro) {
     return null;
   }
   try { await ctx.close(); } catch { /* já fechado */ }
+  return analisarVozDeBuffer(buffer);
+}
+
+// A MESMA análise, sobre um buffer JÁ descodificado — o que o motor do vídeo
+// tem em mãos quando a trilha foi carregada. O motor usa-a para RESSINCRONIZAR
+// a letra ao canto real na hora de gravar: assim os versos seguem o canto
+// mesmo que a análise da página tenha faltado (página recarregada, análise
+// ainda a correr ou falhada).
+export function analisarVozDeBuffer(buffer) {
   if (!buffer || !buffer.duration || !isFinite(buffer.duration)) return null;
 
   const QUADRO = 0.05; // janelas de 50 ms

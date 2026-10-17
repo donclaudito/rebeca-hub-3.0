@@ -13,12 +13,13 @@
 //  de 2 minutos leva 2 minutos a gravar.
 // ============================================================
 
-import { blocoAtivo, legendasDaLetra, legendasDasCenas, legendasParaSrt } from './legendas-core.mjs';
+import { blocoAtivo, legendasDasCenas, legendasParaSrt } from './legendas-core.mjs';
+import { erroNosTempos } from './legendas-tempos.mjs';
 
 // Versão do motor. Aparece no resumo da página: serve para saber, sem dúvidas,
 // qual build está a correr no browser (um build antigo em cache foi uma das
 // causas de "não funcionou" que já apanhei).
-export const VERSAO_VIDEO = '3.9.5';
+export const VERSAO_VIDEO = '3.9.6';
 
 // Duração do FECHO: nos últimos segundos do vídeo (quando há trilha), a música
 // esmaece até ao silêncio e a imagem apaga suavemente para preto.
@@ -455,6 +456,10 @@ export async function gerarVideo({
   deveParar = () => false,
 }) {
   const querLegendas = Boolean(legendas);
+  if (querLegendas && Array.isArray(legendasExternas)) {
+    const erro = erroNosTempos(legendasExternas);
+    if (erro) return { ok: false, erro };
+  }
 
   if (!suporta()) {
     return { ok: false, erro: 'Este browser não consegue gravar vídeo. Use o Chrome ou o Edge.' };
@@ -687,34 +692,9 @@ export async function gerarVideo({
   let desenharLegenda = null;
   const externas = Array.isArray(legendasExternas) ? legendasExternas.filter((c) => c && c.texto) : [];
   if (querLegendas && externas.length) {
-    // A letra repete com as imagens? Não: a letra acompanha a MÚSICA, que toca
-    // uma vez. Se o vídeo tem passagens, a letra fica só na primeira.
-    //
-    // SINCRONIZAÇÃO FINA: a letra foi distribuída pela duração MEDIDA pela
-    // página (metadados); a verdade é a duração JÁ DESCODIFICADA (musicaReal).
-    // Se as duas divergirem, os versos ressincronizam à escala real da música —
-    // senão a letra ia atrasando-se ao longo do vídeo.
-    const fator =
-      musicaReal > 0 && musicaSegundos > 0 && musicaReal !== musicaSegundos
-        ? musicaReal / musicaSegundos
-        : 1;
-    listaCues = externas.map((c) => ({ texto: c.texto, inicio: c.inicio * fator, fim: c.fim * fator }));
-    // RESSINCRONIA NO MOTOR: a letra chega distribuída pela análise da PÁGINA.
-    // Se essa análise faltou (página recarregada, análise ainda a correr ou
-    // falhada), os versos saem em fatias iguais desde o segundo zero —
-    // aparece a letra DURANTE a intro instrumental, antes de alguém cantar.
-    // Com a música JÁ descodificada aqui, a análise é refeita no motor: os
-    // versos passam a acompanhar o canto real, sempre.
-    try {
-      const analise =
-        musicaBuffer && modTrilha?.analisarVozDeBuffer ? modTrilha.analisarVozDeBuffer(musicaBuffer) : null;
-      if (analise && analise.secoes && analise.secoes.length) {
-        const refeitas = legendasDaLetra(externas.map((c) => c.texto), musicaReal, { secoes: analise.secoes });
-        if (refeitas.length === externas.length) listaCues = refeitas;
-      }
-    } catch (e) {
-      console.warn('a ressincronia da letra falhou (fico com a da página):', e && e.message);
-    }
+    // A página já preparou e mostrou estes tempos. Não analisar novamente,
+    // redimensionar ou substituir: a prévia, o vídeo e o SRT usam a mesma lista.
+    listaCues = externas.map((c) => ({ texto: c.texto, inicio: c.inicio, fim: c.fim }));
   } else if (querLegendas) {
     listaCues = legendasDasCenas(ciclos.map((c) => c._texto || ''), durFinal, inicios);
   }

@@ -258,7 +258,7 @@ export function legendasParaSrt(legendas) {
   if (!legendas || !legendas.length) return '';
   return (
     legendas
-      .map((b, i) => `${i + 1}\n${tempoSrt(b.inicio)} --> ${tempoSrt(Math.max(b.fim, b.inicio + CAPT_PISO))}\n${b.texto}`)
+      .map((b, i) => `${i + 1}\n${tempoSrt(b.inicio)} --> ${tempoSrt(b.fim)}\n${b.texto}`)
       .join('\n\n') + '\n'
   );
 }

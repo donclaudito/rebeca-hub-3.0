@@ -7,6 +7,7 @@
     <link rel="stylesheet" href="/style.css" />
     <link rel="stylesheet" href="/painel.css" />
     <link rel="stylesheet" href="/pesquisa.css" />
+    <link rel="stylesheet" href="/legendas-editor.css" />
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎙️</text></svg>" />
   </head>
   <body>
@@ -325,8 +326,8 @@
                   </div>
                   <div class="trilha-linha">
                     <span class="hint">
-                      O tempo é dividido igualmente pelos versos: uma música de 3:00 com 20 versos dá 9s a cada
-                      um. A letra passa a ser a legenda do vídeo e sai também no ficheiro .srt.
+                      Os tempos automáticos são estimativas, não reconhecimento das palavras cantadas.
+                      Confira e ajuste o início e o fim de cada verso na aba Legendas antes de gerar.
                     </span>
                   </div>
                 </div>
@@ -407,6 +408,7 @@
           <div class="abas" id="abas-dir">
             <button type="button" class="aba on" data-tab="tab-narracao">📝 Narração</button>
             <button type="button" class="aba" data-tab="tab-acoes">⚡ Ações</button>
+            <button type="button" class="aba" data-tab="tab-legendas">Legendas</button>
           </div>
 
           <div class="tab" id="tab-narracao">
@@ -416,6 +418,28 @@
             </header>
             <ol id="scenes" class="scenes"></ol>
             <p id="empty-scenes" class="empty">Importe imagens e clique em <b>Gerar narração das imagens</b>.</p>
+          </div>
+
+          <div class="tab" id="tab-legendas" hidden>
+            <header class="pane-head">
+              <h2>Tempos das legendas</h2>
+              <span id="legendas-resumo" class="pane-hint">0 legenda(s) da música</span>
+            </header>
+            <div class="legendas-editor">
+              <p class="hint">Revise os versos da letra antes de processar. Use mm:ss.mmm (00:32.500) ou segundos (32.5). O fim deve ser maior que o início, sem sobrepor o próximo verso.</p>
+              <audio id="legendas-audio" controls preload="metadata" aria-label="Música para conferir os tempos" hidden></audio>
+              <p id="legendas-previa" class="legendas-previa" aria-live="off">Sem legenda neste trecho</p>
+              <p id="legendas-vazio" class="hint">Cole a letra e escolha a trilha sonora na aba Vídeo para ver as legendas aqui.</p>
+              <fieldset id="legendas-campos" disabled aria-label="Editar tempos das legendas">
+                <ol id="legendas-lista" class="legendas-lista"></ol>
+                <div class="trilha-linha">
+                  <button id="btn-legendas-aplicar" class="primary small" type="button">Aplicar tempos</button>
+                  <button id="btn-legendas-restaurar" class="ghost small" type="button">Restaurar automáticos</button>
+                </div>
+              </fieldset>
+              <p id="legendas-editor-estado" class="cfg-result" role="status"></p>
+              <p class="hint">A prévia toca os tempos aplicados. Os ajustes ficam nas preferências deste navegador e acompanham o projeto ao guardar.</p>
+            </div>
           </div>
 
           <div class="tab" id="tab-acoes" hidden>

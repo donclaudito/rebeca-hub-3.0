@@ -122,6 +122,7 @@ async function recolherProjeto(nome) {
       codec: state.codec,
       letra: state.letra,
       letraLigada: state.letraLigada,
+      legendasLetra: state.legendasLetra,
       texto: { tone: $('tone').value, extra: $('extra').value, minWords: $('minWords').value, maxWords: $('maxWords').value },
     },
   };
@@ -359,6 +360,7 @@ export async function abrirProjeto(id) {
 
     // Preferências do projeto.
     const c = p.config || {};
+    state.legendasLetra = c.legendasLetra || null;
     for (const [k, v] of Object.entries(c)) {
       if (k === 'texto') continue;
       if (v !== undefined && v !== null) state[k] = v;

@@ -18,11 +18,13 @@ export async function gerarVideoFinal() {
   const {
     state, $, toast, progress, estadoVideo, mostrarResultado,
     guardarComo, podeEscolherOnde, imagemDaCena, querVoz, querMusica,
-    cuesDaLetra, guardar, atualizarTrilha,
+    cuesDaLetra, guardar, atualizarTrilha, validarTempos, pararPreviaLetra,
   } = ctx;
   const modCenasEdit = ctx.modCenasEdit ? ctx.modCenasEdit() : null;
 
   if (state.busy) return;
+  if (validarTempos && !validarTempos()) return;
+  pararPreviaLetra?.();
 
   // Cenas de vídeo entram mesmo sem texto: quem manda nelas é o próprio ficheiro.
   const comTexto = state.scenes.filter((s) => (s.texto || '').trim() || s.video);
@@ -72,6 +74,7 @@ export async function gerarVideoFinal() {
 
   const mod = await import('./video.mjs');
   state.busy = true;
+  document.getElementById('legendas-campos').disabled = true;
   state.pararVideo = false;
   $('btn-video').disabled = true;
   $('btn-video-parar').hidden = false;
@@ -257,6 +260,7 @@ export async function gerarVideoFinal() {
     toast(e.message, 'err');
   } finally {
     state.busy = false;
+    document.getElementById('legendas-campos').disabled = !document.querySelector('#legendas-lista li');
     state.pararVideo = false;
     $('btn-video').disabled = false;
     $('btn-video-parar').hidden = true;

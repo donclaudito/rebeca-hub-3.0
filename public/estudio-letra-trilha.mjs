@@ -6,7 +6,14 @@
 //  guarda de preferências) chegam via iniciar(ctx).
 // ============================================================
 
+import { cuesDaLetra as obterCues, temposManuais, formatarTempo } from './legendas-tempos.mjs';
+import iniciarEditorLegendas from './estudio-legendas.mjs';
+import iniciarPreviaLegendas from './legendas-previa.mjs';
+
 const $ = (id) => document.getElementById(id);
+let editorLegendas = null;
+let previaLegendas = null;
+export const validarTempos = () => editorLegendas?.validar() !== false;
 
 let state = null;
 let toast = () => {};
@@ -22,6 +29,8 @@ export function iniciar(ctx) {
   resumoVideo = ctx.resumoVideo;
   marcarModoDuracao = ctx.marcarModoDuracao;
   leg = ctx.leg;
+  previaLegendas = iniciarPreviaLegendas({ state, cuesDaLetra });
+  editorLegendas = iniciarEditorLegendas({ state, guardar, atualizarLetra, resumoVideo });
 }
 
 // ---------------------------------------------------------------- trilha sonora
@@ -107,7 +116,10 @@ async function escolherTrilha() {
   if (!f) return;
 
   pararPreviaTrilha();
+  pararPreviaLetra();
   state.musicaFicheiro = f;
+  state.musicaVoz = null;
+  state.musicaSegundos = 0;
   state.musicaLigada = true;
   state.musicaDuracao = 0;
   state.musicaMedida = false;
@@ -155,7 +167,7 @@ async function escolherTrilha() {
 
   if (state.musicaVoz?.secoes?.length) {
     toast(
-      `Sincronia pronta: a voz entra aos ${formatarMinutos(state.musicaVoz.vozInicio)} e os versos seguem o canto.`,
+      `Estimativa por volume pronta. Confira e ajuste os versos na aba Legendas.`, 
       'ok',
     );
   }
@@ -227,17 +239,9 @@ function ligarTrilha() {
 // notoriamente pouco fiável. Colar a letra dá um resultado certo, custa zero e
 // o utilizador pode corrigir o que quiser.
 
-let letraTimer = null; // o relógio da pré-escuta da letra
-
-// A letra já temporizada: cada verso com o seu segundo de entrada e de saída.
-// Precisa da duração da música; sem ela não há como distribuir.
+// A mesma lista alimenta o editor, a prévia, o vídeo e o .srt.
 function cuesDaLetra() {
-  const versos = leg.versosDaLetra ? leg.versosDaLetra(state.letra) : [];
-  const duracao = state.musicaSegundos || 0;
-  if (!versos.length || !duracao) return [];
-  // Com os trechos de voz detetados na música, os versos seguem o CANTO: cada
-  // um entra quando a voz canta a sua linha (e não em fatias iguais).
-  return leg.legendasDaLetra(versos, duracao, { secoes: state.musicaVoz?.secoes || null });
+  return obterCues(state);
 }
 
 function estadoLetra(msg, tipo = '') {
@@ -248,6 +252,8 @@ function estadoLetra(msg, tipo = '') {
 }
 
 function atualizarLetra() {
+  editorLegendas?.atualizar();
+  previaLegendas?.atualizar();
   const versos = leg.versosDaLetra ? leg.versosDaLetra(state.letra) : [];
   const duracao = state.musicaSegundos || 0;
   const btn = $('btn-letra-usar');
@@ -275,19 +281,17 @@ function atualizarLetra() {
     estadoLetra(`${versos.length} verso(s), mas ainda não sei quanto dura a música — escolha a trilha.`, 'err');
     return;
   }
-  const cada = duracao / versos.length;
-  const minutos = (s) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`;
-  // Estado da sincronia: com os trechos de voz, a letra segue o canto real.
-  const sincronia = state.musicaVoz?.secoes?.length
-    ? ` · 🎤 sincronizada com o canto (voz desde ${minutos(state.musicaVoz.vozInicio)})`
-    : state.musicaVoz
-      ? ' · canto contínuo — divisão igual entre os versos'
-      : state.musicaFicheiro
-        ? ' · a sincronizar com o canto…'
-        : '';
+  const cues = cuesDaLetra();
+  const inicio = cues.length ? formatarTempo(cues[0].inicio) : '00:00.000';
+  const fim = cues.length ? formatarTempo(cues[cues.length - 1].fim) : '00:00.000';
+  const origem = temposManuais(state)
+    ? 'tempos manuais aplicados'
+    : state.musicaVoz?.secoes?.length
+      ? 'estimativa por volume, não sincronização palavra a palavra'
+      : 'tempos automáticos estimados';
   estadoLetra(
-    `${versos.length} verso(s) · ${minutos(cada)} cada um · a letra cobre ${minutos(duracao)}` +
-      `${sincronia}${state.letraLigada ? ' · ✅ em uso como legenda' : ''}`,
+    `${versos.length} verso(s) · de ${inicio} a ${fim} · ${origem}. Revise na aba Legendas.` +
+      `${state.letraLigada ? ' · em uso como legenda' : ''}`,
     'ok',
   );
 }
@@ -310,57 +314,25 @@ function alternarLetra() {
 // Pré-escuta: toca a música e mostra, verso a verso, o que vai aparecer no
 // vídeo. É a forma de confirmar o sincronismo antes de gravar dois minutos.
 function pararPreviaLetra() {
-  if (letraTimer) {
-    clearTimeout(letraTimer);
-    letraTimer = null;
-  }
-  const b = $('btn-letra-previa');
-  if (b) b.textContent = '▶️ Ver a letra a passar';
-  document.querySelectorAll?.('.letra-passo.on')?.forEach?.((el) => el.classList.remove('on'));
+  previaLegendas?.parar();
 }
 
 async function preverLetra() {
-  if (letraTimer) {
-    pararPreviaLetra();
-    return;
-  }
-  const cues = cuesDaLetra();
-  if (!cues.length) return toast('Cole a letra e escolha a música primeiro.', 'err');
-  if (!state.musicaFicheiro) return toast('Escolha a música primeiro.', 'err');
-
+  if (!cuesDaLetra().length || !state.musicaFicheiro) return toast('Cole a letra e escolha a música primeiro.', 'err');
+  if (!validarTempos()) return;
   pararPreviaTrilha();
-  const url = URL.createObjectURL(state.musicaFicheiro);
-  trilhaAudio = new Audio(url);
-  trilhaAudio.volume = 0.5;
-  $('btn-letra-previa').textContent = '⏹ Parar';
-
-  // Em vez de esperar pelo fim, agenda cada verso no seu segundo: se a música
-  // for parada, os relógios são limpos todos de uma vez.
-  const caixa = $('letra-estado');
-  const passo = (i) => {
-    if (i >= cues.length) {
-      pararPreviaLetra();
-      return;
-    }
-    const c = cues[i];
-    caixa.className = 'letra-passo on';
-    caixa.textContent = `${i + 1}/${cues.length} · ${c.texto}`;
-    letraTimer = setTimeout(() => passo(i + 1), Math.max(250, (c.fim - c.inicio) * 1000));
-  };
   try {
-    await trilhaAudio.play();
+    await previaLegendas.tocar();
   } catch {
-    pararPreviaLetra();
     toast('Não consegui tocar essa música neste browser.', 'err');
-    return;
   }
-  passo(0);
 }
 
 function limparLetra() {
   pararPreviaLetra();
   state.letra = '';
   state.letraLigada = false;
+  state.legendasLetra = null;
   const ta = $('letra-texto');
   if (ta) ta.value = '';
   guardar();

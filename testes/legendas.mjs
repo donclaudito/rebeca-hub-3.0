@@ -2,6 +2,7 @@
 // A lógica é pura (não precisa de canvas), por isso corre-se diretamente.
 const BASE = new URL('../public/', import.meta.url).href;
 const core = await import(BASE + 'legendas-core.mjs');
+await import(new URL('./legendas-manuais.mjs', import.meta.url).href);
 
 const falhas = [];
 const ok = (m) => console.log('  ok:', m);
@@ -124,9 +125,9 @@ console.log('\n[6] Ficheiro .srt com os mesmos blocos do vídeo');
   // O SRT aguenta acentos (é escrito em UTF-8).
   check(srt.includes('também'), 'os acentos ficam intactos no .srt', 'acentos perdidos');
   check(core.legendasParaSrt([]) === '', 'sem blocos, o .srt é vazio', 'devolveu lixo');
-  // Uma legenda muito curta é esticada no .srt para não piscar.
+  // O .srt preserva o fim exato, inclusive em ajustes manuais curtos.
   const rapido = core.legendasParaSrt([{ texto: 'Oi', inicio: 0, fim: 0.2 }]);
-  check(/00:00:00,000 --> 00:00:00,800/.test(rapido), 'uma legenda de 0,2s sai com 0,8s no .srt', rapido.replace(/\n/g, ' | '));
+  check(/00:00:00,000 --> 00:00:00,200/.test(rapido), 'uma legenda de 0,2s preserva o fim exato no .srt', rapido.replace(/\n/g, ' | '));
 }
 
 console.log('\n[7] Cabe em 2 linhas sem perder palavras');

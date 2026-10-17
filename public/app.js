@@ -46,6 +46,7 @@ const state = {
   // Letra da música: o texto colado e se está a ser usada como legenda.
   letra: '',
   letraLigada: false,
+  legendasLetra: null,
   pararVideo: false,
   // Trilha sonora: o ficheiro escolhido (fica só nesta sessão) e a duração lida.
   musicaFicheiro: null,
@@ -1217,8 +1218,7 @@ function notaLetra() {
   if (!state.letraLigada) return '';
   const cues = cuesDaLetra();
   if (!cues.length) return ' ⚠️ A letra está ligada, mas falta o texto ou a música — vão sair as legendas da narração.';
-  const cada = (cues[0].fim - cues[0].inicio).toFixed(1).replace('.', ',');
-  return ` 💬 Legenda: a LETRA da música, ${cues.length} verso(s) de ${cada}s cada (substitui a legenda da narração).`;
+  return ` 💬 Legenda: a LETRA da música, ${cues.length} verso(s), com os tempos da aba Legendas (substitui a legenda da narração).`;
 }
 
 // O texto que fica por baixo dos controlos: diz exatamente o que vai sair.
@@ -1864,6 +1864,8 @@ async function gerarVideoFinal() {
       state, $, toast, progress, estadoVideo, mostrarResultado, guardarComo,
       podeEscolherOnde, imagemDaCena, querVoz, querMusica, cuesDaLetra,
       guardar, atualizarTrilha, modCenasEdit: () => modCenasEdit,
+      validarTempos: () => modLetraTrilha?.validarTempos() !== false,
+      pararPreviaLetra,
     });
   }
   return modFinal.gerarVideoFinal();
@@ -1970,6 +1972,7 @@ function guardar() {
         legendas: state.legendas,
         letra: state.letra,
         letraLigada: state.letraLigada,
+        legendasLetra: state.legendasLetra,
         modoDuracao: state.modoDuracao,
         codec: state.codec,
         orientacao: state.orientacao,
@@ -2186,8 +2189,8 @@ async function init() {
   if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
     window.addEventListener('rh-vista', updateLayout);
   }
-  // projetos guardados (histórico) + utilizador: módulos à parte
-  carregarModulosExtras();
+  // Só anunciar pronto depois de carregar os módulos usados pelos controlos.
+  await carregarModulosExtras();
 
   // arrastar para a página (ficheiros ou pastas)
   const drop = $('drop');
@@ -2274,6 +2277,7 @@ async function init() {
   state.legendas = c.legendas !== false;
   state.letra = typeof c.letra === 'string' ? c.letra : '';
   state.letraLigada = c.letraLigada === true && state.letra.trim().length > 0;
+  state.legendasLetra = c.legendasLetra || null;
   state.modoDuracao = c.modoDuracao === 'trilha' ? 'trilha' : 'natural';
   state.codec = c.codec === 'vp9' ? 'vp9' : 'vp8';
   state.musicaLigada = c.musicaLigada !== false;
@@ -2283,7 +2287,7 @@ async function init() {
   state.cenaInicial = typeof c.cenaInicial === 'string' ? c.cenaInicial : '';
   marcarMotor();
   marcarTom();
-  iniciarVideo();
+  await iniciarVideo();
   // A voz escolhida só se pode marcar depois de a lista chegar do servidor;
   // o botão "Carregar as minhas vozes" trata disso e repõe a escolha guardada.
   if (state.vozEleven) $('voz-estado').textContent = `ElevenLabs · ${state.vozEleven.slice(0, 8)}… (por confirmar)`;

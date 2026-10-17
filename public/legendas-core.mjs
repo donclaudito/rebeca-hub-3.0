@@ -147,10 +147,21 @@ export function blocoAtivo(legendas, t) {
 // ---- letra de música ----
 // Uma linha por verso. Linhas vazias são ignoradas (é o que sai de copiar e
 // colar com espaçamento), e espaços a mais são limpos.
+//
+// DEFESA contra marcações de estrutura (o que motivou esta função a crescer):
+// letra vinda do Suno ou da IA chega com "**[Verso 2]**", "(Refrão)" e afins —
+// e uma marcação colada vira legenda no vídeo. Aqui: 1) linha que é SÓ marcação
+// sai da letra; 2) negrito/itálico/código são removidos em qualquer linha.
 export function versosDaLetra(texto) {
+  // Palavras de seção: é o que distingue "(Refrão)" (marcação) de "(ah, ah)"
+  // (versos de verdade, que ficam).
+  const SECAO = /pre[- ]?chorus|pré[- ]?refrão|pré[- ]?refrao|interlúdio|interlude|instrumental|refrão|refrao|chorus|verse|verso|bridge|ponte|outro|intro|solo|drop/i;
   return String(texto || '')
     .split(/\r?\n/)
-    .map((l) => l.replace(/\s+/g, ' ').trim())
+    .map((l) => l.replace(/\*\*|__|`/g, '').replace(/\s+/g, ' ').trim()) // negrito e espaços
+    // Linha que é SÓ marcação de seção sai da letra: [Verso 2], (Refrão),
+    // [Chorus]… com ou sem negrito/código em volta.
+    .filter((l) => !(/^\[[^\]]*\]$/.test(l) || (/^\([^\)]*\)$/.test(l) && SECAO.test(l))))
     .filter(Boolean);
 }
 

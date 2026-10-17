@@ -217,6 +217,15 @@ console.log('\n[10] Letra da música: versos e distribuição do tempo');
   check(versos[1] === 'Segunda linha com espaços', `os espaços a mais são limpos ("${versos[1]}")`, versos[1]);
   check(core.versosDaLetra('').length === 0 && core.versosDaLetra(null).length === 0, 'letra vazia não dá versos', 'deu versos');
 
+  // Marcações de estrutura vindo do Suno/IA: "**[Verso 2]**" NÃO é verso —
+  // nem aparece como legenda, nem desalinha a distribuição do tempo.
+  const comMarcas = 'Os passarinhos cantam\n**[Verso 2]**\n[Refrão]\nO sol vai se pôr\n__(Refrão)__\nA noite vem chegando\n**(Chorus)**';
+  const limpos = core.versosDaLetra(comMarcas);
+  check(limpos.length === 3, `só os 3 versos de verdade ficam (${limpos.length})`, JSON.stringify(limpos));
+  check(!limpos.some((v) => /verso|refrão|chorus/i.test(v)), 'nenhuma marcação sobra nos versos', JSON.stringify(limpos));
+  check(limpos[0] === 'Os passarinhos cantam', 'o verso normal passa intacto', limpos[0]);
+  check(!core.versosDaLetra('**[Verso 2]**\n[Chorus]\n`[Ponte]`').length, 'letra só de marcações não dá versos', 'deu versos');
+
   // 4 versos numa música de 120s: 30s cada, encaixados sem buracos.
   const cues = core.legendasDaLetra(versos.concat('Quarta'), 120);
   check(cues.length === 4, `4 versos temporizados (${cues.length})`, String(cues.length));

@@ -176,7 +176,7 @@ export async function analisarDiretor() {
 // ============================================================
 async function aplicarEGerar() {
   if (!ctx) return;
-  const { state, toast, guardar, resumoVideo, aplicarPreferenciasNaInterface, gerarVideoFinal } = ctx;
+  const { state, toast, guardar, resumoVideo, aplicarPreferenciasNaInterface, gerarVideoFinal, videoAtual } = ctx;
   const a = ultimaAnalise?.aplicar;
   if (!a) return toast('A análise ainda não trouxe melhorias aplicáveis.', 'err');
 
@@ -209,12 +209,18 @@ async function aplicarEGerar() {
     );
   }
   if (Number.isFinite(Number(a.duracaoCena)) && Number(a.duracaoCena) !== state.videoDuracaoCena) {
-    aceitar(
-      Number(a.duracaoCena),
-      mod.DURACOES_CENA,
-      (v) => `${v}s por imagem`,
-      (d) => (state.videoDuracaoCena = d.id),
-    );
+    // Tempo por imagem só manda numa montagem SEM narração: com voz, quem dita
+    // o ritmo é a fala. Aplicar à toa enganaria quem espera a melhoria na tela.
+    if (videoAtual && videoAtual()?.r?.comVoz) {
+      ignorados.push('tempo por imagem (a montagem tem narração — quem dita o ritmo é a fala)');
+    } else {
+      aceitar(
+        Number(a.duracaoCena),
+        mod.DURACOES_CENA,
+        (v) => `${v}s por imagem`,
+        (d) => (state.videoDuracaoCena = d.id),
+      );
+    }
   }
   if (typeof a.legendas === 'boolean' && a.legendas !== state.legendas) {
     state.legendas = a.legendas;

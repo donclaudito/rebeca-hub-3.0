@@ -45,7 +45,7 @@ export default async function (req) {
         'Devolva exatamente três campos:',
         '- promptImagem: UM prompt detalhado, em INGLÊS, para geradores de imagem (Midjourney, DALL·E e afins). Descreve a CENA PRINCIPAL da capa/primeira cena do vídeo: personagens, ação, cenário, iluminação, estilo (animação 2D ou 3D fofa, cores alegres, estilo infantil), terminando com a proporção 16:9. Texto corrido, uma frase rica, sem listas, sem marcas. Conteúdo 100% apropriado para crianças.',
         "- musicaEstilo: em INGLÊS, uma linha descrevendo o ESTILO da música para geradores como o Suno: gênero (ex.: gentle children's lullaby), instrumentos, andamento, clima e voz. Sem marcações de seção.",
-        '- musicaLetra: LETRA completa em português do Brasil, cantável, apropriada à faixa etária, coerente com o tema. Estrutura com marcações no início das seções: [Verso 1], [Refrão], [Verso 2], [Ponte], [Refrão]. No mínimo dois versos e um refrão; versos curtos (4 a 8 palavras), vocabulário simples.',
+        "- musicaLetra: LETRA completa em português do Brasil, cantável, apropriada à faixa etária, coerente com o tema. SOMENTE a letra pura: NUNCA use marcações de seção nem de estrutura ([Verso 1], [Refrão], [Ponte], [Chorus], (Refrão)…), nem títulos, nem negrito (**assim**), nem comentários. Apenas os versos, um por linha. No mínimo dois versos e um refrão; versos curtos (4 a 8 palavras), vocabulário simples.",
       ]
         .filter(Boolean)
         .join('\n'),
@@ -60,9 +60,21 @@ export default async function (req) {
       },
     });
 
+    // Só letra pura: sem marcações de seção ([Verso 1], [Refrão]…), sem negrito
+    // e sem linhas vazias dobradas. A defesa fica aqui porque nem toda a IA
+    // obedece ao pedido, e uma marcação vira legenda no vídeo.
+    const soLetraPura = (letra) =>
+      String(letra || '')
+        .split('\n')
+        .filter((l) => !/^\s*[\*_`>#()\s]*\[[^\]]+\][\*_`>#()\s]*$/.test(l)) // linhas só de marcação
+        .map((l) => l.replace(/\*\*/g, '').trim())
+        .join('\n')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+    const letraBruta = corte(resposta?.musicaLetra, 6000);
     const promptImagem = corte(resposta?.promptImagem, 2000);
     const musicaEstilo = corte(resposta?.musicaEstilo, 600);
-    const musicaLetra = corte(resposta?.musicaLetra, 6000);
+    const musicaLetra = soLetraPura(letraBruta) || letraBruta;
     if (!promptImagem || !musicaLetra) {
       return json({ ok: false, error: 'A IA não devolveu os prompts. Tente outra vez.' }, 502);
     }

@@ -18,7 +18,7 @@ import { blocoAtivo, legendasDasCenas, legendasParaSrt } from './legendas-core.m
 // Versão do motor. Aparece no resumo da página: serve para saber, sem dúvidas,
 // qual build está a correr no browser (um build antigo em cache foi uma das
 // causas de "não funcionou" que já apanhei).
-export const VERSAO_VIDEO = '3.9.0';
+export const VERSAO_VIDEO = '3.9.1';
 
 export const FORMATOS = [
   { id: '1920x1080', rotulo: 'Horizontal 1920×1080 (YouTube)', w: 1920, h: 1080 },
@@ -125,9 +125,9 @@ function duracaoDaCenaDeVideo(c) {
 //
 // Devolve os itens já com `_passagem` e `_texto` (o texto da cena original), que
 // é o que o desenho usa para saber qual passagem está no ecrã. A repetição é
-// INTEIRA: conta-se o número de passagens que cobre a música. O corte final,
-// porém, é sempre o da MÚSICA: quando ela acaba, a gravação é encerrada naquele
-// instante (ver fimDaMusica em gerarVideo) — o vídeo dura exatamente a trilha.
+// INTEIRA: conta-se o número de passagens que cobre a música, ARREDONDANDO PARA
+// CIMA. O vídeo acaba sempre no fim da última cena — nunca é cortado pela
+// música: a trilha, que toca em ciclo, é parada exatamente nesse instante.
 function repetirAte(itens, duracoes, alvo, maxPassagens = MAX_PASSAGENS) {
   const natural = duracoes.reduce((a, d) => a + d, 0);
   if (!itens.length || !natural || !(alvo > natural)) return { itens: [], duracoes: [], passagens: 1 };
@@ -583,18 +583,13 @@ export async function gerarVideo({
     .filter((_, i) => !fora(i));
   const durBase = comEpilogo || comIntro ? duracoes.filter((_, i) => !fora(i)) : duracoes;
 
-  // Com música e epílogo: se dá para chegar ao fim da música com UMA passagem
-  // a menos, reservo esse tempo para o epílogo — assim ele acaba JUNTO com a
-  // música, em vez de ser cortado a meio.
-  let alvoCiclo = alvoMusica;
-  if (comEpilogo && alvoMusica > 0) {
-    const naturalBase = durBase.reduce((a, d) => a + d, 0);
-    const cheio = Math.min(MAX_PASSAGENS, Math.max(2, Math.ceil(alvoMusica / naturalBase)));
-    const menor = (cheio - 1) * naturalBase;
-    // Um cabelo ABAIXO do alvo: o ciclo arredonda para cima, e assim fica com
-    // UMA passagem a menos — é esse tempo que sobra para o epílogo caber.
-    if (cheio > 1 && alvoMusica - menor >= 2.5) alvoCiclo = menor - 0.001;
-  }
+  // Com música e epílogo, o epílogo entra NO LUGAR de uma passagem do ciclo:
+  // o ciclo é encurtado do tempo dele e o epílogo fecha o vídeo por cima do
+  // fim da música — sem nunca cortar o vídeo a meio de uma cena (a trilha
+  // toca em ciclo até à última cena).
+  const alvoCiclo = comEpilogo && alvoMusica > 0
+    ? alvoMusica - Math.max(5, 2 * T + 0.4)
+    : alvoMusica;
 
   const repetido = repetirAte(base, durBase, alvoCiclo);
   const semCiclo = explicarSemCiclo(modoDuracao, alvoMusica, natural);
@@ -648,7 +643,8 @@ export async function gerarVideo({
     soma += d;
   }
   const total = soma;
-  const cortado = Boolean(repetido.itens.length) && total > alvoMusica;
+  // A música nunca corta o vídeo: ele acaba sempre no fim da última cena.
+  const cortado = false;
 
   // 2c) legendas: ou a LETRA da música (já temporizada pela página), ou o corte
   // da narração em blocos curtos, temporizados dentro da cena. O que for
@@ -683,28 +679,10 @@ export async function gerarVideo({
   gravador.ondataavailable = (e) => { if (e.data && e.data.size) pedacos.push(e.data); };
   const parado = new Promise((r) => { gravador.onstop = r; });
 
-  // O FIM DA MÚSICA MANDA NO FIM DO VÍDEO. A trilha começa com a gravação; o
-  // instante em que ela acaba, convertido para o relógio do vídeo, é o segundo
-  // exato em que a gravação para — a meio de uma cena, se precisar. Sem trilha
-  // (ou sem duração conhecida) não há corte: vale o comportamento de sempre.
-  const ctxNoComeco = seq.ctx.currentTime;
-  const fimDaMusica =
-    trilha && trilha.comecou && duracaoMusica > 0
-      ? trilha.comecouEm + duracaoMusica - ctxNoComeco
-      : 0;
-  const totalEfetivo = fimDaMusica > 0 ? Math.min(total, fimDaMusica) : total;
-
-  // A legenda não passa do fim: o bloco que atravessasse o fim da música é
-  // aparado, e o que começaria depois dele é deitado fora. O .srt sai igual
-  // ao que foi desenhado.
-  if (fimDaMusica > 0 && listaCues.length) {
-    const dentro = [];
-    for (const c of listaCues) {
-      if (c.inicio >= fimDaMusica) break;
-      dentro.push({ ...c, fim: Math.min(c.fim, fimDaMusica) });
-    }
-    listaCues = dentro;
-  }
+  // A MÚSICA NUNCA CORTA O VÍDEO. O vídeo acaba com a ÚLTIMA CENA (ou com o
+  // epílogo); a trilha, que toca em ciclo, continua por baixo e é parada
+  // exatamente nesse instante — a música termina junto com a última cena.
+  const totalEfetivo = total;
 
   // Repete as imagens na mesma ordem da primeira passagem (a imagem de cada
   // cena vem do ficheiro original; `ciclos` só diz qual toca em cada momento).
@@ -758,18 +736,13 @@ export async function gerarVideo({
       }
 
       let interrompido = false;
-      let acabouMusica = false;
       await new Promise((resolve) => {
         const quadro = () => {
           const agora = relogio();
           // O "Parar" é ouvido a cada fotograma, não só entre cenas.
           const pedido = deveParar();
-          // A MÚSICA ACABOU: encerra no mesmo instante, a meio da cena se
-          // precisar. É o vídeo que segue a trilha, e não o contrário.
-          const fimMusicaAgora = fimDaMusica > 0 && agora >= fimDaMusica;
-          if (agora >= inicios[i] + durFinal[i] || pedido || fimMusicaAgora) {
+          if (agora >= inicios[i] + durFinal[i] || pedido) {
             interrompido = pedido;
-            acabouMusica = fimMusicaAgora;
             resolve();
             return;
           }
@@ -794,13 +767,12 @@ export async function gerarVideo({
 
       // Só conta o tempo que chegou a ser gravado.
       acumulado = Math.min(totalEfetivo, Math.max(acumulado, relogio()));
-      if (interrompido || acabouMusica) break;
+      if (interrompido) break;
     }
   } finally {
     // Deixa o último fotograma entrar e fecha — mesmo que algo falhe a meio.
-    // Quando o corte foi da MÚSICA, o fecho é quase imediato: não se grava
-    // música a tocar DEPOIS de ela já ter acabado.
-    await new Promise((r) => setTimeout(r, fimDaMusica > 0 ? 80 : 250));
+    // A música para JUNTO: o vídeo acaba na última cena e a trilha é cortada aí.
+    await new Promise((r) => setTimeout(r, 250));
     if (trilha) trilha.parar();
     if (gravador.state !== 'inactive') gravador.stop();
     await parado;
@@ -833,9 +805,9 @@ export async function gerarVideo({
     cenasPorPassagem: cenas.length,
     repetido: Boolean(repetido.itens.length),
     cortado,
-    // A gravação acabou NO SEGUNDO EM QUE A MÚSICA ACABOU, em vez de seguir
-    // até ao fim de uma imagem ou de um ciclo.
-    terminouComMusica: fimDaMusica > 0 && total > fimDaMusica,
+    // A gravação acaba sempre NO FIM DA ÚLTIMA CENA; a música (em ciclo) é
+    // parada nesse mesmo instante — nunca é o vídeo que ela corta.
+    terminouComMusica: false,
     duracaoNatural: natural,
     versao: VERSAO_VIDEO,
     semCiclo,

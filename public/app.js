@@ -1368,7 +1368,7 @@ function notaCiclo() {
   if (r.passagens === 1) {
     return ` ℹ️ A música (${formatarMinutos(r.alvo)}) não é mais longa do que o vídeo (${formatarMinutos(r.total)}): não há nada a repetir.`;
   }
-  return ` 🔁 REPETE: as imagens passam ${r.passagens}×, até acabar a música de ${formatarMinutos(r.alvo)}. O vídeo fica com ${formatarMinutos(r.total)}.`;
+  return ` 🔁 REPETE: as imagens passam ${r.passagens}×, até cobrir a música de ${formatarMinutos(r.alvo)}. O vídeo acaba na última cena (${formatarMinutos(r.total)}) e a música para junto.`;
 }
 
 // Quanto tempo o vídeo levaria sem repetir nada.

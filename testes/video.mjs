@@ -685,13 +685,12 @@ console.log('\n[18] Vídeo curto com música longa: as imagens repetem em ciclo'
   check(perto(r.duracaoNatural, 7, 0.05), `a duração natural era ${r.duracaoNatural.toFixed(2)}s`, String(r.duracaoNatural));
   check(perto(r.musicaSegundos, 20, 0.05), `o motor usou a duração do áudio descodificado (${r.musicaSegundos}s)`, String(r.musicaSegundos));
   check(r.passagens >= 3, `deu ${r.passagens} passagens às imagens`, String(r.passagens));
-  check(r.duracao >= 20, `o vídeo chegou aos 20s da música (${r.duracao.toFixed(2)}s)`, `${r.duracao}`);
-  check(r.duracao < 21, `não passa do fim da música: ${r.duracao.toFixed(2)}s < 21s`, `${r.duracao}`);
-  // Quando a música acaba, a gravação é encerrada NAQUELE INSTANTE: o vídeo
-  // dura exatamente a música, e não uma passagem inteira a mais.
-  check(perto(r.duracao, 20, 0.4), `acaba exatamente no fim da música (${r.duracao.toFixed(2)}s)`, `${r.duracao}`);
-  check(r.terminouComMusica === true, 'assinala que acabou com a música', `terminouComMusica=${r.terminouComMusica}`);
-  check(r.cortado === true, 'avisa que a última passagem é cortada a meio', `cortado=${r.cortado}`);
+  check(r.duracao >= 20, `o vídeo cobre os 20s da música (${r.duracao.toFixed(2)}s)`, `${r.duracao}`);
+  // A música NUNCA corta o vídeo: ele acaba no fim da última passagem (3×7s)
+  // e a trilha, em ciclo, é parada exatamente nesse instante.
+  check(perto(r.duracao, 21, 0.4), `o vídeo acaba no fim da última cena (${r.duracao.toFixed(2)}s ≈ 21s)`, `${r.duracao}`);
+  check(r.terminouComMusica === false, 'a música não corta o vídeo', `terminouComMusica=${r.terminouComMusica}`);
+  check(r.cortado === false, 'não há corte a meio de cena', `cortado=${r.cortado}`);
 
   // As imagens têm de voltar pela mesma ordem, e a música continuar em ciclo.
   const ordem = desenhos.map((d) => d.img).filter((v, i, a) => v !== a[i - 1]);
@@ -720,28 +719,28 @@ console.log('\n[19] Sem modo de ciclo, a duração continua a ser a natural');
   check(perto(r.duracao, 7, 0.1), `ficou nos 7s das imagens (${r.duracao.toFixed(2)}s)`, `${r.duracao}`);
   check(r.cortado === false, 'não assinala corte', `cortado=${r.cortado}`);
 
-  // Música mais CURTA do que o vídeo: não há nada a repetir, mas O VÍDEO
-  // ACABA QUANDO A MÚSICA ACABA — a trilha manda no fim da gravação.
+  // Música mais CURTA do que o vídeo: ela repete em ciclo por baixo e é parada
+  // junto com a ÚLTIMA CENA — o vídeo nunca é cortado pela música.
   instalarAmbiente([], { musicaSegundos: 3 });
   const r2 = await correrCom(mod.gerarVideo({
     cenas: duasCenas, transicao: 'fade', duracaoTransicao: 0.6, duracaoCena: 3.5,
     musica, modoDuracao: 'trilha', musicaSegundos: 3,
   }));
-  check(r2.repetido === false && perto(r2.duracao, 3, 0.2), `música de 3s: o vídeo acaba nos 3s dela (${r2.duracao.toFixed(2)}s)`, `${r2.duracao}`);
+  check(r2.repetido === false && perto(r2.duracao, 7, 0.2), `música de 3s não corta: o vídeo acaba na última cena (${r2.duracao.toFixed(2)}s)`, `${r2.duracao}`);
   check(r2.cortado === false, 'não é um corte de ciclo', `cortado=${r2.cortado}`);
-  check(r2.terminouComMusica === true, 'assinala que acabou com a música', `terminouComMusica=${r2.terminouComMusica}`);
+  check(r2.terminouComMusica === false, 'a música não manda no fim', `terminouComMusica=${r2.terminouComMusica}`);
   const ultimoDesenho = desenhos.at(-1)?.t ?? 0;
-  check(ultimoDesenho <= 3.25, `deixou de desenhar no fim da música (último fotograma ${ultimoDesenho.toFixed(2)}s)`, `continuou até ${ultimoDesenho.toFixed(2)}s`);
+  check(ultimoDesenho <= 7.25, `o desenho segue até à última cena (${ultimoDesenho.toFixed(2)}s de 7s)`, `parou em ${ultimoDesenho.toFixed(2)}s`);
 
-  // O mesmo vale no modo NATURAL: com trilha ativa e duração conhecida, o fim
-  // da gravação é o da música — em qualquer modo.
+  // No modo NATURAL vale o mesmo: a música repete em ciclo por baixo e para
+  // com a última cena — nunca corta o vídeo.
   instalarAmbiente([], { musicaSegundos: 3 });
   const r2b = await correrCom(mod.gerarVideo({
     cenas: duasCenas, transicao: 'fade', duracaoTransicao: 0.6, duracaoCena: 3.5,
     musica, modoDuracao: 'natural', musicaSegundos: 3,
   }));
-  check(perto(r2b.duracao, 3, 0.2), `modo natural: música de 3s acaba o vídeo (${r2b.duracao.toFixed(2)}s)`, `${r2b.duracao}`);
-  check(r2b.terminouComMusica === true, 'e assinala o corte pela música', `terminouComMusica=${r2b.terminouComMusica}`);
+  check(perto(r2b.duracao, 7, 0.2), `modo natural: o vídeo acaba na última cena (${r2b.duracao.toFixed(2)}s)`, `${r2b.duracao}`);
+  check(r2b.terminouComMusica === false, 'a música não corta o vídeo', `terminouComMusica=${r2b.terminouComMusica}`);
 
   // Sem música escolhida, o modo de ciclo não faz nada de estranho.
   instalarAmbiente([]);

@@ -1,4 +1,4 @@
-import { versosDaLetra, legendasDaLetra } from './legendas-core.mjs';
+import { versosDaLetra, legendasDaLetra, CAPT_PISO } from './legendas-core.mjs';
 
 export function chaveDaLetra(state) {
   const f = state.musicaFicheiro;
@@ -8,9 +8,38 @@ export function temposManuais(state) {
   const salvo = state.legendasLetra;
   return salvo?.chave === chaveDaLetra(state) && Array.isArray(salvo.cues) ? salvo.cues : null;
 }
+// Ordena as legendas pelo tempo e assenta os cortes: a lista sai sempre em
+// ordem (pelo início), e NENHUMA pode começar antes de a anterior acabar —
+// quem chega cedo demais espera pelo fim da anterior; quem ficou sem tempo de
+// ecrã ganha o piso mínimo. É o mesmo resultado que a página mostra, o que o
+// vídeo desenha e o que sai no .srt.
+export function ordenarLegendas(cues, duracao = Infinity) {
+  const originais = Array.isArray(cues) ? cues : [];
+  const fimTudo = Number(duracao);
+  const fim = Number.isFinite(fimTudo) && fimTudo > 0 ? fimTudo : Infinity;
+  const ordenadas = originais
+    .map((c) => ({ texto: String(c?.texto || ''), inicio: Number(c?.inicio), fim: Number(c?.fim) }))
+    .filter((c) => c.texto && Number.isFinite(c.inicio) && Number.isFinite(c.fim))
+    .sort((a, b) => a.inicio - b.inicio || a.fim - b.fim);
+  for (let i = 0; i < ordenadas.length; i++) {
+    const c = ordenadas[i];
+    if (i > 0 && c.inicio < ordenadas[i - 1].fim - 0.001) c.inicio = ordenadas[i - 1].fim;
+    if (c.fim > fim) c.fim = fim;
+    if (c.fim <= c.inicio) c.fim = Math.min(fim, c.inicio + CAPT_PISO); // Math.min(∞, x) = x
+  }
+  const mudou = ordenadas.length !== originais.length
+    || ordenadas.some(
+      (c, i) =>
+        c.texto !== String(originais[i]?.texto || '')
+        || Math.abs(c.inicio - Number(originais[i]?.inicio)) > 0.0005
+        || Math.abs(c.fim - Number(originais[i]?.fim)) > 0.0005,
+    );
+  return { cues: ordenadas, mudou };
+}
+
 export function cuesDaLetra(state) {
   const manual = temposManuais(state);
-  if (manual) return manual.map((c) => ({ ...c }));
+  if (manual) return ordenarLegendas(manual, state.musicaSegundos).cues;
   // Rascunho: os versos seguem os TRECHOS DE CANTO (de analisarVoz, em
   // musica.mjs) — o texto entra quando a voz entra e as pausas instrumentais
   // (intro, interlúdio) ficam sem legenda. Sem trechos úteis (canto contínuo,

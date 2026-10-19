@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { chaveDaLetra, cuesDaLetra, temposManuais, erroNosTempos, lerTempo, formatarTempo } from '../public/legendas-tempos.mjs';
+import { chaveDaLetra, cuesDaLetra, ordenarLegendas, temposManuais, erroNosTempos, lerTempo, formatarTempo } from '../public/legendas-tempos.mjs';
 import { blocoAtivo, legendasDaLetra, legendasParaSrt, ressincronizarPelaVoz, versosDaLetra } from '../public/legendas-core.mjs';
 import { versosAlinhados } from '../base44/shared/alinhamentoLetra.ts';
 
@@ -59,6 +59,27 @@ for (const [rotulo, cues2] of [
   }
 }
 assert.equal(versosDaLetra('[Verso 2]\num\ndois').length, 2, 'marcações de seção continuam fora da letra');
+
+// REGRESSÃO: a lista organiza os versos em ordem e nenhuma legenda pode
+// começar antes de a anterior acabar (a da meio chega antes e é assentada).
+const desordenadas = [
+  { texto: 'Segundo', inicio: 34, fim: 36 },
+  { texto: 'Encavalitada', inicio: 33, fim: 35.5 },
+  { texto: 'Primeiro', inicio: 32.5, fim: 32.7 },
+];
+state.legendasLetra = { chave: chaveDaLetra(state), cues: desordenadas.map((c) => ({ ...c })) };
+const organizadas = cuesDaLetra(state);
+assert.deepEqual(organizadas.map((c) => c.texto), ['Primeiro', 'Encavalitada', 'Segundo'], 'a lista saiu pela ordem do tempo');
+assert.equal(erroNosTempos(organizadas, 111), '', 'tempos organizados passam na validação');
+for (let i = 1; i < organizadas.length; i++) {
+  assert.ok(organizadas[i].inicio >= organizadas[i - 1].fim - 0.001, `legenda ${i + 1} não sobrepõe a anterior`);
+}
+// Piso mínimo: uma legenda sem tempo de ecrã não some do ecrã.
+const esmagadas = ordenarLegendas([{ texto: 'a', inicio: 5, fim: 5 }, { texto: 'b', inicio: 6, fim: 7 }]).cues;
+assert.ok(esmagadas[0].fim > esmagadas[0].inicio, 'legenda sem duração ganha o piso mínimo');
+assert.ok(esmagadas[1].inicio >= esmagadas[0].fim - 0.001, 'e a seguinte espera pelo fim dela');
+// Aplicar os tempos organizados não muda mais nada (fica confirmado).
+assert.equal(ordenarLegendas(organizadas, 111).mudou, false, 'reabrir não reorganiza de novo');
 
 state.letra = 'Outra letra';
 assert.equal(temposManuais(state), null, 'trocar a letra invalida tempos antigos');

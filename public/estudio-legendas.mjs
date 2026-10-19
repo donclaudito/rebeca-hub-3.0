@@ -1,5 +1,6 @@
 import criarLinhaLegenda from './legendas-editor-linha.mjs';
 import { chaveDaLetra, cuesDaLetra, temposManuais, erroNosTempos, lerTempo } from './legendas-tempos.mjs';
+const mesmaOrdem = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
 export default function iniciarEditorLegendas(ctx) {
   const { state, guardar, atualizarLetra, resumoVideo } = ctx;
@@ -9,12 +10,16 @@ export default function iniciarEditorLegendas(ctx) {
   let chave = '', assinatura = '', sujo = false, exibidas = [];
   const avisar = (texto, erro = false) => { status.textContent = texto; status.className = `cfg-result ${erro ? 'err' : 'ok'}`; };
   const atualizar = () => {
+    const manual = temposManuais(state);
     const novaChave = chaveDaLetra(state), cues = cuesDaLetra(state), nova = JSON.stringify(cues);
     if (novaChave !== chave) { sujo = false; assinatura = ''; chave = novaChave; }
     if (!sujo && nova !== assinatura) {
       exibidas = cues; assinatura = nova;
       lista.replaceChildren(...cues.map(criarLinhaLegenda));
-      avisar(temposManuais(state) ? state.legendasLetra.confirmado === false ? 'Palavras alinhadas ao áudio. Confira a prévia e clique em Aplicar tempos.' : 'Tempos aplicados. Vídeo e .srt usarão os mesmos instantes.' : 'Rascunho não sincronizado. Sincronize com o canto ou ajuste os tempos ouvindo a música; depois aplique.');
+      const msgBase = manual ? state.legendasLetra.confirmado === false ? 'Palavras alinhadas ao áudio. Confira a prévia e clique em Aplicar tempos.' : 'Tempos aplicados. Vídeo e .srt usarão os mesmos instantes.' : 'Rascunho não sincronizado. Sincronize com o canto ou ajuste os tempos ouvindo a música; depois aplique.';
+      avisar(manual && !mesmaOrdem(manual, cues)
+        ? 'A lista foi reordenada pela ordem do tempo, e os tempos assentados para nenhuma legenda começar antes de a anterior acabar. Confira e clique em Aplicar tempos para confirmar. ' + msgBase
+        : msgBase);
     }
     $('legendas-vazio').hidden = cues.length > 0;
     status.hidden = !cues.length;

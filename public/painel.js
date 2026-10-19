@@ -111,11 +111,27 @@ function desenharResumo() {
 function miniatura(p) {
   const m = document.createElement('div');
   m.className = 'miniatura';
-  if (p.thumbUrl) {
+  if (p.thumb_uri && p.thumbUrl) {
     const img = document.createElement('img');
     img.src = p.thumbUrl;
     img.alt = '';
     img.loading = 'lazy';
+    // O URL assinado vale 10 minutos e o <img> só pede o ficheiro quando entra
+    // no ecrã (loading="lazy"). Se a página ficou aberta mais do que isso, o
+    // pedido chega com o token já expirado (401): assina OUTRA VEZ e recarrega.
+    img.onerror = () => {
+      if (img.dataset.renovado === '1') return;
+      img.dataset.renovado = '1';
+      assinar(p.thumb_uri, 600)
+        .then((url) => {
+          if (!url) return;
+          p.thumbUrl = url;
+          img.src = url;
+        })
+        .catch(() => {
+          /* sem miniatura renovada, o cartão fica como estava */
+        });
+    };
     m.append(img);
   } else {
     const ic = document.createElement('span');

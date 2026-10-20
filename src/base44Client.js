@@ -21,4 +21,15 @@ export const base44 = createClient({
   functionsVersion: import.meta.env.VITE_BASE44_FUNCTIONS_VERSION,
   serverUrl: '',
   appBaseUrl: import.meta.env.VITE_BASE44_APP_BASE_URL,
+  // ANALYTICS DESLIGADO: o módulo de analytics do SDK pergunta "quem está"
+  // (auth.me) de fundo, e num visitante sem conta isso é um
+  // GET /entities/User/me -> 401 em cada carregamento (o vermelho na consola).
+  // Esta app não precisa dessas estatísticas; com isto há menos pedidos e a
+  // consola fica limpa. Para voltar a ligar: analytics: { enabled: true }.
+  analytics: { enabled: false },
 });
+
+// Há sessão guardada? É só ver o token (não faz pedido nenhum). Serve para a
+// app NÃO perguntar "quem está" quando não há ninguém — era outro 401 garantido
+// a cada visita anónima.
+export const temSessao = () => Boolean(getAccessToken());

@@ -39,12 +39,45 @@ function nomeDoUtilizador(u) {
   return String(u.email || '').split('@')[0] || u.email || 'utilizador';
 }
 
+// A chave onde o SDK guarda o token da sessão (utils/auth-utils do SDK:
+// "base44_access_token"). Ler daqui é local e instantâneo — não faz pedido.
+const CHAVE_TOKEN = 'base44_access_token';
+
+function temTokenGuardado() {
+  try {
+    return Boolean(localStorage.getItem(CHAVE_TOKEN));
+  } catch {
+    return false;
+  }
+}
+
+function estadoSemConta() {
+  utilizadorAtual = null;
+  mostrarEstadoUser('sem conta');
+  const el = $('user-estado');
+  if (el) el.title = 'a app funciona sem conta; entrar é opcional';
+  const entrar = $('btn-user-entrar');
+  const sair = $('btn-user-sair');
+  if (entrar) entrar.hidden = false;
+  if (sair) sair.hidden = true;
+}
+
 // Vê quem está a usar. Nunca deixa a página em baixo se a Base44 responder mal:
 // sem sessão, a app continua a funcionar sem conta.
+//
+// IMPORTANTE: sem token guardado NÃO se pergunta nada ao servidor. Antes, cada
+// visita anónima fazia GET /entities/User/me e levava um 401 (o vermelho na
+// consola) para depois mostrar "sem conta" — que já se sabia.
 async function verQuemEsta() {
   const entrar = $('btn-user-entrar');
   const sair = $('btn-user-sair');
   mostrarEstadoUser('a ver quem está…');
+
+  if (!temTokenGuardado()) {
+    estadoSemConta();
+    return null;
+  }
+
   try {
     const base44 = await clienteBase44();
     const u = await base44.auth.me();
@@ -59,12 +92,15 @@ async function verQuemEsta() {
     }
     throw new Error('sem sessão');
   } catch {
-    utilizadorAtual = null;
-    mostrarEstadoUser('sem conta');
-    const el = $('user-estado');
-    if (el) el.title = 'a app funciona sem conta; entrar é opcional';
-    if (entrar) entrar.hidden = false;
-    if (sair) sair.hidden = true;
+    // O token que lá estava já não vale (expirado, conta apagada…): tira-se, para
+    // não voltar a falhar em cada carregamento.
+    try {
+      const base44 = await clienteBase44();
+      base44.auth.logout();
+    } catch {
+      /* segue sem conta */
+    }
+    estadoSemConta();
     return null;
   }
 }

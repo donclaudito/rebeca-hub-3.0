@@ -98,6 +98,9 @@ function montar(suportaVideo) {
 
 function ambiente(reg, suportaVideo, duracaoMusica = 65) {
   const store = {};
+  // A app só pergunta 'quem está' quando há token guardado: os casos com sessão
+  // põem-no aqui (__tokenDeTeste) antes de arrancar.
+  if (globalThis.__tokenDeTeste) store.base44_access_token = String(globalThis.__tokenDeTeste);
   globalThis.localStorage = { getItem: (k) => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = String(v); }, removeItem: (k) => { delete store[k]; } };
   globalThis.document = {
     getElementById: (id) => reg.get(id) || null,
@@ -176,20 +179,50 @@ function ambiente(reg, suportaVideo, duracaoMusica = 65) {
       async loginViaEmailPassword(email, senha) {
         this.chamadas.push(['login', email, senha]);
         if (this.erro) throw this.erro;
+        // Como o SDK a sério: entrar guarda a sessão e passa a haver utilizador.
+        this.utilizador = { id: 'u1', email, full_name: 'Rebeca Silva', role: 'user' };
         return { access_token: 'token-falso' };
       },
       async register(p) {
         this.chamadas.push(['register', p.email]);
         if (this.erro) throw this.erro;
+        this.registo = p; // o nome fica para a sessão que o código vai abrir
         return { ok: true };
       },
       async verifyOtp(p) {
         this.chamadas.push(['otp', p.email, p.otpCode]);
         if (this.erro) throw this.erro;
+        // Como o SDK a sério: confirmar o código ABRE a sessão (utilizador +
+        // token guardado). Sem isto, depois de criar a conta a app mostrava
+        // "sem conta" — e o teste estaria a mentir.
+        this.utilizador = {
+          id: 'u2',
+          email: p.email || (this.registo && this.registo.email) || '',
+          full_name: (this.registo && this.registo.full_name) || '',
+          role: 'user',
+        };
+        this.setToken('token-falso');
         return { ok: true };
       },
-      setToken(t) { this.chamadas.push(['setToken', t]); },
-      logout() { this.chamadas.push(['logout']); this.utilizador = null; },
+      // O SDK a sério guarda o token no localStorage (é o que faz a app saber que
+      // há sessão): o falso faz o mesmo.
+      setToken(t) {
+        this.chamadas.push(['setToken', t]);
+        try {
+          globalThis.localStorage.setItem('base44_access_token', String(t));
+        } catch {
+          /* sem armazenamento */
+        }
+      },
+      logout() {
+        this.chamadas.push(['logout']);
+        this.utilizador = null;
+        try {
+          globalThis.localStorage.removeItem('base44_access_token');
+        } catch {
+          /* sem armazenamento */
+        }
+      },
     },
   };
   return store;
@@ -367,6 +400,8 @@ console.log('\n[17] Utilizador no topo: quem está a usar a app');
 {
   // (a) COM sessão: mostra o nome e dá para sair.
   globalThis.__authFalso = { utilizador: { id: 'u1', email: 'rebeca@exemplo.pt', full_name: 'Rebeca Silva', role: 'user' }, erro: null };
+  // Com sessão há token guardado: é isso que faz a app perguntar quem está.
+  globalThis.__tokenDeTeste = 'token-de-teste';
   const reg = await arrancar(true);
   await new Promise((r) => setTimeout(r, 60));
   const estado = reg.get('user-estado');
@@ -385,6 +420,8 @@ console.log('\n[17] Utilizador no topo: quem está a usar a app');
 
   // (b) SEM sessão (a Base44 recusa): a app continua utilizável.
   globalThis.__authFalso = { utilizador: null, erro: Object.assign(new Error('Unauthorized'), { response: { status: 401 } }) };
+  // Token velho (expirado): a app tenta, leva 401, esquece a sessão.
+  globalThis.__tokenDeTeste = 'token-velho';
   const reg2 = await arrancar(true);
   await new Promise((r) => setTimeout(r, 60));
   check(/sem conta/.test(reg2.get('user-estado').textContent), `sem sessão, diz "sem conta" ("${reg2.get('user-estado').textContent}")`, reg2.get('user-estado').textContent);
@@ -396,6 +433,8 @@ console.log('\n[17] Utilizador no topo: quem está a usar a app');
 console.log('\n[18] Entrar, criar conta e confirmar o código');
 {
   globalThis.__authFalso = { utilizador: null, erro: null };
+  // Sessão nova, sem token guardado: é o caso de quem abre a app e entra.
+  globalThis.__tokenDeTeste = '';
   const reg = await arrancar(true);
   await new Promise((r) => setTimeout(r, 60));
 
@@ -442,6 +481,8 @@ console.log('\n[18] Entrar, criar conta e confirmar o código');
 console.log('\n[19] Criar conta e confirmar o código do email');
 {
   globalThis.__authFalso = { utilizador: null, erro: null };
+  // Sessão nova, sem token guardado: é o caso de quem abre a app e entra.
+  globalThis.__tokenDeTeste = '';
   const reg = await arrancar(true);
   await new Promise((r) => setTimeout(r, 60));
 

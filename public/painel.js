@@ -96,20 +96,24 @@ try {
   /* sem janela (testes) */
 }
 
-// Chama `fn` quando o elemento entrar no ecrã (delega no módulo partilhado).
-// Enquanto o módulo não chegou, NÃO se chama já: era isso que fazia a rajada na
-// primeira abertura do Painel.
+// Chama `fn` quando o elemento entrar no ecrã. Sem IntersectionObserver
+// (browsers antigos, testes), chama já — o comportamento antigo.
 function quandoVisivel(el, fn) {
-  if (modUrls) {
-    modUrls.quandoVisivel(el, fn);
-    return;
+  try {
+    if (typeof IntersectionObserver !== 'function') {
+      fn();
+      return;
+    }
+    const obs = new IntersectionObserver((entradas) => {
+      if (entradas.some((e) => e.isIntersecting)) {
+        obs.disconnect();
+        fn();
+      }
+    });
+    obs.observe(el);
+  } catch {
+    fn();
   }
-  import('./urls-assinados.mjs')
-    .then((m) => {
-      modUrls = m;
-      m.quandoVisivel(el, fn);
-    })
-    .catch(() => fn());
 }
 // ---------------------------------------------------------------- vistas
 function hashAtual() {
@@ -211,16 +215,24 @@ function miniatura(p) {
     const img = document.createElement('img');
     img.alt = '';
     img.loading = 'lazy';
-    img.hidden = true;
-    img.onload = () => {
-      img.hidden = false;
+    // `display` em linha e não o atributo `hidden`: o CSS da miniatura tem
+    // `.miniatura img { display: block }`, que ganha ao `hidden` do browser — a
+    // imagem apareceria partida enquanto o URL não chega.
+    img.style.display = 'none';
+    const mostrar = () => {
+      img.style.display = '';
       ic.hidden = true;
     };
+    const esconder = () => {
+      img.style.display = 'none';
+      ic.hidden = false;
+    };
+    img.onload = mostrar;
     img.onerror = () => {
       // O URL pode ter expirado (fica guardado 24 h). Pede um NOVO uma vez —
       // pelo caminho da fila, para não voltar a fazer rajada.
       if (img.dataset.renovado === '1') {
-        img.hidden = true;
+        esconder();
         return;
       }
       img.dataset.renovado = '1';

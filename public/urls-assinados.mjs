@@ -127,23 +127,3 @@ async function pedirComRecuo(pedir, uri, expira, chave) {
   }
   return '';
 }
-
-// Chama `fn` quando o elemento entrar no ecrã. Sem IntersectionObserver
-// (browsers antigos, testes), chama já.
-export function quandoVisivel(el, fn) {
-  try {
-    if (typeof IntersectionObserver !== 'function') {
-      fn();
-      return;
-    }
-    const obs = new IntersectionObserver((entradas) => {
-      if (entradas.some((e) => e.isIntersecting)) {
-        obs.disconnect();
-        fn();
-      }
-    });
-    obs.observe(el);
-  } catch {
-    fn();
-  }
-}

@@ -208,6 +208,7 @@ for (const m of html.matchAll(/id="([A-Za-z0-9_-]+)"/g)) {
   if (/\sdisabled/.test(tag)) el.disabled = true;
   el.getContext = () => ({ drawImage() {}, save() {}, restore() {}, clearRect() {}, measureText: () => ({ width: 10 }) });
   el.captureStream = () => ({ getVideoTracks: () => [{}], getAudioTracks: () => [] });
+  el.replaceChildren = (...n) => { el.children = [...n]; };
   if (/id="trilha-ligada"/.test(html.slice(m.index - 6, m.index + 20))) el.checked = true;
   reg.set(m[1], el);
 }
@@ -216,9 +217,12 @@ const store = {};
 globalThis.localStorage = { getItem: (k) => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = String(v); }, removeItem: (k) => { delete store[k]; } };
 globalThis.document = {
   getElementById: (id) => reg.get(id) || null,
+  createTextNode: (txt) => ({ nodeType: 3, textContent: String(txt) }),
   createElement: (t) => { const el = new El(t); el.getContext = () => ({ drawImage() {}, save() {}, restore() {}, clearRect() {}, measureText: () => ({ width: 10 }) }); el.captureStream = () => ({ getVideoTracks: () => [{}], getAudioTracks: () => [] }); return el; },
   _l: {}, addEventListener(t, fn) { (this._l[t] = this._l[t] || []).push(fn); },
   dispatch(t, ev = {}) { ((this._l[t] || [])).forEach((f) => f({ preventDefault() {}, ...ev })); },
+  querySelector: () => null,
+  querySelectorAll: () => [],
   documentElement: new El('html'),
 };
 globalThis.window = { MediaRecorder: class { static isTypeSupported() { return true; } }, AudioContext: class {}, speechSynthesis: { getVoices: () => [], speak() {}, cancel() {} }, confirm: () => true };
@@ -248,6 +252,8 @@ js = js.replace(/await import\('\.\/video\.mjs'\)/g, `await import('${BASE}video
 js = js.replace(/await import\('\.\/audio-info\.mjs'\)/g, `await import('${BASE}audio-info.mjs')`);
 js = js.replace(/await import\('\.\/legendas-core\.mjs'\)/g, `await import('${BASE}legendas-core.mjs')`);
 js = js.replace(/await import\('\.\/projetos\.mjs'\)/g, `await import('${BASE}projetos.mjs')`);
+// O app.js tem um import ESTÁTICO; dentro de uma Function não é permitido.
+js = js.replace(/^import \{ ehFicheiroVideo \} from '\.\/estudio-video-carregado\.mjs';$/m, 'const ehFicheiroVideo = () => false;');
 js = js.replace(/await import\('\.\/estudio-projetos\.mjs'\)/g, `await import('${BASE}estudio-projetos.mjs')`);
 js = js.replace(/await import\('\.\/estudio-letra-trilha\.mjs'\)/g, `await import('${BASE}estudio-letra-trilha.mjs')`);
 js = js.replace(/await import\('\.\/estudio-utilizador\.mjs'\)/g, `await import('${BASE}estudio-utilizador.mjs')`);

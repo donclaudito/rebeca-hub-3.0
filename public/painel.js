@@ -73,23 +73,54 @@ function avisarVista() {
 
 // O PAINEL É A PÁGINA INICIAL: ao abrir o app sem destino, chega-se aqui.
 // "#estudio" abre o estúdio diretamente (link, favorito, "Abrir o estúdio").
+//
+// REGRA ÚNICA, para a navegação não piscar: cada vista manda em TUDO o que é da
+// vista. Antes, o estúdio ficava com `ws.hidden = noPainel || !ws.hidden` — uma
+// expressão que dependia do estado anterior — e o ecrã inicial (a zona de
+// arrastar imagens) só era escondido pelo painel. Se o estúdio corresse depois
+// (o app.js arranca no DOMContentLoaded, que vem DEPOIS destes módulos), voltava
+// a mostrar o ecrã inicial por cima do painel: era isso que fazia o botão
+// "📺 Painel" parecer que ia para a página inicial, e só à segunda tentativa
+// funcionar.
 function mostrarVista(vista) {
   const noPainel = vista !== 'estudio';
   try {
     localStorage.setItem('rh3vista', noPainel ? 'painel' : 'estudio');
+    // O hash acompanha a vista, para o botão "voltar" do browser e um favorito
+    // darem no mesmo sítio. Sem `hashchange` a disparar recargas.
+    const alvo = noPainel ? '' : '#estudio';
+    if (typeof history !== 'undefined' && history.replaceState) {
+      history.replaceState(null, '', `${location.pathname}${location.search}${alvo}`);
+    }
   } catch {
-    /* modo privado */
+    /* modo privado ou sem histórico */
   }
-  const drop = $('drop');
-  const ws = $('workspace');
-  const secao = $('painel-section');
-  const pesq = $('pesquisa-section');
+
+  const vistas = {
+    drop: $('drop'),
+    workspace: $('workspace'),
+    painel: $('painel-section'),
+    pesquisa: $('pesquisa-section'),
+  };
+
+  // A pesquisa é uma vista à parte: qualquer outra vista a esconde.
+  if (vistas.pesquisa) vistas.pesquisa.hidden = true;
+
+  if (noPainel) {
+    // Painel: a zona de arrastar e o estúdio SAEM DE CENA, sempre.
+    if (vistas.drop) vistas.drop.hidden = true;
+    if (vistas.workspace) vistas.workspace.hidden = true;
+    if (vistas.painel) vistas.painel.hidden = false;
+  } else {
+    // Estúdio: a zona de arrastar só aparece sem imagens; quem decide é o
+    // updateLayout do app.js (avisado por "rh-vista" mais abaixo).
+    if (vistas.painel) vistas.painel.hidden = true;
+    if (vistas.drop) vistas.drop.hidden = false;
+    if (vistas.workspace) vistas.workspace.hidden = false;
+  }
+
   const btnPainel = $('btn-ir-painel');
   const btnEstudio = $('btn-ir-estudio');
-  if (pesq) pesq.hidden = true;
-  if (drop) drop.hidden = noPainel;
-  if (secao) secao.hidden = !noPainel;
-  if (ws) ws.hidden = noPainel || !ws.hidden; // ao voltar, o estúdio decide (updateLayout)
   if (btnPainel) btnPainel.hidden = noPainel;
   if (btnEstudio) btnEstudio.hidden = !noPainel;
   if (noPainel) carregar();
@@ -619,6 +650,21 @@ if (typeof window !== 'undefined') {
   if (ytBaixar) ytBaixar.onclick = () => videoYouTube && descarregarVideo(videoYouTube);
   // Links: botão do painel + pop-up de cadastro.
   iniciarLinks();
-  // Vista inicial: "#estudio" abre o estúdio; em todos os outros casos, o painel.
-  mostrarVista(/estudio/.test(hashAtual()) ? 'estudio' : 'painel');
+
+  // VISTA INICIAL — a última palavra tem de ser desta função.
+  //
+  // O `app.js` arranca no DOMContentLoaded, que só corre DEPOIS de todos os
+  // scripts de módulo (este incluído). Se a vista for aplicada agora, o arranque
+  // do estúdio pode voltar a mostrar o ecrã inicial por cima do Painel. Por isso
+  // aplica-se agora (para não haver piscar) E outra vez depois do arranque
+  // completo, para ficar a certeza.
+  const vistaInicial = () => mostrarVista(/estudio/.test(hashAtual()) ? 'estudio' : 'painel');
+  vistaInicial();
+  const reaplicar = () => vistaInicial();
+  if (document.readyState === 'complete') {
+    setTimeout(reaplicar, 0);
+  } else {
+    window.addEventListener('load', reaplicar, { once: true });
+  }
+  // O evento "rh-vista" devolve a vista a quem a mudou (é idempotente).
 }

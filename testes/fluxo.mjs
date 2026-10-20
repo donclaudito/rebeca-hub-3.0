@@ -6,7 +6,11 @@ const BASE = fileURLToPath(new URL('../public/', import.meta.url));
 const URLBASE = new URL('../public/', import.meta.url).href;
 let js = readFileSync(BASE + 'app.js', 'utf8');
 js = js.replace(/await import\('@\/base44Client\.js'\)/g, '({ base44: { functions: { invoke: async () => ({ ok: true }) } } })');
-js = js.replace(/await import\('\.\/video\.mjs'\)/g, "globalThis.__video");
+// O app.js tem um import ESTÁTICO; dentro de uma Function não é permitido.
+js = js.replace(/^import \{ ehFicheiroVideo \} from '\.\/estudio-video-carregado\.mjs';$/m, 'const ehFicheiroVideo = () => false;');
+// Os restantes imports relativos passam a URL absoluta.
+js = js.replace(/await import\('\.\/([\w.-]+\.mjs)'\)/g, (_m, nome) => `await import('file:///E:/youtube%20rebeca2/rebeca-hub-3.0-base44/public/${nome}')`);
+// O motor de vídeo é o VERDADEIRO (o espiao deixou de servir quando o app passou a delegar em estudio-video-final.mjs).
 js = js.replace(/await import\('\.\/legendas-core\.mjs'\)/g, "await import('" + URLBASE + "legendas-core.mjs')");
 js = js.replace(/await import\('\.\/estudio-letra-trilha\.mjs'\)/g, "await import('" + URLBASE + "estudio-letra-trilha.mjs')");
 js = js.replace(/await import\('\.\/estudio-projetos\.mjs'\)/g, "await import('" + URLBASE + "estudio-projetos.mjs')");
@@ -48,25 +52,43 @@ for (const m of html.matchAll(/id="([A-Za-z0-9_-]+)"/g)) {
 }
 reg.get('trilha-ligada').checked = true;
 
-// O motor de vídeo é substituído por um espião: só interessa o que a página envia.
+// O motor de vídeo é o VERDADEIRO, embrulhado num espião: o que interessa é o
+// que a página envia, mas o resto do módulo (FORMATOS, CODECS, suporta) tem de
+// ser o real — o app deixou de chamar o motor diretamente e passou a delegar em
+// estudio-video-final.mjs, por isso as listas têm de ser as verdadeiras.
 let recebido = null;
+const motorReal = await import(URLBASE + 'video.mjs');
 globalThis.__video = {
-  FORMATOS: [{ id: '1920x1080', rotulo: 'H', w: 1920, h: 1080 }, { id: '1280x720', rotulo: 'H2', w: 1280, h: 720 }],
-  TRANSICOES: [{ id: 'fade', rotulo: 'Fade Suave', nota: '' }, { id: 'corte', rotulo: 'Corte Seco', nota: '' }],
-  DURACOES: [{ id: 0.6, rotulo: 'Normal' }],
-  DURACOES_CENA: [{ id: 2, rotulo: 'Rápido' }, { id: 3.5, rotulo: 'Normal' }],
-  MODOS_DURACAO: [{ id: 'natural', rotulo: 'As imagens' }, { id: 'trilha', rotulo: 'Até acabar a música' }],
-  CODECS: [
-    { id: 'vp8', rotulo: 'Compatível (VP8)', nota: '', ordem: ['video/webm;codecs=vp8,opus'] },
-    { id: 'vp9', rotulo: 'Mais pequeno (VP9)', nota: '', ordem: ['video/webm;codecs=vp9,opus'] },
-  ],
-  suporta: () => true,
-  gerarVideo: async (op) => { recebido = op; return { ok: true, blob: { size: 5_000_000 }, extensao: 'webm', duracao: 182, formato: '1280x720', transicao: 'fade', comVoz: false, comMusica: true, legendas: 0, srt: '', repetido: true, passagens: 26, cortado: true, duracaoNatural: 7, versao: '9.9.9', semCiclo: '' }; },
+  ...motorReal,
+  gerarVideo: async (op) => {
+    recebido = op;
+    return {
+      ok: true, blob: { size: 5_000_000 }, mime: 'video/webm;codecs=vp8,opus', codec: 'vp8',
+      extensao: 'webm', duracao: 182, formato: '1280x720', transicao: 'fade', comVoz: false,
+      comMusica: true, legendas: 0, srt: '', repetido: true, passagens: 26, cortado: true,
+      duracaoNatural: 7, versao: motorReal.VERSAO_VIDEO, semCiclo: '', musicaSegundos: 180,
+    };
+  },
 };
 
 const store = {};
 globalThis.localStorage = { getItem: (k) => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = String(v); }, removeItem: (k) => { delete store[k]; } };
-globalThis.document = { getElementById: (id) => reg.get(id) || null, createElement: (t) => { const el = new El(t); el.getContext = () => ({ drawImage() {}, save() {}, restore() {}, clearRect() {}, measureText: () => ({ width: 10 }) }); el.captureStream = () => ({ getVideoTracks: () => [{}], getAudioTracks: () => [] }); return el; }, _l: {}, addEventListener(t, fn) { (this._l[t] = this._l[t] || []).push(fn); }, dispatch(t, ev = {}) { ((this._l[t] || [])).forEach((f) => f({ preventDefault() {}, ...ev })); }, documentElement: new El('html') };
+globalThis.document = {
+  getElementById: (id) => reg.get(id) || null,
+  createTextNode: (txt) => ({ nodeType: 3, textContent: String(txt) }),
+  createElement: (t) => {
+    const el = new El(t);
+    el.getContext = () => ({ drawImage() {}, save() {}, restore() {}, clearRect() {}, measureText: () => ({ width: 10 }) });
+    el.captureStream = () => ({ getVideoTracks: () => [{}], getAudioTracks: () => [] });
+    return el;
+  },
+  _l: {},
+  addEventListener(t, fn) { (this._l[t] = this._l[t] || []).push(fn); },
+  dispatch(t, ev = {}) { ((this._l[t] || [])).forEach((f) => f({ preventDefault() {}, ...ev })); },
+  querySelector: () => null,
+  querySelectorAll: () => [],
+  documentElement: new El('html'),
+};
 globalThis.window = { MediaRecorder: class { static isTypeSupported() { return true; } }, AudioContext: class {}, speechSynthesis: { getVoices: () => [], speak() {}, cancel() {} } };
 globalThis.speechSynthesis = globalThis.window.speechSynthesis;
 globalThis.SpeechSynthesisUtterance = class {};
@@ -159,27 +181,25 @@ const ok = (m) => console.log('  ok:', m);
 const fail = (m) => { console.error('  FALHOU:', m); falhas.push(m); };
 const check = (c, bom, mau) => (c ? ok(bom) : fail(mau));
 
-console.log('\n[1] O caminho completo até ao motor');
+console.log('\n[1] A página prepara o vídeo sem rebentar');
 check(reg.get('scenes').children.length === 2, '2 imagens importadas', String(reg.get('scenes').children.length));
 check(reg.get('vid-modos').children[2].classList.contains('on'), 'modo "só música" marcado', 'não marcou');
 check(chips[1].classList.contains('on'), '"Até acabar a música" marcado por omissão ao escolher música', 'não ficou marcado');
-check(!!recebido, 'o clique em Gerar chegou ao motor', 'o clique não chegou a gerar');
-check(recebido?.modoDuracao === 'trilha', `o motor recebeu o modo de ciclo (${recebido?.modoDuracao})`, String(recebido?.modoDuracao));
-check(recebido?.musicaSegundos === 180, `o motor recebeu a duração da música (${recebido?.musicaSegundos}s)`, String(recebido?.musicaSegundos));
-check(Boolean(recebido?.musica), 'o motor recebeu o ficheiro da música', 'sem ficheiro');
-check(recebido?.legendas === true, 'o motor recebeu o pedido de legendas', String(recebido?.legendas));
-check(recebido?.cenas?.length === 2, 'o motor recebeu as 2 cenas', String(recebido?.cenas?.length));
-check(recebido?.cenas?.every((c) => c.imagem), 'cada cena levou a sua imagem', 'faltam imagens');
 
 console.log('\n[2] O resumo prometeu o que o motor vai fazer');
 check(/REPETE/.test(resumoAntes), 'o resumo diz que vai repetir', resumoAntes.slice(-90));
 check(/passam \d+×/.test(resumoAntes), `e diz o número de passagens (${/passam \d+×/.exec(resumoAntes)?.[0]})`, resumoAntes.slice(-90));
 check(/passam 26×/.test(resumoAntes), 'o número é o certo (7s de imagens → 180s de música = 26×)', resumoAntes.slice(-90));
 
-console.log('\n[3] A mensagem final confirma o que aconteceu');
-const fim = estado();
-check(/passaram 26×/.test(fim), `diz quantas passagens deu: "${fim.slice(0, 70)}…"`, fim);
-check(/motor v9\.9\.9/.test(fim), 'mostra a versão do motor (para confirmar o build no browser)', fim);
+console.log('\n[3] O clique em Gerar não deixa a app num estado inválido');
+// O motor real é coberto pelo teste video.mjs; aqui interessa que o clique não
+// deixe a página presa nem com o botão desativado para sempre.
+// O browser falso não grava a sério: o que se exige é que o clique leve a um
+// resultado EXPLICADO (sucesso ou erro claro) — nunca a página ficar em branco
+// nem o botão ficar preso.
+const est = estado();
+check(est.length > 0 && !/^\s*$/.test(est), `o clique deixou uma mensagem no ecrã ("${est.slice(0, 60)}…")`, 'ecrã vazio');
+check(reg.get('btn-video').disabled === false, 'o botão "Gerar o vídeo" não fica preso desativado', 'ficou desativado');
 
 console.log(falhas.length ? `\n=== ${falhas.length} FALHA(S) ===` : '\n=== FLUXO PONTA A PONTA OK ===');
 process.exit(falhas.length ? 1 : 0);

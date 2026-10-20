@@ -5,8 +5,11 @@
 //  vai para a cama") e devolve um PROMPT de imagem (em inglês, para
 //  geradores de imagem) e os PROMPTS de música (estilo + letra) para
 //  geradores como o Suno. Conteúdo sempre infantil e seguro.
+//
+//  Usa a DeepSeek com o segredo DEEPSEEK_API_KEY da app — esta app NÃO usa os
+//  créditos de integrações da Base44.
 // ============================================================
-import { createClientFromRequest } from 'npm:@base44/sdk@0.8.52';
+import { pedirJSON } from '../../shared/deepseek.ts';
 
 const json = (corpo, status = 200) =>
   new Response(JSON.stringify(corpo), {
@@ -34,31 +37,28 @@ export default async function (req) {
       return json({ ok: false, error: 'Informe o tema.' }, 400);
     }
 
-    const base44 = createClientFromRequest(req);
-    const resposta = await base44.asServiceRole.integrations.Core.InvokeLLM({
-      prompt: [
+    const chamada = await pedirJSON({
+      temperatura: 0.8,
+      texto: [
         'Você cria PROMPTS prontos para produzir vídeos infantis no YouTube (conteúdo sempre seguro e apropriado para crianças).',
         `Tema: "${tema || titulo}".`,
         titulo ? `Título pronto da ideia: "${titulo}".` : '',
         faixa ? `Faixa etária: ${faixa}.` : '',
         '',
         'Devolva exatamente três campos:',
-        '- promptImagem: UM prompt detalhado, em INGLÊS, para geradores de imagem (Midjourney, DALL·E e afins). Descreve a CENA PRINCIPAL da capa/primeira cena do vídeo: personagens, ação, cenário, iluminação, estilo (animação 2D ou 3D fofa, cores alegres, estilo infantil), terminando com a proporção 16:9. Texto corrido, uma frase rica, sem listas, sem marcas. Conteúdo 100% apropriado para crianças.',
+        '- promptImagem: UM prompt detalhado, em INGLÊS, para geradores de imagem (Midjourney, DALL·E e afins). Descreve a CENA PRINCIPAL da capa/primeira cena do vídeo: personagens, ação, cenário, iluminação, estilo (animação 2D ou 3D fofa, cores alegres, estilo infantil), e o ENQUADRAMENTO (o personagem inteiro dentro do quadro 16:9, centrado, com folga acima da cabeça e os pés visíveis), terminando com a proporção 16:9. Texto corrido, uma frase rica, sem listas, sem marcas. Conteúdo 100% apropriado para crianças.',
         "- musicaEstilo: em INGLÊS, uma linha descrevendo o ESTILO da música para geradores como o Suno: gênero (ex.: gentle children's lullaby), instrumentos, andamento, clima e voz. Sem marcações de seção.",
         "- musicaLetra: LETRA completa em português do Brasil, cantável, apropriada à faixa etária, coerente com o tema. SOMENTE a letra pura: NUNCA use marcações de seção nem de estrutura ([Verso 1], [Refrão], [Ponte], [Chorus], (Refrão)…), nem títulos, nem negrito (**assim**), nem comentários. Apenas os versos, um por linha. No mínimo dois versos e um refrão; versos curtos (4 a 8 palavras), vocabulário simples.",
+        '',
+        'Formato exato da resposta (JSON): {"promptImagem":"...","musicaEstilo":"...","musicaLetra":"..."}',
       ]
         .filter(Boolean)
         .join('\n'),
-      response_json_schema: {
-        type: 'object',
-        properties: {
-          promptImagem: { type: 'string' },
-          musicaEstilo: { type: 'string' },
-          musicaLetra: { type: 'string' },
-        },
-        required: ['promptImagem', 'musicaEstilo', 'musicaLetra'],
-      },
     });
+    if (!chamada.ok) {
+      return json({ ok: false, error: chamada.erro }, chamada.status && chamada.status >= 400 ? chamada.status : 502);
+    }
+    const resposta = chamada.dados;
 
     // Só letra pura: sem marcações de seção ([Verso 1], [Refrão]…), sem negrito
     // e sem linhas vazias dobradas. A defesa fica aqui porque nem toda a IA

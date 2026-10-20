@@ -9,8 +9,8 @@
 //  vêm da API oficial do YouTube (dados reais); sem chave, a IA pesquisa
 //  na internet (Gemini com busca).
 // ============================================================
-import { createClientFromRequest } from 'npm:@base44/sdk@0.8.52';
 import { secrets } from 'base44:runtime';
+import { pedirJSON } from '../../shared/deepseek.ts';
 
 const json = (corpo, status = 200) =>
   new Response(JSON.stringify(corpo), {
@@ -127,8 +127,6 @@ export default async function (req) {
       return json({ ok: false, error: 'Esse link não parece ser de um vídeo do YouTube.' }, 400);
     }
 
-    const base44 = createClientFromRequest(req);
-
     const comLink = Boolean(videoId);
 
     // DADOS REAIS: com a chave da YouTube Data API, buscamos o vídeo de
@@ -186,64 +184,26 @@ export default async function (req) {
       .join('\n');
 
     const inicio = Date.now();
-    const resposta = await base44.asServiceRole.integrations.Core.InvokeLLM({
-      prompt,
-      // A busca na internet só vale a pena (e só é suportada) quando há link
-      // e a API do YouTube não deu os dados reais — com dados reais, chamada
-      // simples (modelo automático, sem custo extra de créditos).
-      ...(comLink && !fonteReal ? { model: 'gemini_3_8_flash', add_context_from_internet: true } : {}),
-      response_json_schema: {
-        type: 'object',
-        properties: {
-          tema: { type: 'string' },
-          videoInfo: {
-            type: 'object',
-            properties: {
-              titulo: { type: 'string' },
-              canal: { type: 'string' },
-              observacao: { type: 'string' },
-            },
-          },
-          videosSimilares: {
-            type: 'array',
-            items: {
-              type: 'object',
-              properties: {
-                titulo: { type: 'string' },
-                canal: { type: 'string' },
-                url: { type: 'string' },
-                faixa: { type: 'string' },
-              },
-              required: ['titulo', 'url'],
-            },
-          },
-          // Classificação etária dos vídeos reais (casada pelo título).
-          faixas: {
-            type: 'array',
-            items: {
-              type: 'object',
-              properties: { titulo: { type: 'string' }, faixa: { type: 'string' } },
-              required: ['titulo', 'faixa'],
-            },
-          },
-          sugestoes: {
-            type: 'array',
-            items: {
-              type: 'object',
-              properties: {
-                tema: { type: 'string' },
-                tituloIdeia: { type: 'string' },
-                justificativa: { type: 'string' },
-                potencial: { type: 'integer' },
-                faixa: { type: 'string' },
-              },
-              required: ['tema', 'tituloIdeia', 'justificativa', 'potencial', 'faixa'],
-            },
-          },
-        },
-        required: ['tema', 'sugestoes'],
-      },
+    // DeepSeek com a chave da app: SEM créditos de integrações da Base44.
+    // (O modelo da DeepSeek não navega na internet; quando o utilizador dá um
+    // link sem dados reais da API do YouTube, a análise é feita a partir do que
+    // o modelo sabe — o pedido diz isso e proíbe inventar números.)
+    const chamada = await pedirJSON({
+      temperatura: 0.7,
+      texto: [
+        ...prompt,
+        '',
+        'Formato exato da resposta (JSON):',
+        '{"tema":"...","videoInfo":{"titulo":"...","canal":"...","observacao":"..."},' +
+          '"videosSimilares":[{"titulo":"...","canal":"...","url":"...","faixa":"..."}],' +
+          '"faixas":[{"titulo":"...","faixa":"..."}],' +
+          '"sugestoes":[{"tema":"...","tituloIdeia":"...","justificativa":"...","potencial":8,"faixa":"4 a 8 anos"}]}',
+      ].join('\n'),
     });
+    if (!chamada.ok) {
+      return json({ ok: false, error: chamada.erro }, chamada.status && chamada.status >= 400 ? chamada.status : 502);
+    }
+    const resposta = chamada.dados;
 
     const limpas = (Array.isArray(resposta?.sugestoes) ? resposta.sugestoes : [])
       .slice(0, MAX_SUGESTOES)

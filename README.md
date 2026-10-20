@@ -106,6 +106,13 @@ Confirme que ficou guardado:
 base44 secrets list
 ```
 
+> **Regra desta app: nenhum crédito de integrações da Base44.** Toda a IA
+> (narração, prompts, temas e a análise do Diretor) chama a DeepSeek
+> diretamente com este segredo — em `base44/shared/deepseek.ts`. Nenhuma função
+> usa `integrations.Core.InvokeLLM`, por isso a fatura das integrações fica a
+> zero; só conta o saldo da sua conta DeepSeek. Há um teste que falha se alguém
+> voltar a meter um `InvokeLLM` no código (`npm test` → `testes/deepseek.mjs`).
+
 ### 4. Pôr o id no ficheiro de ambiente
 
 Crie um ficheiro **`.env.local`** na raiz do projeto com:

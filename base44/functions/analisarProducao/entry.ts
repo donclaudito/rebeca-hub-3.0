@@ -3,10 +3,15 @@
 //
 //  Recebe as imagens da montagem (a miniatura do vídeo pronto + as cenas, por
 //  ordem) e os dados da gravação, e pede a um modelo com VISÃO uma análise
-//  estruturada nos 4 pontos: composição/ritmo, sincronia com o áudio,
-//  melhorias de pós-produção e um prompt refinado (em inglês) para regerar.
+//  estruturada: enquadramento/integridade do personagem, composição/ritmo,
+//  sincronia com o áudio, melhorias de pós-produção, um prompt refinado (em
+//  inglês) e o que a própria app pode aplicar.
+//
+//  O modelo é o da DeepSeek, com o segredo DEEPSEEK_API_KEY da app — esta app
+//  NÃO usa os créditos de integrações da Base44.
 // ============================================================
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.52';
+import { pedirJSON } from '../../shared/deepseek.ts';
 
 const json = (corpo, status = 200) =>
   new Response(JSON.stringify(corpo), {
@@ -111,8 +116,11 @@ export default async function (req) {
       for (const e of exigenciasEnq) linhas.push(`  · ${e}`);
     }
 
-    const resposta = await base44.asServiceRole.integrations.Core.InvokeLLM({
-      prompt: [
+    const chamada = await pedirJSON({
+      modelo: '',
+      temperatura: 0.4,
+      imagens: urls.map((u) => u.url),
+      texto: [
         'Você é um Diretor de Fotografia e Editor de Vídeo Profissional analisando um vídeo infantil montado no browser a partir de imagens fixas, com transições, narração opcional e trilha sonora opcional.',
         'As imagens em anexo, por ordem: a PRIMEIRA é um fotograma do vídeo pronto (miniatura, captada no início da gravação); as seguintes são as cenas, na ordem em que aparecem no vídeo.',
         'Analise o conjunto e devolva EXATAMENTE estes cinco campos:',
@@ -138,42 +146,16 @@ export default async function (req) {
         '- foraDaApp: array de 0 a 6 frases curtas com o que pede edição externa e não tem controlo na app (o que for de enquadramento vai aqui).',
         'NÃO coloque aqui nada sobre as imagens nem sobre o prompt refinado.',
         '',
+        'Formato exato da resposta (JSON): {"enquadramento":"...","composicao":"...","sincronia":"...","melhorias":[{"titulo":"...","detalhe":"..."}],"promptRefinado":"...","aplicar":{"transicao":"fade","duracaoTransicao":0.6,"legendas":true,"foraDaApp":[]}}',
+        '',
         'Dados da montagem:',
         ...linhas,
       ].join('\n'),
-      file_urls: urls.map((u) => u.url),
-      response_json_schema: {
-        type: 'object',
-        properties: {
-          enquadramento: { type: 'string' },
-          composicao: { type: 'string' },
-          sincronia: { type: 'string' },
-          melhorias: {
-            type: 'array',
-            items: {
-              type: 'object',
-              properties: { titulo: { type: 'string' }, detalhe: { type: 'string' } },
-              required: ['titulo', 'detalhe'],
-            },
-          },
-          promptRefinado: { type: 'string' },
-          aplicar: {
-            type: 'object',
-            properties: {
-              transicao: { type: 'string' },
-              duracaoTransicao: { type: 'number' },
-              duracaoCena: { type: 'number' },
-              legendas: { type: 'boolean' },
-              modoDuracao: { type: 'string' },
-              orientacao: { type: 'string' },
-              codec: { type: 'string' },
-              foraDaApp: { type: 'array', items: { type: 'string' } },
-            },
-          },
-        },
-        required: ['enquadramento', 'composicao', 'sincronia', 'melhorias', 'promptRefinado'],
-      },
     });
+    if (!chamada.ok) {
+      return json({ ok: false, error: chamada.erro }, chamada.status && chamada.status >= 400 ? chamada.status : 502);
+    }
+    const resposta = chamada.dados;
 
     const melhorias = Array.isArray(resposta?.melhorias)
       ? resposta.melhorias

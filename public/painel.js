@@ -346,13 +346,22 @@ function cartao(p) {
   reedit.textContent = '✏️';
   reedit.title = 'Reeditar projeto';
   reedit.onclick = () => reeditar(p);
+  // O nome do cartão é o nome do VÍDEO, copiado quando o vídeo foi guardado.
+  // Mudar o nome do projeto no estúdio não muda este cartão — por isso há aqui
+  // um botão só para isso.
+  const nomear = document.createElement('button');
+  nomear.type = 'button';
+  nomear.className = 'ghost small';
+  nomear.textContent = '🏷️';
+  nomear.title = 'mudar o nome deste vídeo no Painel';
+  nomear.onclick = () => renomearVideo(p);
   const yt = document.createElement('button');
   yt.type = 'button';
   yt.className = 'ghost small';
   yt.textContent = '📤';
   yt.title = 'Preparar envio ao YouTube';
   yt.onclick = () => prepararYouTube(p);
-  acoes.append(ver, yt, reedit, descarregar, apagar);
+  acoes.append(ver, nomear, yt, reedit, descarregar, apagar);
 
   corpo.append(nome, meta, et, acoes);
   c.append(miniatura(p), corpo);
@@ -436,6 +445,8 @@ async function abrirDetalhes(p) {
 
   const btn = $('btn-det-descarregar');
   if (btn) btn.onclick = () => descarregarVideo(p);
+  const renomear = $('btn-det-renomear');
+  if (renomear) renomear.onclick = () => renomearVideo(p);
   const re = $('btn-det-reeditar');
   if (re) re.onclick = () => reeditar(p);
   const yt = $('btn-det-ir-youtube');
@@ -558,6 +569,38 @@ function fecharJanelas() {
         /* já fechada */
       }
     }
+  }
+}
+
+// ---------------------------------------------------------------- renomear
+// Muda o nome com que o VÍDEO aparece no Painel (o nome do registo, não o do
+// projeto). É uma alteração pequena: não toca no ficheiro nem no projeto.
+async function renomearVideo(p) {
+  const atual = String(p.nome || '').trim();
+  const resposta = window.prompt('Novo nome para este vídeo:', atual);
+  if (resposta === null) return; // cancelou
+  const nome = String(resposta).trim();
+  if (!nome) return toast('O nome não pode ficar vazio.', 'err');
+  if (nome === atual) return;
+  try {
+    const b = await cliente();
+    await b.entities.VideoProducao.update(p.id, { nome });
+    p.nome = nome;
+    desenharLista();
+    // Se a janela de detalhes estiver aberta, o título acompanha.
+    const dlg = $('dlg-detalhes');
+    if (dlg && dlg.open) {
+      const t = $('det-titulo');
+      if (t) t.textContent = nome;
+    }
+    toast(`Nome mudado para "${nome}".`, 'ok');
+  } catch (e) {
+    if (naoExisteNoServidor(e)) {
+      ocultarDoPainel(p.id);
+      toast('Este vídeo já não existe no servidor. Retirei-o do Painel.', '');
+      return;
+    }
+    toast(`Não consegui mudar o nome: ${(e && e.message) || e}`, 'err');
   }
 }
 

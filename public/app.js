@@ -1970,6 +1970,16 @@ async function gerarVideoFinal() {
 async function guardarNaNuvem() {
   if (!resultadoVideo.blob) return;
   const btn = $('btn-video-nuvem');
+  // O nome do cartão no Painel é o nome do projeto. Guardar sem nome é o que
+  // fazia aparecer cartões "Projeto sem nome" que depois não se sabia de quem
+  // eram — pede-se o nome primeiro, antes de subir o vídeo.
+  const nomeDoProjeto = ($('projeto-nome')?.value || '').trim();
+  if (!nomeDoProjeto) {
+    toast('Dê um nome ao projeto antes de guardar o vídeo (é o nome que aparece no Painel).', 'err');
+    const campo = $('projeto-nome');
+    if (campo && typeof campo.focus === 'function') campo.focus();
+    return;
+  }
   btn.disabled = true;
   btn.textContent = 'a guardar…';
   try {

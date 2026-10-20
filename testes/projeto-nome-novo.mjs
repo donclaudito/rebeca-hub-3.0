@@ -231,7 +231,30 @@ console.log('\n[5] O projeto de cada vídeo é o projeto certo');
   check(/Guardar projeto/.test(rotulo()), 'e o botão sabe que está a editar esse projeto', rotulo());
 }
 
-console.log('\n[6] Sem erros de JavaScript');
+console.log('\n[6] Guardar sem nome é recusado (não nascem cartões "Projeto sem nome")');
+{
+  const antes = listaLocal().length;
+  nomear('');
+  reg.get('btn-projeto-guardar').click();
+  await new Promise((r) => setTimeout(r, 600));
+  check(listaLocal().length === antes, `não guardou nada (${listaLocal().length})`, `guardou ${listaLocal().length - antes}`);
+  check(/Dê um nome ao projeto/i.test(reg.get('toast').textContent), `explica o que falta ("${reg.get('toast').textContent.slice(0, 50)}")`, reg.get('toast').textContent);
+}
+
+console.log('\n[7] O botão 🔁 Atualizar RENOMEIA o projeto aberto (sem criar outro)');
+{
+  nomear('As Flores do Jardim');
+  const antes = listaLocal();
+  reg.get('btn-projeto-atualizar').click();
+  await new Promise((r) => setTimeout(r, 900));
+  const itens = listaLocal();
+  check(itens.length === antes.length, `continua com ${antes.length} projeto(s) (${itens.length})`, `${itens.length} — criou um projeto a mais`);
+  const flores = itens.find((x) => x.id === antes[0].id);
+  check(flores && flores.nome === 'As Flores do Jardim', `o projeto certo mudou de nome ("${flores && flores.nome}")`, String(flores && flores.nome));
+  check(/renomeado|agora chama-se/i.test(reg.get('toast').textContent) || /renomeado/i.test(reg.get('projeto-estado').textContent), 'avisa que foi renomeado', reg.get('toast').textContent);
+}
+
+console.log('\n[8] Sem erros de JavaScript');
 if (erros.length) erros.slice(0, 4).forEach((e) => fail('erro: ' + e));
 else ok('nenhum erro não tratado');
 

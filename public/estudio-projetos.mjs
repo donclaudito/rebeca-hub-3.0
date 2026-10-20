@@ -181,12 +181,23 @@ function binarioDeBase64(b64) {
   return bytes;
 }
 
-export async function guardarProjetoAgora() {
+// `renomear: true` (botão 🔁 Atualizar) = escrever por cima do projeto aberto,
+// MESMO que o nome tenha mudado — é assim que se muda o nome de um projeto sem
+// criar outro.
+export async function guardarProjetoAgora(opcoes = {}) {
+  const renomear = Boolean(opcoes && opcoes.renomear === true);
   if (!state.images.length) return toast('Importe as imagens primeiro.', 'err');
   const btn = $('btn-projeto-guardar');
   const nome = nomeDoCampo();
   const nomeAnterior = String(projetos.nomeAtual || '').trim();
-  const comoNovo = vaiSerProjetoNovo();
+  const comoNovo = renomear ? false : vaiSerProjetoNovo();
+  if (!nome) {
+    // Guardar sem nome é o que dava cartões "Projeto sem nome" no Painel.
+    toast('Dê um nome ao projeto antes de guardar.', 'err');
+    const campo = $('projeto-nome');
+    if (campo && typeof campo.focus === 'function') campo.focus();
+    return;
+  }
   btn.disabled = true;
   estadoProjeto(state.images.length > 20 ? 'a guardar… (são muitas imagens, isto demora um pouco)' : 'a guardar…');
   try {
@@ -212,14 +223,18 @@ export async function guardarProjetoAgora() {
     estadoProjeto(
       (comoNovo
         ? `Projeto NOVO "${dados.nome}" guardado${nomeAnterior ? ` — o "${nomeAnterior}" ficou como estava` : ''} · `
-        : `Projeto "${dados.nome}" guardado${projetos.nuvemId ? ' (aqui e na nuvem)' : ''} · `) +
+        : renomear && nomeAnterior && nomeAnterior !== dados.nome
+          ? `Projeto renomeado para "${dados.nome}" · `
+          : `Projeto "${dados.nome}" guardado${projetos.nuvemId ? ' (aqui e na nuvem)' : ''} · `) +
         `${dados.cenas.length} imagem(ns) · ${mod.tamanhoLegivel(mod.tamanhoDe(dados))}`,
       'ok',
     );
     toast(
       comoNovo
         ? `Projeto novo "${dados.nome}" guardado. O anterior ficou intacto.`
-        : `Projeto "${dados.nome}" guardado${projetos.nuvemId ? ', inclusive na nuvem' : ''}.`,
+        : renomear && nomeAnterior && nomeAnterior !== dados.nome
+          ? `Projeto agora chama-se "${dados.nome}".`
+          : `Projeto "${dados.nome}" guardado${projetos.nuvemId ? ', inclusive na nuvem' : ''}.`,
       'ok',
     );
     atualizarRotuloGuardar();
@@ -489,8 +504,12 @@ export async function apagarProjeto(id, nome) {
 
 export function iniciarProjetos() {
   const ver = $('projetos-lista');
-  $('btn-projeto-guardar').onclick = guardarProjetoAgora;
-  $('btn-projeto-atualizar').onclick = guardarProjetoAgora;
+  $('btn-projeto-guardar').onclick = () => guardarProjetoAgora();
+  // 🔁 Atualizar = escrever por cima do projeto aberto, mesmo com nome novo
+  // (é a forma de RENOMEAR sem criar um projeto a mais).
+  $('btn-projeto-atualizar').onclick = () => guardarProjetoAgora({ renomear: true });
+  const btnAtualizarTopo = $('btn-projeto-atualizar');
+  if (btnAtualizarTopo) btnAtualizarTopo.title = 'guarda por cima do projeto aberto (e muda-lhe o nome, se escreveu outro)';
   const btnNuvem = $('btn-projeto-nuvem');
   if (btnNuvem) btnNuvem.onclick = guardarNuvemAgora;
   $('btn-projetos-ver').onclick = async () => {

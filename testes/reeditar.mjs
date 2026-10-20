@@ -229,7 +229,8 @@ console.log('\n[3] O atalho ✏️ do próprio cartão também abre o projeto');
   await new Promise((r) => setTimeout(r, 500));
   const cartao = reg.get('grade').children[0];
   const acoes = cartao.children[1].children[3];
-  const reedit = acoes.children[2]; // ✏️
+  // Pelo título: a ordem dos botões do cartão pode mudar (há um 🏷️ para o nome).
+  const reedit = acoes.children.find((b) => String(b.title || '').includes('Reeditar'));
   check(String(reedit.textContent).includes('✏️'), `o botão ✏️ do cartão existe ("${reedit.textContent}")`, String(reedit.textContent));
   reedit.click();
   await new Promise((r) => setTimeout(r, 900));

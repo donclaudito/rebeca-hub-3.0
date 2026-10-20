@@ -174,6 +174,10 @@ console.log('\n[3] Recarregar a página também aproveita os URLs guardados');
   check(contagem.assinar === antes, `o botão "recarregar" não assina de novo (${contagem.assinar} no total)`, `fez ${contagem.assinar - antes} pedidos novos`);
 }
 
+// Os botões do cartão, pelos títulos (a ordem pode mudar).
+const botaoDoCartao = (cartao, titulo) =>
+  cartao.children[1].children[3].children.find((b) => String(b.title || '').toLowerCase().includes(titulo));
+
 console.log('\n[4] Apagar um vídeo que o servidor já não tem (404) tira-o do Painel');
 {
   // Era o erro da consola: DELETE em VideoProducao/<id> → 404. O cartão voltava
@@ -188,9 +192,8 @@ console.log('\n[4] Apagar um vídeo que o servidor já não tem (404) tira-o do 
   };
 
   const cartao = reg.get('grade').children[0];
-  const acoes = cartao.children[1].children[3];
-  const apagar = acoes.children[4]; // ▶️ Ver, 📤, ✏️, ⬇️, 🗑
-  check(String(apagar.textContent).includes('🗑'), `há um botão 🗑 no cartão ("${apagar.textContent}")`, String(apagar.textContent));
+  const apagar = botaoDoCartao(cartao, 'apagar do painel');
+  check(Boolean(apagar), `há um botão 🗑 no cartão ("${apagar && apagar.textContent}")`, 'sem botão de apagar');
   apagar.click();
   await new Promise((r) => setTimeout(r, 400));
 
@@ -207,7 +210,38 @@ console.log('\n[4] Apagar um vídeo que o servidor já não tem (404) tira-o do 
   check(ocultos.includes('v1'), 'o id fica guardado como oculto (não volta em nenhuma sessão)', JSON.stringify(ocultos));
 }
 
-console.log('\n[5] Sem erros de JavaScript');
+console.log('\n[5] 🏷️ Muda o nome do cartão no Painel (o "Projeto sem nome")');
+{
+  // O nome do cartão é o do VÍDEO, copiado quando o vídeo foi guardado. Mudar o
+  // nome do projeto no estúdio não mudava este cartão — daqui muda-se.
+  const renomeados = [];
+  globalThis.__base44Falso.entities.VideoProducao.update = async (id, dados) => {
+    renomeados.push({ id, nome: dados && dados.nome });
+    const v = videos.find((x) => x.id === id);
+    if (v && dados) v.nome = dados.nome;
+    return { ...(v || {}), ...dados };
+  };
+  globalThis.window.prompt = () => 'A Borboleta no jardim';
+
+  const cartao = reg.get('grade').children[0];
+  const nomear = botaoDoCartao(cartao, 'mudar o nome');
+  check(Boolean(nomear), `há um botão 🏷️ no cartão ("${nomear && nomear.textContent}")`, 'sem botão de nome');
+  nomear.click();
+  await new Promise((r) => setTimeout(r, 400));
+
+  check(renomeados.length === 1, `pediu a mudança de nome ao servidor (${renomeados.length} pedido)`, `${renomeados.length} pedidos`);
+  check(renomeados[0] && renomeados[0].nome === 'A Borboleta no jardim', `com o nome novo ("${renomeados[0] && renomeados[0].nome}")`, String(renomeados[0] && renomeados[0].nome));
+  const titulo = reg.get('grade').children[0].children[1].children[0].textContent;
+  check(titulo === 'A Borboleta no jardim', `o cartão passa a mostrar o nome novo ("${titulo}")`, `continua "${titulo}"`);
+
+  // Cancelar não muda nada.
+  globalThis.window.prompt = () => null;
+  botaoDoCartao(reg.get('grade').children[0], 'mudar o nome').click();
+  await new Promise((r) => setTimeout(r, 200));
+  check(renomeados.length === 1, 'cancelar a janela não faz pedido nenhum', `${renomeados.length} pedidos`);
+}
+
+console.log('\n[6] Sem erros de JavaScript');
 if (erros.length) erros.slice(0, 4).forEach((e) => fail('erro: ' + e));
 else ok('nenhum erro não tratado');
 

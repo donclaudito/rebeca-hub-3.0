@@ -428,6 +428,14 @@ async function apagarVideo(p) {
     toast('Vídeo apagado do painel.', '');
     carregar();
   } catch (e) {
+    // 404 = o vídeo já tinha sido apagado (por exemplo, noutra janela ou
+    // noutro computador): a lista fica desatualizada e o cartão aponta para um
+    // vídeo que já não existe. Tratar como feito e refrescar, em vez de erro.
+    if (/404|not found|não existe/i.test(`${e.status || ''} ${e.message}`)) {
+      toast('Este vídeo já tinha sido apagado. A lista foi atualizada.', '');
+      carregar();
+      return;
+    }
     toast(`Não consegui apagar: ${e.message}`, 'err');
   }
 }

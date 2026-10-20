@@ -583,23 +583,59 @@ async function descarregarVideo(p) {
   }
 }
 
+// Vídeos que o SERVIDOR já não tem (ou não deixa apagar): ficam guardados aqui
+// para não voltarem a aparecer no Painel. Sem isto, o cartão voltava na lista a
+// cada atualização e o utilizador clicava em 🗑 outra vez — um 404 atrás do
+// outro, sem fim.
+const CACHE_OCULTOS = 'rh3ocultos';
+
+function lerOcultos() {
+  try {
+    const cru = localStorage.getItem(CACHE_OCULTOS);
+    const arr = cru ? JSON.parse(cru) : [];
+    return new Set(Array.isArray(arr) ? arr : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function ocultarDoPainel(id) {
+  if (!id) return;
+  const ocultos = lerOcultos();
+  ocultos.add(String(id));
+  try {
+    localStorage.setItem(CACHE_OCULTOS, JSON.stringify([...ocultos]));
+  } catch {
+    /* modo privado: fica só nesta sessão */
+  }
+  lista = lista.filter((x) => x.id !== id);
+  desenharLista();
+}
+
+// O servidor respondeu "não existe"? (404, ou uma mensagem que o diga.)
+function naoExisteNoServidor(e) {
+  const texto = `${(e && e.status) || ''} ${(e && e.message) || e}`;
+  return /404|not found|não existe|nao existe/i.test(texto);
+}
+
 async function apagarVideo(p) {
   if (!window.confirm(`Apagar "${p.nome}" do painel? O vídeo deixa de estar disponível aqui.`)) return;
   try {
     const b = await cliente();
     await b.entities.VideoProducao.delete(p.id);
+    ocultarDoPainel(p.id);
     toast('Vídeo apagado do painel.', '');
     carregar();
   } catch (e) {
-    // 404 = o vídeo já tinha sido apagado (por exemplo, noutra janela ou
-    // noutro computador): a lista fica desatualizada e o cartão aponta para um
-    // vídeo que já não existe. Tratar como feito e refrescar, em vez de erro.
-    if (/404|not found|não existe/i.test(`${e.status || ''} ${e.message}`)) {
-      toast('Este vídeo já tinha sido apagado. A lista foi atualizada.', '');
-      carregar();
+    // 404 = o vídeo já tinha sido apagado (noutra janela, noutro computador, ou
+    // o registo pertence a outra conta). Antes mostrava-se "não consegui apagar"
+    // e o cartão continuava lá: cada tentativa era outro 404.
+    if (naoExisteNoServidor(e)) {
+      ocultarDoPainel(p.id);
+      toast('Este vídeo já não existe no servidor. Retirei-o do Painel.', '');
       return;
     }
-    toast(`Não consegui apagar: ${e.message}`, 'err');
+    toast(`Não consegui apagar: ${(e && e.message) || e}`, 'err');
   }
 }
 
@@ -614,7 +650,10 @@ async function carregar({ jaAssinadas = true } = {}) {
   try {
     const b = await cliente();
     const page = await b.entities.VideoProducao.filter({}, { sort: '-created_date', limit: 50 });
-    const itens = page.items || [];
+    const ocultos = lerOcultos();
+    // Vídeos que o servidor já não tem (ou não deixa apagar) não voltam a
+    // aparecer: sem isto, o cartão reaparecia a cada atualização.
+    const itens = (page.items || []).filter((p) => !ocultos.has(String(p.id)));
     const anteriores = new Map(lista.map((p) => [p.id, p.thumbUrl]));
     for (const p of itens) {
       // Reaproveita o URL que já se tinha; senão fica vazio e a miniatura pede-o

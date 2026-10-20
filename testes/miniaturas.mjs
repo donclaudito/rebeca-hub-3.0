@@ -174,7 +174,40 @@ console.log('\n[3] Recarregar a página também aproveita os URLs guardados');
   check(contagem.assinar === antes, `o botão "recarregar" não assina de novo (${contagem.assinar} no total)`, `fez ${contagem.assinar - antes} pedidos novos`);
 }
 
-console.log('\n[4] Sem erros de JavaScript');
+console.log('\n[4] Apagar um vídeo que o servidor já não tem (404) tira-o do Painel');
+{
+  // Era o erro da consola: DELETE em VideoProducao/<id> → 404. O cartão voltava
+  // na atualização seguinte e cada tentativa era outro 404.
+  globalThis.__base44Falso.entities.VideoProducao.delete = async (id) => {
+    if (id === 'v1') {
+      const e = new Error('Request failed with status code 404');
+      e.status = 404;
+      throw e;
+    }
+    return {};
+  };
+
+  const cartao = reg.get('grade').children[0];
+  const acoes = cartao.children[1].children[3];
+  const apagar = acoes.children[4]; // ▶️ Ver, 📤, ✏️, ⬇️, 🗑
+  check(String(apagar.textContent).includes('🗑'), `há um botão 🗑 no cartão ("${apagar.textContent}")`, String(apagar.textContent));
+  apagar.click();
+  await new Promise((r) => setTimeout(r, 400));
+
+  const msg = reg.get('toast').textContent;
+  check(/já não existe no servidor|Retirei-o/i.test(msg), `explica o que aconteceu ("${msg.slice(0, 60)}")`, msg);
+  check(reg.get('grade').children.length === N - 1, `o cartão saiu da lista (${reg.get('grade').children.length} de ${N})`, `continuam ${reg.get('grade').children.length}`);
+
+  // E não volta a aparecer ao atualizar o Painel.
+  reg.get('btn-recarregar')?.click?.();
+  await new Promise((r) => setTimeout(r, 800));
+  check(reg.get('grade').children.length === N - 1, `depois de atualizar continua fora (${reg.get('grade').children.length})`, `voltou a aparecer (${reg.get('grade').children.length})`);
+
+  const ocultos = JSON.parse(globalThis.localStorage.getItem('rh3ocultos') || '[]');
+  check(ocultos.includes('v1'), 'o id fica guardado como oculto (não volta em nenhuma sessão)', JSON.stringify(ocultos));
+}
+
+console.log('\n[5] Sem erros de JavaScript');
 if (erros.length) erros.slice(0, 4).forEach((e) => fail('erro: ' + e));
 else ok('nenhum erro não tratado');
 

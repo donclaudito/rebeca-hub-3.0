@@ -20,9 +20,13 @@
         </div>
       </div>
       <div class="top-actions">
-        <button id="btn-ir-painel" class="ghost" type="button" title="os vídeos já prontos">📺 Painel</button>
-        <button id="btn-ir-estudio" class="ghost" type="button" hidden>🎙️ Estúdio</button>
-        <button id="btn-ir-pesquisa" class="ghost" type="button" title="sugestões de temas com IA">🔍 Temas</button>
+        <!-- Os três separadores estão SEMPRE visíveis; o painel.js marca o da
+             vista atual (.ativo) e nunca esconde nenhum. O Painel é a casa. -->
+        <nav class="vistas" aria-label="navegação entre vistas">
+          <button id="btn-ir-painel" class="ghost vista-aba" type="button" title="os vídeos já prontos">📺 Painel</button>
+          <button id="btn-ir-estudio" class="ghost vista-aba" type="button" title="importar as imagens e gerar o vídeo">🎙️ Estúdio</button>
+          <button id="btn-ir-pesquisa" class="ghost vista-aba" type="button" title="sugestões de temas com IA">🔍 Temas</button>
+        </nav>
         <span id="status" class="pill">a ligar…</span>
         <span id="versao" class="pill tiny-pill" title="versão do motor de vídeo que está a correr neste browser">v…</span>
 

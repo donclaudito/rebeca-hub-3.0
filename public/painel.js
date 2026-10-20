@@ -116,12 +116,38 @@ function quandoVisivel(el, fn) {
   }
 }
 // ---------------------------------------------------------------- vistas
+//
+//  LÓGICA DE NAVEGAÇÃO (uma só regra, para não haver surpresas):
+//
+//   · Há TRÊS vistas: painel (casa), estúdio e temas.
+//   · Os três separadores do topo estão SEMPRE visíveis; o da vista atual fica
+//     marcado (.ativo). Nunca desaparecem — um botão que se esconde é o que dava
+//     a sensação de "não sei onde estou".
+//   · "📺 Painel" abre SEMPRE o painel; "🎙️ Estúdio" abre SEMPRE o estúdio;
+//     "🔍 Temas" abre sempre os temas.
+//   · O endereço (hash) é o dono da vista: '' = painel, '#estudio', '#temas'.
+//     Ao abrir a app sem nada no endereço, cai no PAINEL. Um favorito ou o botão
+//     "voltar" do browser funcionam.
+//   · Quem quiser mudar de vista de fora dispara o evento "rh-ir-para"
+//     ({ detail: { vista } }) — é o que o app.js e o pesquisa.js usam.
+const VISTAS = ['painel', 'estudio', 'pesquisa'];
+
+const HASH_DA_VISTA = { painel: '', estudio: '#estudio', pesquisa: '#temas' };
+
 function hashAtual() {
   try {
     return String(window.location.hash || '');
   } catch {
     return '';
   }
+}
+
+// Que vista é que o endereço pede? Sem endereço, o painel (a casa).
+function vistaDoHash(hash = hashAtual()) {
+  const h = String(hash || '').toLowerCase();
+  if (/estudio|estúdio/.test(h)) return 'estudio';
+  if (/temas|pesquisa/.test(h)) return 'pesquisa';
+  return 'painel';
 }
 
 function avisarVista() {
@@ -132,8 +158,29 @@ function avisarVista() {
   }
 }
 
-// O PAINEL É A PÁGINA INICIAL: ao abrir o app sem destino, chega-se aqui.
-// "#estudio" abre o estúdio diretamente (link, favorito, "Abrir o estúdio").
+// Marca o separador da vista atual e desmarca os outros.
+function marcarSeparadores(vista) {
+  const botoes = {
+    painel: $('btn-ir-painel'),
+    estudio: $('btn-ir-estudio'),
+    pesquisa: $('btn-ir-pesquisa'),
+  };
+  for (const [nome, botao] of Object.entries(botoes)) {
+    if (!botao) continue;
+    // NUNCA esconder nem desativar: só marcar onde estamos. Um separador
+    // desativado parecia um botão avariado.
+    botao.hidden = false;
+    const ativo = nome === vista;
+    if (botao.classList) {
+      botao.classList.toggle('ativo', ativo);
+      botao.classList.toggle('primary', ativo);
+      botao.classList.toggle('ghost', !ativo);
+    }
+    botao.setAttribute('aria-current', ativo ? 'page' : 'false');
+  }
+}
+
+// O PAINEL É A PÁGINA INICIAL: abrir o app sem destino dá no painel.
 //
 // REGRA ÚNICA, para a navegação não piscar: cada vista manda em TUDO o que é da
 // vista. Antes, o estúdio ficava com `ws.hidden = noPainel || !ws.hidden` — uma
@@ -144,14 +191,14 @@ function avisarVista() {
 // "📺 Painel" parecer que ia para a página inicial, e só à segunda tentativa
 // funcionar.
 function mostrarVista(vista) {
-  const noPainel = vista !== 'estudio';
+  const alvo = VISTAS.includes(vista) ? vista : 'painel';
   try {
-    localStorage.setItem('rh3vista', noPainel ? 'painel' : 'estudio');
+    localStorage.setItem('rh3vista', alvo);
     // O hash acompanha a vista, para o botão "voltar" do browser e um favorito
     // darem no mesmo sítio. Sem `hashchange` a disparar recargas.
-    const alvo = noPainel ? '' : '#estudio';
+    const hash = HASH_DA_VISTA[alvo] || '';
     if (typeof history !== 'undefined' && history.replaceState) {
-      history.replaceState(null, '', `${location.pathname}${location.search}${alvo}`);
+      history.replaceState(null, '', `${location.pathname}${location.search}${hash}`);
     }
   } catch {
     /* modo privado ou sem histórico */
@@ -164,27 +211,26 @@ function mostrarVista(vista) {
     pesquisa: $('pesquisa-section'),
   };
 
-  // A pesquisa é uma vista à parte: qualquer outra vista a esconde.
-  if (vistas.pesquisa) vistas.pesquisa.hidden = true;
-
-  if (noPainel) {
-    // Painel: a zona de arrastar e o estúdio SAEM DE CENA, sempre.
-    if (vistas.drop) vistas.drop.hidden = true;
-    if (vistas.workspace) vistas.workspace.hidden = true;
-    if (vistas.painel) vistas.painel.hidden = false;
-  } else {
-    // Estúdio: a zona de arrastar só aparece sem imagens; quem decide é o
-    // updateLayout do app.js (avisado por "rh-vista" mais abaixo).
-    if (vistas.painel) vistas.painel.hidden = true;
-    if (vistas.drop) vistas.drop.hidden = false;
-    if (vistas.workspace) vistas.workspace.hidden = false;
+  // 1) Tudo escondido — depois só a vista pedida aparece. Assim nunca há duas
+  //    vistas à frente uma da outra.
+  for (const secao of Object.values(vistas)) {
+    if (secao) secao.hidden = true;
   }
 
-  const btnPainel = $('btn-ir-painel');
-  const btnEstudio = $('btn-ir-estudio');
-  if (btnPainel) btnPainel.hidden = noPainel;
-  if (btnEstudio) btnEstudio.hidden = !noPainel;
-  if (noPainel) carregar();
+  if (alvo === 'painel') {
+    if (vistas.painel) vistas.painel.hidden = false;
+  } else if (alvo === 'estudio') {
+    // No estúdio, a zona de arrastar e o estúdio aparecem; quem decide se a zona
+    // de arrastar fica compacta (já há imagens) é o updateLayout do app.js,
+    // avisado por "rh-vista" no fim desta função.
+    if (vistas.drop) vistas.drop.hidden = false;
+    if (vistas.workspace) vistas.workspace.hidden = false;
+  } else {
+    if (vistas.pesquisa) vistas.pesquisa.hidden = false;
+  }
+
+  marcarSeparadores(alvo);
+  if (alvo === 'painel') carregar();
   avisarVista();
 }
 
@@ -841,10 +887,18 @@ function iniciarLinks() {
 // ---------------------------------------------------------------- arranque
 // Botoeiros e estado inicial — corre já com o DOM analisado (script de módulo).
 if (typeof window !== 'undefined') {
-  const irPainel = $('btn-ir-painel');
-  if (irPainel) irPainel.onclick = () => mostrarVista('painel');
-  const irEstudio = $('btn-ir-estudio');
-  if (irEstudio) irEstudio.onclick = () => mostrarVista('estudio');
+  // OS TRÊS SEPARADORES são ligados AQUI (e só aqui): a navegação tem um dono.
+  // Antes o "🔍 Temas" era ligado no pesquisa.js, e por isso a vista não mudava
+  // se esse módulo não carregasse — e cada módulo mexia nos botões do topo à sua
+  // maneira.
+  for (const [id, vista] of [
+    ['btn-ir-painel', 'painel'],
+    ['btn-ir-estudio', 'estudio'],
+    ['btn-ir-pesquisa', 'pesquisa'],
+  ]) {
+    const botao = $(id);
+    if (botao) botao.onclick = () => mostrarVista(vista);
+  }
   const recarregar = $('btn-recarregar');
   if (recarregar) recarregar.onclick = () => carregar();
   const fechar = $('btn-det-fechar');
@@ -858,6 +912,14 @@ if (typeof window !== 'undefined') {
   }
   // O estúdio pede para abrir o painel (botão "📺 Ver no painel").
   window.addEventListener('rh-abrir-painel', () => mostrarVista('painel'));
+  // Qualquer módulo pede uma vista por aqui: document.dispatchEvent(new
+  // CustomEvent('rh-ir-para', { detail: { vista: 'estudio' } })).
+  document.addEventListener('rh-ir-para', (e) => {
+    const vista = e && e.detail ? e.detail.vista : '';
+    if (vista) mostrarVista(vista);
+  });
+  // A API simples para os outros scripts clássicos (app.js, pesquisa.js).
+  window.__rhIrPara = mostrarVista;
   const irPainelDoVideo = $('btn-video-painel');
   if (irPainelDoVideo) irPainelDoVideo.onclick = () => mostrarVista('painel');
   const irEstudioVazio = $('btn-ir-estudio-vazio');
@@ -887,12 +949,17 @@ if (typeof window !== 'undefined') {
 
   // VISTA INICIAL — a última palavra tem de ser desta função.
   //
+  // O endereço manda: sem hash, abre no PAINEL (a casa); "#estudio" e "#temas"
+  // abrem nessas vistas (link, favorito, "voltar"). Já não se retoma a última
+  // vista de outra sessão: abrir a app dá sempre no painel, para não haver
+  // surpresas.
+  //
   // O `app.js` arranca no DOMContentLoaded, que só corre DEPOIS de todos os
   // scripts de módulo (este incluído). Se a vista for aplicada agora, o arranque
   // do estúdio pode voltar a mostrar o ecrã inicial por cima do Painel. Por isso
   // aplica-se agora (para não haver piscar) E outra vez depois do arranque
   // completo, para ficar a certeza.
-  const vistaInicial = () => mostrarVista(/estudio/.test(hashAtual()) ? 'estudio' : 'painel');
+  const vistaInicial = () => mostrarVista(vistaDoHash());
   vistaInicial();
   const reaplicar = () => vistaInicial();
   if (document.readyState === 'complete') {
@@ -900,6 +967,17 @@ if (typeof window !== 'undefined') {
   } else {
     window.addEventListener('load', reaplicar, { once: true });
   }
+  // O "voltar" do browser (hashchange) também muda de vista — sem recarregar.
+  window.addEventListener('hashchange', () => {
+    const vista = vistaDoHash();
+    let atual = 'painel';
+    try {
+      atual = localStorage.getItem('rh3vista') || 'painel';
+    } catch {
+      /* modo privado */
+    }
+    if (vista !== atual) mostrarVista(vista);
+  });
   // O evento "rh-vista" devolve a vista a quem a mudou (é idempotente).
 
   // AO VOLTAR AO PAINEL, a lista é atualizada — mas SEM assinar miniaturas em

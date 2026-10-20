@@ -27,10 +27,14 @@ class El {
   get innerHTML() { return this._html; } set innerHTML(v) { this._html = String(v); if (v === '') this.children = []; }
   append(...n) { n.forEach((x) => this.children.push(x)); }
   appendChild(n) { this.children.push(n); return n; }
-  remove() {} setAttribute() {} removeAttribute() {} querySelector() { return null; } querySelectorAll() { return []; }
+  remove() {} querySelector() { return null; } querySelectorAll() { return []; }
   replaceChildren(...n) { this.children = [...n]; }
   addEventListener(t, fn) { (this.listeners[t] = this.listeners[t] || []).push(fn); }
   removeEventListener() {}
+  // Atributos a sério: o aria-current dos separadores é verificado nas provas.
+  setAttribute(k, v) { (this.attrs = this.attrs || {})[k] = String(v); }
+  getAttribute(k) { return (this.attrs && this.attrs[k] !== undefined ? this.attrs[k] : null); }
+  removeAttribute(k) { if (this.attrs) delete this.attrs[k]; }
   dispatchEvent(ev) { (this.listeners[ev.type] || []).forEach((f) => f(ev)); }
   click() { if (typeof this.onclick === 'function') this.onclick({ preventDefault() {} }); this.dispatchEvent({ type: 'click' }); }
   pause() {} play() { return Promise.resolve(); }
@@ -140,14 +144,28 @@ const vista = () => ({
   pesquisa: !reg.get('pesquisa-section').hidden,
 });
 
+// Os três separadores: nenhum escondido, e o da vista atual marcado.
+const separadores = () => ({
+  painel: reg.get('btn-ir-painel'),
+  estudio: reg.get('btn-ir-estudio'),
+  pesquisa: reg.get('btn-ir-pesquisa'),
+});
+const todosVisiveis = () => Object.values(separadores()).every((b) => b && b.hidden === false);
+const marcado = () => {
+  const s = separadores();
+  const ativos = Object.entries(s).filter(([, b]) => b && b.classList.contains('ativo')).map(([n]) => n);
+  return ativos.length === 1 ? ativos[0] : ativos.join('+') || '(nenhum)';
+};
+
 console.log('\n[1] O app abre no Painel, não no ecrã inicial');
 {
   const v = vista();
   check(v.painel === true, 'o painel está visível ao abrir', JSON.stringify(v));
   check(v.drop === false, 'a zona de arrastar imagens NÃO aparece por cima do painel', JSON.stringify(v));
   check(v.pesquisa === false, 'a pesquisa está escondida', JSON.stringify(v));
-  check(reg.get('btn-ir-painel').hidden === true, 'o botão "Painel" fica escondido (já estamos lá)', 'continua visível');
-  check(reg.get('btn-ir-estudio').hidden === false, 'e o "Estúdio" aparece', 'não aparece');
+  check(todosVisiveis(), 'os TRÊS separadores estão à vista (Painel · Estúdio · Temas)', 'falta algum separador');
+  check(marcado() === 'painel', `e o "Painel" está marcado como o sítio onde estamos (${marcado()})`, marcado());
+  check(reg.get('btn-ir-painel').getAttribute('aria-current') === 'page', 'com aria-current="page" para leitores de ecrã', 'sem aria-current');
   check(globalThis.localStorage.getItem('rh3vista') === 'painel', 'o estado da vista fica guardado', String(globalThis.localStorage.getItem('rh3vista')));
 }
 
@@ -157,7 +175,8 @@ console.log('\n[2] Do estúdio, o botão "Painel" leva ao Painel — à primeira
   await new Promise((r) => setTimeout(r, 120));
   let v = vista();
   check(v.drop === true && v.painel === false, 'o estúdio abre (zona de arrastar à vista, painel fora)', JSON.stringify(v));
-  check(reg.get('btn-ir-painel').hidden === false, 'e o botão "Painel" volta a aparecer', 'ficou escondido');
+  check(marcado() === 'estudio', `e o separador "Estúdio" fica marcado (${marcado()})`, marcado());
+  check(todosVisiveis(), 'o "Painel" continua à vista, mesmo não sendo a vista atual', 'o botão desapareceu');
 
   // UMA vez. Tem de chegar ao painel, com a zona de arrastar fora do caminho.
   reg.get('btn-ir-painel').click();
@@ -166,6 +185,7 @@ console.log('\n[2] Do estúdio, o botão "Painel" leva ao Painel — à primeira
   check(v.painel === true, 'com um só clique, o painel aparece', JSON.stringify(v));
   check(v.drop === false, 'e o ecrã inicial NÃO aparece por cima', JSON.stringify(v));
   check(v.estudio === false, 'e o estúdio sai de cena', JSON.stringify(v));
+  check(marcado() === 'painel', 'o separador volta a marcar "Painel"', marcado());
   check(globalThis.localStorage.getItem('rh3vista') === 'painel', 'a vista fica guardada como painel', String(globalThis.localStorage.getItem('rh3vista')));
 }
 
@@ -177,6 +197,14 @@ console.log('\n[3] O hash acompanha a vista (para o "voltar" e os favoritos)');
   reg.get('btn-ir-painel').click();
   await new Promise((r) => setTimeout(r, 150));
   check(globalThis.location.hash === '', `no painel, o endereço volta a limpo (${JSON.stringify(globalThis.location.hash)})`, globalThis.location.hash);
+  // Temas também tem endereço próprio.
+  reg.get('btn-ir-pesquisa').click();
+  await new Promise((r) => setTimeout(r, 150));
+  check(globalThis.location.hash === '#temas', `nos temas, o endereço fica "#temas" (${globalThis.location.hash})`, globalThis.location.hash);
+  check(vista().pesquisa === true, 'e a vista de temas aparece', JSON.stringify(vista()));
+  check(marcado() === 'pesquisa', 'com o separador "Temas" marcado', marcado());
+  reg.get('btn-ir-painel').click();
+  await new Promise((r) => setTimeout(r, 150));
 }
 
 console.log('\n[4] Ida e volta várias vezes, sem o ecrã inicial a aparecer');
@@ -187,12 +215,14 @@ console.log('\n[4] Ida e volta várias vezes, sem o ecrã inicial a aparecer');
     await new Promise((r) => setTimeout(r, 60));
     let v = vista();
     if (!v.drop || v.painel) problema = `ida ${i + 1}: ${JSON.stringify(v)}`;
+    if (marcado() !== 'estudio') problema = `ida ${i + 1}: separador ${marcado()}`;
     reg.get('btn-ir-painel').click();
     await new Promise((r) => setTimeout(r, 60));
     v = vista();
     if (!v.painel || v.drop || v.estudio) problema = `volta ${i + 1}: ${JSON.stringify(v)}`;
+    if (marcado() !== 'painel') problema = `volta ${i + 1}: separador ${marcado()}`;
   }
-  check(problema === '', 'em 4 idas e voltas, cada vista aparece sozinha', problema);
+  check(problema === '', 'em 4 idas e voltas, cada vista aparece sozinha e o separador acompanha', problema);
 }
 
 console.log('\n[5] "Novo projeto" abre o estúdio limpo');
@@ -204,7 +234,29 @@ console.log('\n[5] "Novo projeto" abre o estúdio limpo');
   check(globalThis.localStorage.getItem('rh3vista') === 'estudio', 'guardado como estúdio', String(globalThis.localStorage.getItem('rh3vista')));
 }
 
-console.log('\n[6] Sem erros de JavaScript');
+console.log('\n[6] A casa é o Painel, mesmo que a última sessão tenha ficado no estúdio');
+{
+  // O endereço manda: sem hash, abre no painel — não retoma a vista antiga.
+  globalThis.localStorage.setItem('rh3vista', 'estudio');
+  globalThis.location.hash = '';
+  window.dispatchEvent(new Event('hashchange'));
+  await new Promise((r) => setTimeout(r, 200));
+  const v = vista();
+  check(v.painel === true && v.drop === false, `abrir sem endereço dá no painel (${JSON.stringify(v)})`, JSON.stringify(v));
+  check(marcado() === 'painel', 'e o separador diz "Painel"', marcado());
+
+  // Mas um endereço com #estudio continua a abrir o estúdio (favorito/link).
+  globalThis.location.hash = '#estudio';
+  window.dispatchEvent(new Event('hashchange'));
+  await new Promise((r) => setTimeout(r, 200));
+  check(vista().drop === true, '#estudio abre o estúdio', JSON.stringify(vista()));
+  check(marcado() === 'estudio', 'com o separador certo', marcado());
+  // E volta ao painel para as provas seguintes.
+  reg.get('btn-ir-painel').click();
+  await new Promise((r) => setTimeout(r, 150));
+}
+
+console.log('\n[7] Sem erros de JavaScript');
 if (erros.length) erros.slice(0, 5).forEach((e) => fail('erro: ' + e));
 else ok('nenhum erro não tratado');
 

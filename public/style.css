@@ -47,6 +47,19 @@ code { background: var(--bg-3); padding: 1px 5px; border-radius: 5px; font-size:
 .tag { margin: 1px 0 0; color: var(--txt-2); font-size: 12.5px; }
 .top-actions { display: flex; align-items: center; gap: 10px; }
 
+/* Separadores das vistas (Painel · Estúdio · Temas): sempre à vista, com o da
+   vista atual destacado. Nunca se escondem — é o que dá orientação. */
+.vistas { display: flex; align-items: center; gap: 6px; }
+.vista-aba.ativo { font-weight: 650; }
+.vista-aba:not(.ativo):hover { border-color: var(--accent); }
+@media (max-width: 760px) {
+  /* Ecrã pequeno: os separadores ficam na sua própria linha, todos à vista. */
+  .top { flex-wrap: wrap; }
+  .top-actions { flex-wrap: wrap; }
+  .vistas { width: 100%; order: 3; }
+  .vista-aba { flex: 1; }
+}
+
 .pill {
   font-size: 12px; padding: 5px 11px; border-radius: 999px;
   background: var(--bg-3); border: 1px solid var(--line); color: var(--txt-2); white-space: nowrap;

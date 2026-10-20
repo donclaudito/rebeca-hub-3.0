@@ -114,32 +114,28 @@ function formatarViews(n) {
 }
 
 // ---------------------------------------------------------------- vistas
-// Entra na vista de pesquisa: esconde painel e estúdio e mostra esta seção.
+// Entra na vista de pesquisa. A NAVEGAÇÃO É TODA DO painel.js (mostrarVista):
+// é ele que esconde as outras vistas, marca o separador e escreve o endereço.
+// Aqui só se pede a troca — antes esta função escondia secções e mexia nos
+// botões do topo à mão, e era aí que as duas lógicas se contrariavam.
 function mostrarPesquisa() {
+  if (typeof window.__rhIrPara === 'function') {
+    window.__rhIrPara('pesquisa');
+    return;
+  }
+  // Sem o painel.js carregado (não devia acontecer): troca mínima e segura.
   try {
     localStorage.setItem('rh3vista', 'pesquisa');
   } catch {
     /* modo privado */
   }
-  const drop = $('drop');
-  const ws = $('workspace');
-  const painel = $('painel-section');
   const secao = $('pesquisa-section');
-  if (drop) drop.hidden = true;
-  if (ws) ws.hidden = true;
-  if (painel) painel.hidden = true;
   if (secao) secao.hidden = false;
-  // No painel o botão "Painel" fica escondido; aqui ele volta, para voltar fácil.
-  const b1 = $('btn-ir-painel');
-  if (b1) b1.hidden = false;
-  const b2 = $('btn-ir-estudio');
-  if (b2) b2.hidden = false;
-  const b3 = $('btn-ir-pesquisa');
-  if (b3) b3.hidden = true;
   avisarVista();
 }
 
-// Quando outro módulo troca a vista (painel.js), esta seção sai da frente.
+// Quando outro módulo troca de vista, esta secção sai da frente. Os separadores
+// do topo são todos do painel.js — aqui já não se esconde botão nenhum.
 window.addEventListener('rh-vista', () => {
   let vista = 'painel';
   try {
@@ -149,8 +145,6 @@ window.addEventListener('rh-vista', () => {
   }
   const secao = $('pesquisa-section');
   if (vista !== 'pesquisa' && secao) secao.hidden = true;
-  const b = $('btn-ir-pesquisa');
-  if (b) b.hidden = vista === 'pesquisa';
 });
 
 // ---------------------------------------------------------------- resultados
@@ -451,8 +445,6 @@ async function pesquisar() {
 
 // ---------------------------------------------------------------- arranque
 if (typeof window !== 'undefined') {
-  const btnTemas = $('btn-ir-pesquisa');
-  if (btnTemas) btnTemas.onclick = mostrarPesquisa;
   const form = $('form-pesquisa');
   if (form) form.onsubmit = (e) => e.preventDefault();
   const btn = $('btn-pesq');

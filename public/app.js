@@ -2123,9 +2123,20 @@ if (typeof window !== 'undefined' && typeof window.addEventListener === 'functio
   window.addEventListener('rh-novo-projeto', () => novoProjeto());
   // "✏️ Reeditar projeto" (Painel e detalhes): abre o projeto original no
   // estúdio. O Painel já confirmou que o projeto existe antes de mandar o id.
-  window.addEventListener('rh-reeditar-projeto', (e) => {
+  window.addEventListener('rh-reeditar-projeto', async (e) => {
     const id = e && e.detail ? e.detail.id : '';
-    if (id) abrirProjeto(id);
+    if (!id) return;
+    // O módulo dos projetos é carregado por import() no arranque. Se o pedido
+    // chegar antes de ele chegar, espera-se por ele (até ~2 s) em vez de o
+    // ignorar em silêncio — era mais uma maneira de o botão "não fazer nada".
+    for (let i = 0; i < 40 && !modProjetosUI; i += 1) {
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    if (!modProjetosUI) {
+      toast('O estúdio ainda não está pronto. Feche a página e abra outra vez.', 'err');
+      return;
+    }
+    abrirProjeto(id);
   });
 }
 

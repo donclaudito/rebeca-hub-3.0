@@ -3,13 +3,13 @@
   "private": true,
   "version": "3.0.0",
   "type": "module",
-  "description": "Rebeca Hub 3.0 alojado na Base44: importa imagens e gera a narra????o, sem depender de servidor no seu computador.",
+  "description": "Rebeca Hub 3.0 alojado na Base44: importa imagens e gera a narração, sem depender de servidor no seu computador.",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
     "test:2": "node testes/audio-duracao.mjs && node testes/interface.mjs && node testes/video.mjs",
-    "test": "node testes/ligacoes.mjs && node testes/navegacao.mjs && node testes/legendas.mjs && node testes/enquadramento.mjs && node testes/projetos.mjs && node testes/fluxo.mjs"
+    "test": "node testes/ligacoes.mjs && node testes/navegacao.mjs && node testes/reeditar.mjs && node testes/legendas.mjs && node testes/enquadramento.mjs && node testes/projetos.mjs && node testes/fluxo.mjs"
   },
   "dependencies": {
     "@base44/sdk": "^0.8.54"

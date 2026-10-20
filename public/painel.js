@@ -401,6 +401,12 @@ function confirmarYouTube() {
 // projeto existe ANTES de trocar de vista — assim nunca se limpa o trabalho
 // aberto no estúdio sem haver projeto para abrir.
 async function reeditar(p) {
+  // PRIMEIRO, fechar a janela de detalhes. O botão "✏️ Reeditar projeto" vive
+  // dentro dela: sem isto, a vista mudava por baixo mas a janela continuava
+  // ABERTA por cima do estúdio (e a bloquear os cliques, por ser modal) — dava
+  // a impressão de que o botão não fazia nada.
+  fecharJanelas();
+  toast(`A abrir o projeto de "${p.nome || 'este vídeo'}"…`, '');
   let projeto = null;
   const mod = await import('./projetos.mjs');
   // Caminho normal: o vídeo sabe qual é o projeto dele.
@@ -441,11 +447,35 @@ async function reeditar(p) {
     toast(`O projeto original de "${p.nome || 'este vídeo'}" não está neste computador nem na nuvem. Abra o vídeo no estúdio e clique em ☁️ Guardar na nuvem para o poder reeditar em qualquer lugar.`, 'err');
     return;
   }
+  // Troca de vista ANTES de pedir ao estúdio para carregar: o estúdio fica à
+  // vista mesmo que o carregamento do projeto se atrase.
   mostrarVista('estudio');
   try {
     window.dispatchEvent(new CustomEvent('rh-reeditar-projeto', { detail: { id: projeto.id } }));
   } catch {
     /* sem janela (testes) */
+  }
+  // No telemóvel/portátil a vista pode ficar a meio da página: volta ao topo
+  // para se ver o projeto a aparecer.
+  try {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  } catch {
+    /* sem janela */
+  }
+}
+
+// Fecha as janelas que ficam POR CIMA da página (modais). Sem isto, mudar de
+// vista com uma janela aberta não se nota e os cliques deixam de responder.
+function fecharJanelas() {
+  for (const id of ['dlg-detalhes', 'dlg-youtube', 'dlg']) {
+    const d = $(id);
+    if (d && typeof d.close === 'function' && d.open !== false) {
+      try {
+        d.close();
+      } catch {
+        /* já fechada */
+      }
+    }
   }
 }
 

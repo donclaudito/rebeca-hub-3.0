@@ -247,6 +247,22 @@ ordem, com a narração e as legendas a acompanhar cada passagem. A contagem é 
 cortado a meio de uma imagem). Uma música enorme (5 horas) fica limitada a 100
 passagens, para não gerar milhares de cenas.
 
+**Enquadramento** — decide como a imagem é cortada quando as proporções não batem
+certo com o vídeo (uma foto 4:3 num vídeo 16:9, ou uma imagem horizontal num vídeo
+vertical):
+
+| Opção | O que faz |
+|---|---|
+| 🎯 Seguir o assunto | procura o personagem na imagem e centra o recorte nele |
+| ⭕ Cortar pelo centro | recorte centrado de sempre; perde o assunto se ele estiver deslocado |
+
+O recorte inteligente calcula onde está o "assunto" — as zonas com mais variação
+de cor e detalhe, que é onde estão caras, olhos, contornos e o corpo do
+personagem — e desloca a janela do vídeo para o apanhar. Tem uma ligeira
+preferência pelo centro (para não saltar para uma árvore ao canto), mas o assunto
+manda. A análise é feita numa cópia pequena da imagem (no máximo 160 px), por isso
+é rápida mesmo no telemóvel.
+
 **Legendas** (💬, ligadas por omissão) — a narração é cortada em blocos curtos e
 desenhada no fundo do vídeo, e sai também um ficheiro **`.srt`** com os mesmos
 blocos, para a faixa de legendas do YouTube. A regra de legibilidade é a do

@@ -32,6 +32,9 @@ const state = {
   modoDuracao: 'natural',
   // Codec do ficheiro: 'vp8' (compatível) ou 'vp9' (mais pequeno).
   codec: 'vp8',
+  // Como cortar a imagem para caber no vídeo: 'personagem' (segue o assunto) ou
+  // 'centro' (recorte centrado). O assunto deslocado perdia-se no recorte centrado.
+  enquadramento: 'personagem',
   // A duração da música foi lida? Se não, o ciclo não pode ser calculado.
   musicaMedida: false,
   // Letra da música: o texto colado e se está a ser usada como legenda.
@@ -1696,6 +1699,7 @@ async function recolherProjeto(nome) {
       legendas: state.legendas,
       modoDuracao: state.modoDuracao,
       codec: state.codec,
+      enquadramento: state.enquadramento,
       letra: state.letra,
       letraLigada: state.letraLigada,
       texto: { tone: $('tone').value, extra: $('extra').value, minWords: $('minWords').value, maxWords: $('maxWords').value },
@@ -2508,6 +2512,29 @@ async function iniciarVideo() {
   state.codec = codecEscolhido.id;
   [...cc.children].forEach((x) => x.classList.toggle('on', x.dataset.id === state.codec));
 
+  // Enquadramento: seguir o assunto ou cortar pelo centro.
+  const ce = $('vid-enquadramento');
+  ce.innerHTML = '';
+  [
+    { id: 'personagem', rotulo: '🎯 Seguir o assunto', nota: 'encontra o personagem na imagem e centra-o no vídeo' },
+    { id: 'centro', rotulo: '⭕ Cortar pelo centro', nota: 'recorte centrado; perde o assunto se ele estiver deslocado' },
+  ].forEach((o) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'chip';
+    b.dataset.id = o.id;
+    b.textContent = o.rotulo;
+    b.title = o.nota;
+    b.onclick = () => {
+      state.enquadramento = o.id;
+      [...ce.children].forEach((x) => x.classList.toggle('on', x === b));
+      guardar();
+      resumoVideo();
+    };
+    ce.append(b);
+  });
+  [...ce.children].forEach((x) => x.classList.toggle('on', x.dataset.id === state.enquadramento));
+
   atualizarTrilha();
 
   // Suporte do browser
@@ -2641,6 +2668,7 @@ async function gerarVideoFinal() {
       legendas: comLegendas,
       legendasExternas: cuesLetra.length ? cuesLetra : null,
       codec: state.codec,
+      enquadramento: state.enquadramento,
       modoDuracao: state.modoDuracao,
       musicaSegundos: state.musicaSegundos,
       // Desenha no canvas visível: vê-se a montagem enquanto grava.
@@ -2768,6 +2796,7 @@ function guardar() {
         letraLigada: state.letraLigada,
         modoDuracao: state.modoDuracao,
         codec: state.codec,
+        enquadramento: state.enquadramento,
         musicaLigada: state.musicaLigada,
         projetoNome: $('projeto-nome') ? $('projeto-nome').value : '',
       }),
@@ -3014,6 +3043,7 @@ function init() {
   state.letraLigada = c.letraLigada === true && state.letra.trim().length > 0;
   state.modoDuracao = c.modoDuracao === 'trilha' ? 'trilha' : 'natural';
   state.codec = c.codec === 'vp9' ? 'vp9' : 'vp8';
+  state.enquadramento = c.enquadramento === 'centro' ? 'centro' : 'personagem';
   state.musicaLigada = c.musicaLigada !== false;
   marcarMotor();
   marcarTom();

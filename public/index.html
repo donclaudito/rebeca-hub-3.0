@@ -106,6 +106,7 @@
         <div class="tb-left">
           <button id="btn-add" class="ghost small" type="button">＋ Adicionar</button>
           <button id="btn-clear" class="ghost small danger" type="button">🗑 Limpar</button>
+          <button id="btn-dedup" class="ghost small" type="button" title="Remove cópias do tipo “nome (1).jpg”, ficando a primeira de cada grupo">🧹 Remover duplicadas</button>
         </div>
         <div class="tb-mid">
           <label class="field">
@@ -292,8 +293,8 @@
                 <div id="vid-orientacao" class="chips"></div>
                 <div class="trilha-linha" id="linha-cena-inicial">
                   <label class="field">
-                    <span>Imagem inicial (introdução)</span>
-                    <select id="vid-cena-inicial" class="select-simples"></select>
+                    <span>Cenas da introdução (pode escolher várias)</span>
+                    <div id="vid-cenas-iniciais" class="cenas-finais"></div>
                   </label>
                   <label class="field">
                     <span>Tempo da introdução</span>
@@ -314,7 +315,7 @@
                 <p class="hint" style="margin:0">
                   Com uma orientação escolhida, as cenas finais são retiradas do ciclo e voltam no fim,
                   pela ordem do projeto, como epílogo — a duração escolhida divide-se entre elas.
-                  A imagem inicial faz o mesmo no começo: abre o vídeo, parada, como introdução.
+                  As cenas da introdução fazem o mesmo no começo: abrem o vídeo, paradas, pela ordem do projeto.
                 </p>
               </div>
 

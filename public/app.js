@@ -45,6 +45,9 @@ const state = {
   // Imagem inicial (introdução), pelo nome do ficheiro — o mesmo raciocínio do
   // epílogo: sai da sequência e abre o vídeo, parada.
   cenaInicial: '',
+  // VÁRIAS cenas na introdução, pela ordem do projeto (nomes de ficheiro) —
+  // o mesmo raciocínio do epílogo: saem da sequência e abrem o vídeo, paradas.
+  cenasIniciais: [],
   // Tempo escolhido da introdução e do epílogo (0 = automático).
   durIntro: 0,
   durEpilogo: 0,
@@ -252,6 +255,39 @@ function renderThumbs() {
   updateLayout();
   atualizarSeletorCenaFinal();
   $('btn-generate').disabled = !state.images.length || state.busy;
+}
+
+// Remove cenas duplicadas da lista: imagens que são cópias da mesma (o
+// Windows e alguns editores gravam "nome (1).jpg", "nome (2).jpg"…). Fica a
+// PRIMEIRA de cada grupo, na ordem da lista. Cópias só contam quando o
+// ficheiro tem o MESMO tamanho (imagens diferentes com nome parecido ficam).
+function removerDuplicadas() {
+  if (state.busy) return;
+  const chaveDe = (nome) => {
+    let base = String(nome || '').toLowerCase();
+    let anterior = '';
+    while (anterior !== base) {
+      anterior = base;
+      base = base.replace(/\s*\(\d+\)(\.[a-z0-9]+)?$/i, '$1').replace(/\s*-cópia|\s*-copiazinha|-copia(\.[a-z0-9]+)?$/i, '$1');
+    }
+    return base;
+  };
+  const grupos = new Map();
+  state.images.forEach((img, i) => {
+    const tamanho = img.file && Number.isFinite(img.file.size) ? img.file.size : '';
+    const chave = `${chaveDe(img.name)}|${tamanho}`;
+    if (!grupos.has(chave)) grupos.set(chave, []);
+    grupos.get(chave).push(i);
+  });
+  const copias = [...grupos.values()].flatMap((idxs) => idxs.slice(1));
+  if (!copias.length) return toast('Nenhuma cena duplicada na lista.', 'ok');
+  const nomes = copias.map((i) => `${i + 1}. ${state.images[i].name}`).join('\n');
+  if (!window.confirm(`Remover ${copias.length} cena(s) duplicada(s)? Fica a primeira de cada grupo:\n\n${nomes}`)) return;
+  const ids = new Set(copias.map((i) => state.images[i].id));
+  state.images = state.images.filter((x) => !ids.has(x.id));
+  renderThumbs();
+  renderScenes();
+  toast(`${copias.length} cena(s) duplicada(s) removida(s).`, 'ok');
 }
 
 // ---------------------------------------------------------------- cenas
@@ -1155,26 +1191,24 @@ function marcarOrientacao() {
 function atualizarSeletorCenaFinal() {
   const nomes = state.images.map((img) => (img.video ? `🎬 ${img.name}` : img.name));
 
-  // Epílogo: VÁRIAS cenas, marcadas numa lista de caixas; a ordem é sempre a
-  // do projeto. Sem nenhuma marcada, o epílogo é a última cena (como antes).
-  const caixa = $('vid-cenas-finais');
-  if (caixa) {
+  // Epílogo e INTRODUÇÃO: VÁRIAS cenas, marcadas em listas de caixas IGUAIS;
+  // a numeração e a ordem são sempre as DA LISTA (refeito a cada mudança).
+  const construirCaixas = (idCaixa, escolhidas, aoMudar) => {
+    const caixa = $(idCaixa);
+    if (!caixa) return;
     caixa.innerHTML = '';
-    state.cenasFinais = (state.cenasFinais || []).filter((n) => nomes.includes(n));
     nomes.forEach((nome, i) => {
       const lab = document.createElement('label');
       lab.className = 'chip';
       const c = document.createElement('input');
       c.type = 'checkbox';
       c.value = nome;
-      const marcada = state.cenasFinais.includes(nome);
+      const marcada = escolhidas.includes(nome);
       c.checked = marcada;
       lab.classList.toggle('on', marcada);
       lab.append(c, document.createTextNode(` ${i + 1}. ${nome}`));
       c.onchange = () => {
-        state.cenasFinais = [...caixa.querySelectorAll('input:checked')].map((x) => x.value);
-        // Compatibilidade: a primeira marcada segue a valer como "cena final".
-        state.cenaFinal = state.cenasFinais[0] || '';
+        aoMudar([...caixa.querySelectorAll('input:checked')].map((x) => x.value));
         [...caixa.querySelectorAll('label')].forEach((l) =>
           l.classList.toggle('on', l.querySelector('input')?.checked),
         );
@@ -1183,29 +1217,21 @@ function atualizarSeletorCenaFinal() {
       };
       caixa.append(lab);
     });
-  }
+  };
 
-  const si = $('vid-cena-inicial');
-  if (si) {
-    const escolhidoAntes = state.cenaInicial;
-    si.innerHTML = '';
-    const nenhuma = document.createElement('option');
-    nenhuma.value = '';
-    nenhuma.textContent = 'Sem introdução';
-    si.append(nenhuma);
-    nomes.forEach((nome, i) => {
-      const o = document.createElement('option');
-      o.value = nome;
-      o.textContent = `${i + 1}. ${nome}`;
-      si.append(o);
-    });
-    if (escolhidoAntes && nomes.includes(escolhidoAntes)) {
-      si.value = escolhidoAntes;
-    } else {
-      state.cenaInicial = '';
-      si.value = '';
-    }
-  }
+  state.cenasFinais = (state.cenasFinais || []).filter((n) => nomes.includes(n));
+  construirCaixas('vid-cenas-finais', state.cenasFinais, (marcadas) => {
+    state.cenasFinais = marcadas;
+    // Compatibilidade: a primeira marcada segue a valer como "cena final".
+    state.cenaFinal = state.cenasFinais[0] || '';
+  });
+
+  state.cenasIniciais = (state.cenasIniciais || []).filter((n) => nomes.includes(n));
+  construirCaixas('vid-cenas-iniciais', state.cenasIniciais, (marcadas) => {
+    state.cenasIniciais = marcadas;
+    // Compatibilidade: a primeira marcada segue a valer como "cena inicial".
+    state.cenaInicial = state.cenasIniciais[0] || '';
+  });
 }
 
 // Nota do epílogo, para o resumo: diz qual imagem fecha o vídeo e como.
@@ -1224,9 +1250,16 @@ function notaEpilogo() {
 
 // Nota da introdução: a imagem que abre o vídeo, parada, e que não repete.
 function notaIntro() {
-  if (!state.cenaInicial) return '';
-  const tempo = Number(state.durIntro) > 0 ? ` durante ${state.durIntro}s` : '';
-  return ` 🎬 Introdução: o vídeo abre com "${state.cenaInicial}"${tempo}, parada, antes da sequência — ela não volta no meio.`;
+  const iniciais = (state.cenasIniciais || []).filter(Boolean);
+  if (!iniciais.length) return '';
+  const nome = iniciais.length === 1
+    ? `"${iniciais[0]}"`
+    : `${iniciais.length} cenas (${iniciais.slice(0, -1).join(', ')} e ${iniciais.at(-1)})`;
+  const tempo = Number(state.durIntro) > 0
+    ? iniciais.length > 1 ? ` durante ${state.durIntro}s (divididos entre elas)` : ` durante ${state.durIntro}s`
+    : '';
+  const plural = iniciais.length > 1 ? 's' : '';
+  return ` 🎬 Introdução: o vídeo abre com ${nome}${tempo}, parada${plural}, antes da sequência — ela${plural} não volta${iniciais.length > 1 ? 'm' : ''} no meio.`;
 }
 
 // Nota do fecho: com trilha sonora, o vídeo acaba quando a música acaba — a
@@ -1835,16 +1868,7 @@ async function iniciarVideo() {
   });
   marcarOrientacao();
   atualizarSeletorCenaFinal();
-  // A introdução: escolher a imagem que abre o vídeo (ou nenhum).
-  const selInicial = $('vid-cena-inicial');
-  if (selInicial) {
-    selInicial.value = state.cenaInicial || '';
-    selInicial.onchange = () => {
-      state.cenaInicial = selInicial.value;
-      guardar();
-      resumoVideo();
-    };
-  }
+
 
   // Tempo da introdução e do epílogo: automático, ou um valor fixo que o motor
   // respeita exatamente (a trilha, se houver, é parada no fim do vídeo).
@@ -2032,6 +2056,7 @@ function guardar() {
         cenaFinal: state.cenaFinal,
         cenasFinais: state.cenasFinais,
         cenaInicial: state.cenaInicial,
+        cenasIniciais: state.cenasIniciais,
         durIntro: state.durIntro,
         durEpilogo: state.durEpilogo,
         musicaLigada: state.musicaLigada,
@@ -2153,6 +2178,7 @@ async function init() {
   $('btn-folder').onclick = pickFolder;
   $('btn-files').onclick = pickFiles;
   $('btn-add').onclick = pickFiles;
+  $('btn-dedup').onclick = removerDuplicadas;
   $('btn-generate').onclick = gerar;
   $('btn-clear').onclick = () => {
     stopSpeak();
@@ -2346,6 +2372,13 @@ async function init() {
   state.cenasFinais = finaisGuardadas.length ? finaisGuardadas : (typeof c.cenaFinal === 'string' && c.cenaFinal ? [c.cenaFinal] : []);
   state.cenaFinal = state.cenasFinais[0] || '';
   state.cenaInicial = typeof c.cenaInicial === 'string' ? c.cenaInicial : '';
+  // Introdução com VÁRIAS cenas: lista nova; projetos antigos tinham uma só.
+  const iniciaisGuardadas = Array.isArray(c.cenasIniciais)
+    ? c.cenasIniciais.filter((x) => typeof x === 'string' && x)
+    : [];
+  state.cenasIniciais = iniciaisGuardadas.length
+    ? iniciaisGuardadas
+    : state.cenaInicial ? [state.cenaInicial] : [];
   state.durIntro = Number(c.durIntro) || 0;
   state.durEpilogo = Number(c.durEpilogo) || 0;
   marcarMotor();

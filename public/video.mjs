@@ -460,6 +460,10 @@ export async function gerarVideo({
   // A cena que ABRE o vídeo (índice): pelo mesmo raciocínio do epílogo, sai da
   // sequência/ciclo e volta no COMEÇO, parada, como introdução.
   cenaInicial = -1,
+  // VÁRIAS cenas de introdução (índices, pela ordem do projeto). Quando vêm,
+  // substituem a cena única: todas saem do ciclo e voltam no começo, e a
+  // duração total da introdução divide-se entre elas.
+  cenasIniciais = [],
   // Tempos da introdução e do epílogo escolhidos na página (em segundos;
   // 0 = automático: cerca de 5s na introdução, epílogo acompanha o fim da música).
   duracaoIntro = 0,
@@ -625,12 +629,19 @@ export async function gerarVideo({
   // A mesma ideia no começo: a imagem inicial sai da sequência/ciclo e ABRE o
   // vídeo, parada. Se for uma das imagens do epílogo, fica só com o epílogo.
   const idxInicialDado = Number(cenaInicial);
-  const idxInicialBruto =
-    Number.isInteger(idxInicialDado) && idxInicialDado >= 0 && idxInicialDado < cenas.length ? idxInicialDado : -1;
-  const comIntro = idxInicialBruto >= 0 && cenas.length > 1 && !finais.includes(idxInicialBruto);
-  const idxInicial = comIntro ? idxInicialBruto : -1;
+  const iniciaisDadas = (Array.isArray(cenasIniciais) ? cenasIniciais : [])
+    .map((i) => Number(i))
+    .filter((i) => Number.isInteger(i) && i >= 0 && i < cenas.length);
+  const iniciaisBrutas = iniciaisDadas.length
+    ? [...new Set(iniciaisDadas)].sort((a, b) => a - b)
+    : idxInicialDado >= 0 && idxInicialDado < cenas.length ? [idxInicialDado] : [];
+  // Uma cena não pode ser introdução E epílogo: se estiver nos dois, fica
+  // apenas no epílogo (como antes, quando a introdução era única).
+  const iniciais = iniciaisBrutas.filter((i) => !finais.includes(i));
+  // Só há introdução se sobrar pelo menos uma cena para o corpo do vídeo.
+  const comIntro = iniciais.length > 0 && cenas.length > finais.length + iniciais.length;
 
-  const fora = comEpilogo || comIntro ? (i) => finais.includes(i) || i === idxInicial : () => false;
+  const fora = comEpilogo || comIntro ? (i) => finais.includes(i) || iniciais.includes(i) : () => false;
   const base = cenas
     .map((c, i) => ({ ...c, _fonte: i, _passagem: 0, _texto: c.texto || '' }))
     .filter((_, i) => !fora(i));
@@ -675,17 +686,22 @@ export async function gerarVideo({
 
   // A introdução entra ANTES do ciclo: 5s parados (ou 2 passagens de transição
   // + margem), com a narração dela a tocar por baixo — como o epílogo no fim.
+  // VÁRIAS cenas: a duração TOTAL é a mesma e divide-se por igual entre elas,
+  // pela ordem do projeto.
   let durIntro = 0;
   if (comIntro) {
     durIntro = durIntroEscolhida > 0 ? durIntroEscolhida : Math.max(5, 2 * T + 0.4);
-    ciclos.unshift({
-      ...cenas[idxInicial],
-      _fonte: idxInicial,
+    const durCada = durIntro / iniciais.length;
+    const novasIniciais = iniciais.map((ii) => ({
+      ...cenas[ii],
+      _fonte: ii,
       _passagem: 0,
-      _texto: cenas[idxInicial].texto || '',
+      _texto: cenas[ii].texto || '',
       _intro: true,
-    });
-    durFinal.unshift(durIntro);
+    }));
+    // Todas entram no COMEÇO, pela ordem do projeto (unshift preserva a ordem).
+    ciclos.unshift(...novasIniciais);
+    durFinal.unshift(...iniciais.map(() => durCada));
   }
 
   // O epílogo entra DEPOIS do ciclo: cabe no tempo que sobra da música
@@ -956,7 +972,8 @@ export async function gerarVideo({
     // Duração TOTAL do epílogo (somadas as cenas finais) e quantas foram.
     epilogo: comEpilogo ? durFinal.slice(-finais.length).reduce((a, d) => a + d, 0) : 0,
     cenasEpilogo: comEpilogo ? finais.length : 0,
-    // Duração da introdução (0 = sem introdução).
+    // Duração da introdução (0 = sem introdução) e quantas cenas a abriram.
     intro: comIntro ? durIntro : 0,
+    cenasIntro: comIntro ? iniciais.length : 0,
   };
 }

@@ -127,6 +127,7 @@ async function recolherProjeto(nome) {
       durEpilogo: state.durEpilogo || 0,
       orientacao: state.orientacao || '',
       cenasFinais: [...(state.cenasFinais || [])],
+      cenasIniciais: [...(state.cenasIniciais || [])],
       texto: { tone: $('tone').value, extra: $('extra').value, minWords: $('minWords').value, maxWords: $('maxWords').value },
     },
   };

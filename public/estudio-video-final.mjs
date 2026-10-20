@@ -94,10 +94,14 @@ export async function gerarVideoFinal() {
   const idxsFinais = [...new Set(nomesFinais.map((n) => nomesNaLista.indexOf(n)).filter((i) => i >= 0))]
     .sort((a, b) => a - b);
   const idxFinal = idxsFinais.length ? idxsFinais.at(-1) : lista.length - 1;
-  const nomeInicial = String(state.cenaInicial || '');
-  const idxInicial = nomeInicial && nomesNaLista.includes(nomeInicial)
-    ? nomesNaLista.indexOf(nomeInicial)
-    : -1;
+  // Introdução: VÁRIAS cenas, pela ordem do projeto (projetos antigos tinham
+  // uma só, em `cenaInicial`).
+  const nomesIniciais = (Array.isArray(state.cenasIniciais) && state.cenasIniciais.length
+    ? state.cenasIniciais
+    : [String(state.cenaInicial || '')]
+  ).filter(Boolean);
+  const idxsIniciais = [...new Set(nomesIniciais.map((n) => nomesNaLista.indexOf(n)).filter((i) => i >= 0))]
+    .sort((a, b) => a - b);
   const cenas = [];
   for (const s of lista) {
     const imagem = comVoz ? imagemDaCena(s) : s.url;
@@ -167,8 +171,10 @@ export async function gerarVideoFinal() {
       orientacao: state.orientacao,
       cenaFinal: idxFinal,
       cenasFinais: idxsFinais,
-      // A cena que abre o vídeo (introdução), pelo mesmo raciocínio do epílogo.
-      cenaInicial: idxInicial,
+      // As cenas que abrem o vídeo (introdução), pelo mesmo raciocínio do
+      // epílogo — várias, pela ordem do projeto.
+      cenaInicial: idxsIniciais.length ? idxsIniciais[0] : -1,
+      cenasIniciais: idxsIniciais,
       // Tempos escolhidos na página para a introdução e o epílogo (0 = automático).
       duracaoIntro: Number(state.durIntro) || 0,
       duracaoEpilogo: Number(state.durEpilogo) || 0,

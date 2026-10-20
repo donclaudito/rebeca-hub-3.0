@@ -130,5 +130,75 @@ console.log('\n[7] O recorte nunca sai da imagem');
   check(problemas.length === 0, `em ${casos.length * 5} combinações de formato e posição, o recorte fica sempre dentro`, problemas.slice(0, 4).join(' | '));
 }
 
+console.log('\n[8] NUNCA cortar a cabeça: personagem em pé numa imagem retrato');
+{
+  // Imagem 300×400 (retrato) com o personagem de corpo inteiro: cabeça no topo
+  // (y=60), pés em baixo (y=380). Para um vídeo 16:9 a janela só tem ~169 px de
+  // altura — o corpo NÃO cabe. Era aqui que o vídeo mostrava o tronco e cortava
+  // a cabeça.
+  const l = 300, a = 400;
+  const dados = imagemComPersonagem(l, a, [120, 60, 60, 320]);
+  const r = enf.calcularRecorte({ largura: l, altura: a, alvoW: 1920, alvoH: 1080, dados, modo: 'personagem' });
+  const vh = Math.round(1080 / (1920 / l));
+  const centradoY = Math.round((a - vh) / 2);
+
+  check(r.y <= 60, `a janela começa ACIMA da cabeça (y=${r.y} ≤ 60)`, `y=${r.y} corta a cabeça`);
+  check(r.y >= 0, `e nunca sai da imagem (y=${r.y})`, String(r.y));
+  check(centradoY > 60, `(o recorte centrado, y=${centradoY}, cortava a cabeça — era o defeito)`, 'o caso não mostra o defeito');
+
+  // A folga por cima da cabeça é a mesma em qualquer imagem (é o que dá
+  // coordenação entre planos): ~9% da altura da janela.
+  const folga = 60 - r.y;
+  const esperada = enf.FOLGA_CABECA * vh;
+  check(Math.abs(folga - esperada) <= 2, `folga de cabeça de ${folga} px (~${esperada.toFixed(1)} px, ${(enf.FOLGA_CABECA * 100).toFixed(0)}% da janela)`, `folga ${folga} vs ${esperada.toFixed(1)}`);
+}
+
+console.log('\n[9] Coordenação: em cenas diferentes, a cabeça fica à mesma altura');
+{
+  // O mesmo personagem em duas posições verticais diferentes: o enquadramento
+  // tem de o pôr à MESMA altura relativa — senão a montagem "salta".
+  const l = 300, a = 400;
+  const alta = enf.calcularRecorte({ largura: l, altura: a, alvoW: 1920, alvoH: 1080, dados: imagemComPersonagem(l, a, [120, 60, 60, 320]), modo: 'personagem' });
+  const baixa = enf.calcularRecorte({ largura: l, altura: a, alvoW: 1920, alvoH: 1080, dados: imagemComPersonagem(l, a, [120, 140, 60, 240]), modo: 'personagem' });
+  const alturaAlta = 60 - alta.y;
+  const alturaBaixa = 140 - baixa.y;
+  check(Math.abs(alturaAlta - alturaBaixa) <= 2, `a cabeça fica à mesma altura nos dois planos (${alturaAlta} px e ${alturaBaixa} px do topo)`, `${alturaAlta} vs ${alturaBaixa}`);
+}
+
+console.log('\n[10] Assunto que cabe inteiro é centrado (não é colado ao topo)');
+{
+  const l = 300, a = 400;
+  // Personagem pequeno no meio-baixo: cabe na janela com folga.
+  const dados = imagemComPersonagem(l, a, [130, 200, 40, 90]);
+  const r = enf.calcularRecorte({ largura: l, altura: a, alvoW: 1920, alvoH: 1080, dados, modo: 'personagem' });
+  const vh = Math.round(1080 / (1920 / l));
+  const centroAssunto = 200 + 90 / 2;
+  const centroJanela = r.y + vh / 2;
+  check(Math.abs(centroAssunto - centroJanela) <= 6, `o assunto fica centrado (centro ${centroAssunto} vs janela ${centroJanela.toFixed(1)})`, `centro ${centroAssunto} vs ${centroJanela.toFixed(1)}`);
+}
+
+console.log('\n[11] Barra preta que a imagem já traga é ignorada');
+{
+  const l = 200, a = 200;
+  const dados = imagemComPersonagem(l, a, [80, 40, 40, 80]);
+  // Barra preta em baixo, como apareceu num dos vídeos.
+  for (let y = 150; y < a; y++) {
+    for (let x = 0; x < l; x++) {
+      const i = (y * l + x) * 4;
+      dados[i] = 0; dados[i + 1] = 0; dados[i + 2] = 0; dados[i + 3] = 255;
+    }
+  }
+  const caixa = enf.caixaUtil(dados, l, a);
+  check(caixa.y1 <= 152 && caixa.y1 >= 148, `a barra preta de baixo é cortada (zona útil termina em y=${caixa.y1})`, `y1=${caixa.y1}`);
+  check(caixa.x0 === 0 && caixa.x1 === l, 'sem barras laterais, a largura fica toda', JSON.stringify(caixa));
+  // A imagem inteira colorida não perde nada.
+  const inteira = enf.caixaUtil(imagemComPersonagem(l, a, [80, 40, 40, 80]), l, a);
+  check(inteira.x0 === 0 && inteira.y0 === 0 && inteira.x1 === l && inteira.y1 === a, 'imagem sem barras fica inteira', JSON.stringify(inteira));
+  // Uma cena escura (noite) NÃO é uma barra preta.
+  const noite = new Uint8ClampedArray(l * a * 4).fill(40);
+  const cNoite = enf.caixaUtil(noite, l, a);
+  check(cNoite.y1 === a, 'cena escura não é confundida com barra preta', JSON.stringify(cNoite));
+}
+
 console.log(falhas.length ? `\n=== ${falhas.length} FALHA(S) ===` : '\n=== ENQUADRAMENTO OK ===');
 process.exit(falhas.length ? 1 : 0);

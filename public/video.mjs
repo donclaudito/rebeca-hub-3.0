@@ -15,12 +15,12 @@
 
 import { blocoAtivo, legendasDasCenas, legendasParaSrt, ressincronizarPelaVoz } from './legendas-core.mjs';
 import { erroNosTempos } from './legendas-tempos.mjs';
-import { calcularRecorte } from './enquadramento.mjs';
+import { calcularRecorte, caixaUtil, janelaVisivel } from './enquadramento.mjs';
 
 // Versão do motor. Aparece no resumo da página: serve para saber, sem dúvidas,
 // qual build está a correr no browser (um build antigo em cache foi uma das
 // causas de "não funcionou" que já apanhei).
-export const VERSAO_VIDEO = '3.9.8';
+export const VERSAO_VIDEO = '3.9.9';
 
 // Duração do FECHO: nos últimos segundos do vídeo (quando há trilha), a música
 // esmaece até ao silêncio e a imagem apaga suavemente para preto.
@@ -224,19 +224,21 @@ const carregarVideo = (url) =>
     v.src = url;
   });
 
-// O recorte inteligente de cada imagem fica aqui, indexado pela própria imagem
+// O enquadramento de cada imagem fica aqui, indexado pela própria imagem
 // (WeakMap: não segura memória depois de a imagem sair).
-const ajustesDeEnquadramento = new WeakMap();
+//
+// Guarda duas coisas:
+//   fonte       → que zona da imagem usar (tira barras pretas que a imagem já
+//                 traga); `null` = a imagem inteira;
+//   deslocamento → onde começa a janela visível, em pixels da `fonte`.
+//
+// O DESENHO lê isto sozinho. Antes, só o fotograma "parado" recebia o recorte e
+// as transições desenhavam centrado — a imagem saltava e via-se a mesma imagem
+// duas vezes com enquadramentos diferentes (o "fantasma" no vídeo).
+const enquadramentos = new WeakMap();
 
-// O recorte escolhido, já convertido para pixels do canvas. `null` quando não há
-// nada a deslocar (recorte centrado).
-function deslocamentoDoRecorte(img, w, h) {
-  const ajuste = img ? ajustesDeEnquadramento.get(img) : null;
-  if (!ajuste || (!ajuste.x && !ajuste.y)) return null;
-  const mw = img.naturalWidth || img.videoWidth || 1;
-  const mh = img.naturalHeight || img.videoHeight || 1;
-  const escala = Math.max(w / mw, h / mh);
-  return { x: -ajuste.x * escala, y: -ajuste.y * escala };
+function enquadramentoDe(img) {
+  return img ? enquadramentos.get(img) || null : null;
 }
 
 // Analisa uma imagem e guarda o recorte que mantém o assunto no meio.
@@ -261,10 +263,41 @@ function analisarEnquadramento(img, alvoW, alvoH, modo) {
     if (!g) return null;
     g.drawImage(img, 0, 0, l, a);
     const dados = g.getImageData(0, 0, l, a).data;
-    const ajuste = calcularRecorte({ largura: l, altura: a, alvoW, alvoH, dados, modo });
+
+    // 1) A zona ÚTIL: imagens geradas trazem por vezes uma barra preta (em
+    //    baixo, tipicamente). Sem isto o vídeo mostrava a barra preta.
+    const util = caixaUtil(dados, l, a);
+    const usaUtil = util.x0 > 0 || util.y0 > 0 || util.x1 < l || util.y1 < a;
+    const area = usaUtil ? util : null;
+
+    // 2) O RECORTE dentro dessa zona.
+    const ajuste = calcularRecorte({ largura: l, altura: a, alvoW, alvoH, dados, modo, area });
+
+    // 3) Converter para pixels da imagem original. O que o desenho precisa é o
+    //    deslocamento RELATIVO AO CENTRO: a imagem é desenhada centrada e é a
+    //    partir daí que se anda para o lado. Com o valor absoluto (o que estava)
+    //    o recorte andava o dobro do devido e caía fora do assunto — daí ora
+    //    aparecer a perna, ora a cabeça.
     const fator = 1 / escala;
-    const final = { x: Math.round(ajuste.x * fator), y: Math.round(ajuste.y * fator) };
-    ajustesDeEnquadramento.set(img, final);
+    const { vw, vh, sobraX, sobraY } = janelaVisivel(l, a, alvoW, alvoH);
+    const sx = util.x0 * fator;
+    const sy = util.y0 * fator;
+    const sw = (util.x1 - util.x0) * fator;
+    const sh = (util.y1 - util.y0) * fator;
+    const relX = ajuste.x * fator - sx - Math.max(0, sw - vw * fator) / 2;
+    const relY = ajuste.y * fator - sy - Math.max(0, sh - vh * fator) / 2;
+
+    const final = {
+      sx,
+      sy,
+      sw,
+      sh,
+      relX,
+      relY,
+      // `fonte` só quando há mesmo uma zona a excluir (barra preta).
+      fonte: usaUtil ? { x: Math.round(sx), y: Math.round(sy), w: Math.max(1, Math.round(sw)), h: Math.max(1, Math.round(sh)) } : null,
+    };
+    enquadramentos.set(img, final);
     return final;
   } catch {
     return null; // imagem protegida por CORS ou canvas bloqueado: recorte centrado
@@ -274,18 +307,29 @@ function analisarEnquadramento(img, alvoW, alvoH, modo) {
 // Desenha a imagem (ou o fotograma atual do vídeo) a cobrir o canvas inteiro
 // (recorta o que sobra), sem deformar.
 //
-// `ajuste` é o recorte inteligente: desloca o recorte para o assunto ficar no
-// meio. `escala`, `deslocamentoX` e `deslocamentoY` são das transições (zoom e
-// deslizar) e do epílogo.
-function desenharCobrindo(ctx, img, w, h, escala = 1, deslocamentoX = 0, deslocamentoY = 0, ajuste = null) {
-  const mw = img.naturalWidth || img.videoWidth || 1;
-  const mh = img.naturalHeight || img.videoHeight || 1;
-  const proporcao = Math.max(w / mw, h / mh) * escala;
-  const dw = mw * proporcao;
-  const dh = mh * proporcao;
-  const ax = ajuste ? ajuste.x : 0;
-  const ay = ajuste ? ajuste.y : 0;
-  ctx.drawImage(img, (w - dw) / 2 + deslocamentoX + ax, (h - dh) / 2 + deslocamentoY + ay, dw, dh);
+// O enquadramento (recorte inteligente e zona útil) vem dos `enquadramentos`,
+// portanto aplica-se a TODOS os desenhos — imagem parada, transições e epílogo.
+// `escala`, `deslocamentoX` e `deslocamentoY` são os movimentos das transições
+// (zoom e deslizar) e do epílogo, somados por cima do enquadramento.
+function desenharCobrindo(ctx, img, w, h, escala = 1, deslocamentoX = 0, deslocamentoY = 0) {
+  const e = enquadramentoDe(img);
+  const completa = img.naturalWidth || img.videoWidth || 1;
+  const completaH = img.naturalHeight || img.videoHeight || 1;
+  const fonte = e && e.fonte ? e.fonte : null;
+  const fonteW = e ? e.sw : completa;
+  const fonteH = e ? e.sh : completaH;
+
+  const proporcao = Math.max(w / fonteW, h / fonteH) * escala;
+  const dw = fonteW * proporcao;
+  const dh = fonteH * proporcao;
+  // A deslocação anda COM o zoom (usa a mesma proporção), senão o assunto fugia
+  // do sítio ao aproximar.
+  const ax = e ? -e.relX * proporcao : 0;
+  const ay = e ? -e.relY * proporcao : 0;
+  const x = (w - dw) / 2 + deslocamentoX + ax;
+  const y = (h - dh) / 2 + deslocamentoY + ay;
+  if (fonte) ctx.drawImage(img, fonte.x, fonte.y, fonte.w, fonte.h, x, y, dw, dh);
+  else ctx.drawImage(img, x, y, dw, dh);
 }
 
 // Desenha o EPILOGO: a imagem final, parada no essencial, com o movimento
@@ -420,11 +464,12 @@ function criarDesenhador({ ctx, w, h, imagens, inicios, duracoes, T, transicao, 
       const t = Math.min(1, Math.max(0, (tLocal - (dur - T)) / T)) * 0.5;
       desenharTransicao(ctx, w, h, imagens[k], imagens[k + 1], t, transicao);
     } else {
-      // Sem passagem: a imagem da cena, quieta.
+      // Sem passagem: a imagem da cena, quieta. O enquadramento é aplicado
+      // pelo próprio desenharCobrindo (imagem parada, transições e epílogo).
       ctx.save();
       ctx.globalAlpha = 1;
       if ('filter' in ctx) ctx.filter = 'none';
-      desenharCobrindo(ctx, imagens[k], w, h, 1, 0, 0, deslocamentoDoRecorte(imagens[k], w, h));
+      desenharCobrindo(ctx, imagens[k], w, h);
       ctx.restore();
     }
 

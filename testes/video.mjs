@@ -34,8 +34,14 @@ class Ctx2D {
   // O FECHO do vídeo pinta o ecrã de preto: regista o véu aplicado em cada
   // instante, para as provas poderem ver o apagar suave.
   fillRect(x, y, w, h) { retoques.push({ t: relogioMs / 1000, alpha: this.globalAlpha, cor: this.fillStyle, x, y, w, h }); }
-  drawImage(img, x, y, w, h) {
-    desenhos.push({ t: relogioMs / 1000, img: img && img.nome, escala: w / 1000, alpha: this.globalAlpha, dx: x, filtro: this.filter });
+  drawImage(img, ...a) {
+    // 5 argumentos (imagem, x, y, w, h) ou 9 (imagem, sx, sy, sw, sh, x, y, w, h)
+    // — o segundo aparece quando a imagem é recortada (barra preta a tirar).
+    const nove = a.length >= 8;
+    const x = nove ? a[4] : a[0];
+    const y = nove ? a[5] : a[1];
+    const w = nove ? a[6] : a[2];
+    desenhos.push({ t: relogioMs / 1000, img: img && img.nome, escala: w / 1000, alpha: this.globalAlpha, dx: x, dy: y, filtro: this.filter, fonte: nove ? [a[0], a[1], a[2], a[3]] : null });
   }
   // A legenda precisa de medir texto: ~0,55 × tamanho por letra.
   measureText(t) { return { width: String(t).length * (parseFloat(this.font) || 16) * 0.55 }; }
@@ -1017,6 +1023,72 @@ console.log('\n[24] Enquadramento: o assunto deslocado fica no meio');
   check(dxInteligente > dxCentrado + 20,
     `o recorte segue o assunto e desloca-se para a direita (${Math.round(dxInteligente)} > ${Math.round(dxCentrado)})`,
     `${dxInteligente} vs ${dxCentrado}`);
+}
+
+console.log('\n[25] Transições usam o MESMO enquadramento (sem salto nem fantasma)');
+{
+  // O defeito que aparecia no vídeo: a imagem parada tinha um recorte e as
+  // transições desenhavam centrado. O resultado era a imagem a saltar e a ver-se
+  // a mesma imagem duas vezes, com enquadramentos diferentes ("fantasma").
+  const l = 160, a = 160;
+  const pixels = new Uint8ClampedArray(l * a * 4);
+  for (let i = 0; i < l * a; i++) {
+    pixels[i * 4] = 210; pixels[i * 4 + 1] = 230; pixels[i * 4 + 2] = 250; pixels[i * 4 + 3] = 255;
+  }
+  // Personagem em pé, com a cabeça no TOPO da imagem (y=10..150, x=60..100) —
+  // o caso do vídeo: imagem retrato num vídeo horizontal.
+  for (let y = 10; y < 150; y++) {
+    for (let x = 60; x < 100; x++) {
+      const q = (Math.floor(x / 2) + Math.floor(y / 2)) % 2;
+      const i = y * l + x;
+      const v = q ? 10 : 250;
+      pixels[i * 4] = v; pixels[i * 4 + 1] = v; pixels[i * 4 + 2] = v;
+    }
+  }
+  const comPixels = (el) => {
+    el.getContext = () => {
+      const g = new Ctx2D();
+      g.getImageData = () => ({ data: pixels, width: l, height: a });
+      return g;
+    };
+    return el;
+  };
+
+  const cenas = [
+    { imagem: 'cA', audio: null, semFala: true, texto: '' },
+    { imagem: 'cB', audio: null, semFala: true, texto: '' },
+  ];
+
+  instalarAmbiente([], { musicaSegundos: 6 });
+  const original = globalThis.document.createElement;
+  globalThis.document.createElement = (t) => {
+    const el = original(t);
+    return t === 'canvas' ? comPixels(el) : el;
+  };
+  const r = await correrCom(mod.gerarVideo({
+    cenas, formato: '1280x720', transicao: 'fade', duracaoTransicao: 0.6, duracaoCena: 2, enquadramento: 'personagem',
+  }));
+  globalThis.document.createElement = original;
+  check(r.ok === true, 'gera com transição', JSON.stringify(r).slice(0, 120));
+
+  // Só os desenhos no canvas do vídeo (a análise desenha a imagem numa cópia
+  // pequena no MESMO contexto falso — 160 px de largura — e não é um fotograma).
+  const daA = desenhos.filter((d) => d.img === 'cA' && d.escala * 1000 >= 700);
+  check(daA.length > 10, `${daA.length} desenhos da mesma imagem (parada + transição)`, String(daA.length));
+  const ys = daA.map((d) => d.dy);
+  const min = Math.min(...ys);
+  const max = Math.max(...ys);
+  check(max - min <= 1, `o enquadramento não muda entre a imagem parada e a transição (Δ=${(max - min).toFixed(2)} px)`, `a imagem salta ${(max - min).toFixed(1)} px (parada em ${min.toFixed(1)}, transição em ${max.toFixed(1)})`);
+
+  // A cabeça (topo do personagem, y=10 na cópia de 160 px) tem de ficar com
+  // ~9% de folga acima — o mesmo em todas as cenas.
+  // A cópia tem 160 px e representa uma imagem de 1000 px, desenhada a 1280 de
+  // largura → cada pixel da cópia vale (1000/160) × 1,28 no vídeo.
+  const porPixelDaCopia = (1000 / l) * 1.28;
+  const cabecaNoVideo = min + 10 * porPixelDaCopia;
+  const folga = cabecaNoVideo / 720;
+  check(folga > 0.04 && folga < 0.16, `a cabeça começa a ${(folga * 100).toFixed(1)}% do topo (folga de cabeça)`, `a cabeça começa a ${(folga * 100).toFixed(1)}% do topo`);
+  check(cabecaNoVideo > 0, `a cabeça está DENTRO do vídeo (y=${cabecaNoVideo.toFixed(0)} px)`, `a cabeça ficou fora do vídeo (y=${cabecaNoVideo.toFixed(0)} px)`);
 }
 
 console.log(falhas.length ? `\n=== ${falhas.length} FALHA(S) ===` : '\n=== GERAÇÃO DE VÍDEO OK ===');

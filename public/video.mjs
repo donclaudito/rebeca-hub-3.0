@@ -13,7 +13,8 @@
 //  de 2 minutos leva 2 minutos a gravar.
 // ============================================================
 
-import { blocoAtivo, legendasDasCenas, legendasParaSrt } from './legendas-core.mjs';
+import { blocoAtivo, legendasDasCenas, legendasParaSrt, ressincronizarPelaVoz } from './legendas-core.mjs';
+import { erroNosTempos } from './legendas-tempos.mjs';
 import { calcularRecorte } from './enquadramento.mjs';
 
 // Versão do motor. Aparece no resumo da página: serve para saber, sem dúvidas,
@@ -211,37 +212,114 @@ const carregarImagem = (url) =>
     i.src = url;
   });
 
-// Desenha a imagem a cobrir o canvas inteiro (recorta o que sobra), sem deformar.
-//
-// `ajuste` é o recorte inteligente (ver enquadramento.mjs): desloca o recorte
-// para o assunto ficar no meio. Sem ajuste, é o recorte centrado de sempre.
-// `escala` e `deslocamentoX` são para as transições (zoom e deslizar).
-function desenharCobrindo(ctx, img, w, h, escala = 1, deslocamentoX = 0) {
-  const proporcao = Math.max(w / img.naturalWidth, h / img.naturalHeight) * escala;
-  const dw = img.naturalWidth * proporcao;
-  const dh = img.naturalHeight * proporcao;
-  ctx.drawImage(img, (w - dw) / 2 + deslocamentoX, (h - dh) / 2, dw, dh);
+// Cena de VÍDEO: carrega o ficheiro como <video>; cada fotograma é desenhado
+// durante a gravação e o som entra pela ligação ao destino do gravador.
+const carregarVideo = (url) =>
+  new Promise((resolve, reject) => {
+    const v = document.createElement('video');
+    v.preload = 'auto';
+    v.playsInline = true;
+    v.onloadeddata = () => resolve(v);
+    v.onerror = () => reject(new Error('não consegui ler um dos vídeos da montagem'));
+    v.src = url;
+  });
+
+// O recorte inteligente de cada imagem fica aqui, indexado pela própria imagem
+// (WeakMap: não segura memória depois de a imagem sair).
+const ajustesDeEnquadramento = new WeakMap();
+
+// O recorte escolhido, já convertido para pixels do canvas. `null` quando não há
+// nada a deslocar (recorte centrado).
+function deslocamentoDoRecorte(img, w, h) {
+  const ajuste = img ? ajustesDeEnquadramento.get(img) : null;
+  if (!ajuste || (!ajuste.x && !ajuste.y)) return null;
+  const mw = img.naturalWidth || img.videoWidth || 1;
+  const mh = img.naturalHeight || img.videoHeight || 1;
+  const escala = Math.max(w / mw, h / mh);
+  return { x: -ajuste.x * escala, y: -ajuste.y * escala };
 }
 
-// Desenha a imagem da cena já com o recorte escolhido.
+// Analisa uma imagem e guarda o recorte que mantém o assunto no meio.
 //
-// O recorte desloca até `ajuste.x`/`ajuste.y` pixels na imagem original. A
-// janela visível tem (alvo/escala) pixels de largura; o que sobra da imagem
-// (dw - w pixels, à escala do canvas) é o que pode deslizar. Desenhar em
-// -x*escala é exatamente pôr o recorte a começar em x.
-function desenharEnquadrado(ctx, img, w, h, ajuste) {
-  const ax = (ajuste && ajuste.x) || 0;
-  const ay = (ajuste && ajuste.y) || 0;
-  if (!ax && !ay) {
-    desenharCobrindo(ctx, img, w, h);
-    return;
+// A análise é feita numa cópia PEQUENA (no máximo 160 px): o mapa de detalhe
+// custa o mesmo por pixel e ler a imagem original inteira num telemóvel seria
+// lento sem ganhar nada — o sítio do personagem vê-se igual em miniatura.
+function analisarEnquadramento(img, alvoW, alvoH, modo) {
+  if (modo !== 'personagem') return null;
+  try {
+    const mw = img.naturalWidth || img.videoWidth || 0;
+    const mh = img.naturalHeight || img.videoHeight || 0;
+    if (!mw || !mh) return null;
+    const maxLado = 160;
+    const escala = Math.min(1, maxLado / Math.max(mw, mh));
+    const l = Math.max(1, Math.round(mw * escala));
+    const a = Math.max(1, Math.round(mh * escala));
+    const c = document.createElement('canvas');
+    c.width = l;
+    c.height = a;
+    const g = c.getContext('2d', { willReadFrequently: true });
+    if (!g) return null;
+    g.drawImage(img, 0, 0, l, a);
+    const dados = g.getImageData(0, 0, l, a).data;
+    const ajuste = calcularRecorte({ largura: l, altura: a, alvoW, alvoH, dados, modo });
+    const fator = 1 / escala;
+    const final = { x: Math.round(ajuste.x * fator), y: Math.round(ajuste.y * fator) };
+    ajustesDeEnquadramento.set(img, final);
+    return final;
+  } catch {
+    return null; // imagem protegida por CORS ou canvas bloqueado: recorte centrado
   }
-  const escala = Math.max(w / img.naturalWidth, h / img.naturalHeight);
-  const dw = Math.round(img.naturalWidth * escala);
-  const dh = Math.round(img.naturalHeight * escala);
-  const dx = Math.round((w - dw) / 2 - ax * escala);
-  const dy = Math.round((h - dh) / 2 - ay * escala);
-  ctx.drawImage(img, dx, dy, dw, dh);
+}
+
+// Desenha a imagem (ou o fotograma atual do vídeo) a cobrir o canvas inteiro
+// (recorta o que sobra), sem deformar.
+//
+// `ajuste` é o recorte inteligente: desloca o recorte para o assunto ficar no
+// meio. `escala`, `deslocamentoX` e `deslocamentoY` são das transições (zoom e
+// deslizar) e do epílogo.
+function desenharCobrindo(ctx, img, w, h, escala = 1, deslocamentoX = 0, deslocamentoY = 0, ajuste = null) {
+  const mw = img.naturalWidth || img.videoWidth || 1;
+  const mh = img.naturalHeight || img.videoHeight || 1;
+  const proporcao = Math.max(w / mw, h / mh) * escala;
+  const dw = mw * proporcao;
+  const dh = mh * proporcao;
+  const ax = ajuste ? ajuste.x : 0;
+  const ay = ajuste ? ajuste.y : 0;
+  ctx.drawImage(img, (w - dw) / 2 + deslocamentoX + ax, (h - dh) / 2 + deslocamentoY + ay, dw, dh);
+}
+
+// Desenha o EPILOGO: a imagem final, parada no essencial, com o movimento
+// da orientação escolhida. p vai de 0 (começo do epílogo) a 1 (fim).
+function desenharEpilogo(ctx, w, h, de, img, tLocal, dur, orientacao, T) {
+  const p = dur > 0 ? Math.min(1, Math.max(0, tLocal / dur)) : 1;
+  ctx.save();
+  // ENTRADA: a imagem final chega a esbater da anterior (nos primeiros T s).
+  if (de && T > 0 && tLocal < T) {
+    desenharCobrindo(ctx, de, w, h);
+    ctx.globalAlpha = Math.min(1, Math.max(0, tLocal / T));
+  } else {
+    ctx.globalAlpha = 1;
+  }
+  if (orientacao === 'natureza') {
+    // Aproximação lenta: a imagem de fecho instala-se (push-in suave).
+    desenharCobrindo(ctx, img, w, h, 1 + 0.1 * p);
+  } else if (orientacao === 'narrativa') {
+    // A câmara sobe e assenta na imagem final parada (plano-herói).
+    const escala = Math.max(1.04, 1.28 - 0.24 * p);
+    const deslocamentoY = h * 0.1 * (1 - p);
+    desenharCobrindo(ctx, img, w, h, escala, 0, deslocamentoY);
+  } else if (orientacao === 'clipe') {
+    // Imagem única, quieta; apaga para preto nos últimos 1,5s.
+    desenharCobrindo(ctx, img, w, h);
+    const restante = dur - tLocal;
+    if (restante < 1.5) {
+      ctx.fillStyle = `rgba(0,0,0,${(1 - Math.max(0, restante) / 1.5).toFixed(3)})`;
+      ctx.fillRect(0, 0, w, h);
+    }
+  } else {
+    desenharCobrindo(ctx, img, w, h);
+  }
+  ctx.restore();
 }
 
 // Desenha um instante da passagem entre a imagem `de` e a imagem `para`.
@@ -286,51 +364,6 @@ function desenharTransicao(ctx, w, h, de, para, t, tipo) {
       break;
   }
   ctx.restore();
-}
-
-// O recorte inteligente de cada imagem fica guardado aqui, indexado pela
-// própria imagem (WeakMap: não segura memória depois de a imagem sair).
-const ajustesDeEnquadramento = new WeakMap();
-
-function ajusteDe(img) {
-  return img ? ajustesDeEnquadramento.get(img) || null : null;
-}
-
-// Analisa uma imagem e guarda o recorte que mantém o assunto no meio.
-//
-// A análise é feita numa cópia PEQUENA (no máximo 160 px): o mapa de detalhe
-// custa o mesmo por pixel e ler a imagem original inteira num telemóvel seria
-// lento sem ganhar nada — o sítio do personagem vê-se igual em miniatura.
-function analisarEnquadramento(img, alvoW, alvoH, modo) {
-  if (modo === 'centro') return null;
-  try {
-    const maxLado = 160;
-    const escala = Math.min(1, maxLado / Math.max(img.naturalWidth, img.naturalHeight));
-    const l = Math.max(1, Math.round(img.naturalWidth * escala));
-    const a = Math.max(1, Math.round(img.naturalHeight * escala));
-    const c = document.createElement('canvas');
-    c.width = l;
-    c.height = a;
-    const g = c.getContext('2d', { willReadFrequently: true });
-    if (!g) return null;
-    g.drawImage(img, 0, 0, l, a);
-    const dados = g.getImageData(0, 0, l, a).data;
-    const ajuste = calcularRecorte({
-      largura: l,
-      altura: a,
-      alvoW,
-      alvoH,
-      dados,
-      modo,
-    });
-    // Converte o recorte da miniatura para o tamanho da imagem original.
-    const fator = 1 / escala;
-    const final = { x: Math.round(ajuste.x * fator), y: Math.round(ajuste.y * fator) };
-    ajustesDeEnquadramento.set(img, final);
-    return final;
-  } catch {
-    return null; // imagem protegida por CORS ou canvas bloqueado: recorte centrado
-  }
 }
 
 // Prepara a função que desenha o vídeo num instante do tempo.
@@ -387,11 +420,11 @@ function criarDesenhador({ ctx, w, h, imagens, inicios, duracoes, T, transicao, 
       const t = Math.min(1, Math.max(0, (tLocal - (dur - T)) / T)) * 0.5;
       desenharTransicao(ctx, w, h, imagens[k], imagens[k + 1], t, transicao);
     } else {
-      // Sem passagem: a imagem da cena, quieta, com o recorte escolhido.
+      // Sem passagem: a imagem da cena, quieta.
       ctx.save();
       ctx.globalAlpha = 1;
       if ('filter' in ctx) ctx.filter = 'none';
-      desenharEnquadrado(ctx, imagens[k], w, h, ajusteDe(imagens[k]));
+      desenharCobrindo(ctx, imagens[k], w, h, 1, 0, 0, deslocamentoDoRecorte(imagens[k], w, h));
       ctx.restore();
     }
 
@@ -457,7 +490,7 @@ export async function gerarVideo({
   // Legendas incrustadas no vídeo, com o texto de cada cena. Desligado por omissão.
   legendas = false,
   // Como cortar a imagem para caber no formato: 'personagem' (procura o assunto e
-  // centra-o) ou 'centro' (recorte centrado, o comportamento antigo).
+  // centra-o) ou 'centro' (recorte centrado).
   enquadramento = 'personagem',
   // Legendas já prontas (a letra da música, distribuída pelo tempo). Quando vêm,
   // substituem as legendas tiradas da narração: as duas juntas enchiam o ecrã.
@@ -522,11 +555,12 @@ export async function gerarVideo({
   const imagens = [];
   const elementosVideo = [];
   for (const [i, c] of cenas.entries()) {
-    const img = await carregarImagem(c.imagem);
-    imagens.push(img);
+    const fonte = c.video ? await carregarVideo(c.imagem) : await carregarImagem(c.imagem);
+    imagens.push(fonte);
     // Depois de carregada, procura-se onde está o assunto — é isto que impede o
     // recorte de cortar a cara do personagem ou tirá-lo de quadro.
-    analisarEnquadramento(img, alvo.w, alvo.h, enquadramento);
+    if (!c.video) analisarEnquadramento(fonte, alvo.w, alvo.h, enquadramento);
+    elementosVideo.push(c.video ? fonte : null);
     aoProgredir({ fase: 'a preparar as imagens', atual: i + 1, total: cenas.length });
   }
 

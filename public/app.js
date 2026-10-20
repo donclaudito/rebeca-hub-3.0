@@ -1606,7 +1606,7 @@ function verResultado() {
 // ---------------------------------------------------------------- projetos
 // A gestão dos projetos guardados vive agora em estudio-projetos.mjs; o objeto
 // `projetos` fica aqui (o estúdio consulta-o ao limpar e ao guardar).
-const projetos = { mod: null, idAtual: null, lista: [], criadoEm: null, nuvemId: null };
+const projetos = { mod: null, idAtual: null, lista: [], criadoEm: null, nuvemId: null, nomeAtual: null };
 let modProjetosUI = null;
 const estadoProjeto = (msg, tipo = '') => modProjetosUI?.estadoProjeto(msg, tipo);
 const desenharProjetos = () => modProjetosUI?.desenharProjetos();
@@ -1978,8 +1978,14 @@ async function guardarNaNuvem() {
     // O "Reeditar projeto" precisa do projeto NA NUVEM: sem ele, o vídeo só se
     // reedita no computador onde as cenas ficaram. Por isso o projeto vai
     // junto (uma vez) e o vídeo fica ligado ao id da cópia da nuvem.
+    //
+    // Se o nome do projeto mudou desde o último guardar, este vídeo é de um
+    // projeto NOVO: tem de subir uma cópia nova, senão o vídeo ficava ligado ao
+    // projeto anterior — era o que fazia o "✏️ Reeditar projeto" abrir sempre o
+    // último projeto usado.
     let projetoId = String(projetos.nuvemId || '');
-    if (!projetoId && modProjetosUI?.guardarProjetoNaNuvem) {
+    const projetoNovo = modProjetosUI?.precisaGuardarComoNovo?.() === true;
+    if ((!projetoId || projetoNovo) && modProjetosUI?.guardarProjetoNaNuvem) {
       try {
         projetoId = String((await modProjetosUI.guardarProjetoNaNuvem()) || '');
         estadoVideo('projeto guardado na nuvem também ✓', 'wait');
@@ -2224,6 +2230,7 @@ async function init() {
     projetos.idAtual = null;
     projetos.criadoEm = null;
     projetos.nuvemId = null;
+    projetos.nomeAtual = null;
     const btnAtualizar = $('btn-projeto-atualizar');
     if (btnAtualizar) btnAtualizar.hidden = true;
     estadoProjeto('Guarde o trabalho para o voltar a abrir noutro dia.');

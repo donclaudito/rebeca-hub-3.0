@@ -60,8 +60,49 @@ function estadoProjeto(msg, tipo = '') {
   el.textContent = msg;
 }
 
+// O projeto que está aberto vai ser ATUALIZADO ou é um trabalho NOVO?
+//
+// Era este o defeito que fazia o "✏️ Reeditar projeto" abrir sempre o último
+// projeto usado: escrevia-se um nome novo no campo, mas o "Guardar" continuava a
+// escrever por cima do projeto aberto (mesmo id e mesma cópia na nuvem). No fim
+// havia um só projeto — com o nome novo e o conteúdo novo — e todos os vídeos
+// apontavam para ele.
+//
+// Regra: se o nome no campo é diferente do nome com que o projeto aberto foi
+// guardado, é um projeto NOVO. Ganha id próprio (e nenhuma cópia na nuvem, até
+// se pedir), e o anterior fica exatamente como estava.
+function nomeDoCampo() {
+  return String($('projeto-nome')?.value || '').trim();
+}
+
+function vaiSerProjetoNovo() {
+  const nome = nomeDoCampo();
+  const anterior = String(projetos.nomeAtual || '').trim();
+  if (!nome || !anterior) return false; // sem projeto aberto: já é novo de si
+  return nome.toLowerCase() !== anterior.toLowerCase();
+}
+
+// Para o app.js: o vídeo que se vai guardar pertence a um projeto que ainda não
+// existe na nuvem? (nome mudou → tem de subir como projeto novo, senão o vídeo
+// fica ligado ao projeto anterior e o "✏️ Reeditar projeto" abre o errado.)
+export function precisaGuardarComoNovo() {
+  return vaiSerProjetoNovo();
+}
+
+// Diz na interface o que o botão vai fazer — sem surpresas ao carregar.
+export function atualizarRotuloGuardar() {
+  const btn = $('btn-projeto-guardar');
+  if (!btn) return;
+  btn.textContent = vaiSerProjetoNovo() ? '💾 Guardar como novo' : '💾 Guardar projeto';
+  btn.title = vaiSerProjetoNovo()
+    ? `cria um projeto novo ("${nomeDoCampo()}"); o projeto "${projetos.nomeAtual}" fica como está`
+    : 'guarda por cima do projeto aberto';
+}
+
 // Junta tudo o que é preciso para voltar a abrir o trabalho mais tarde.
-async function recolherProjeto(nome) {
+//
+// `novo` = guardar como projeto NOVO (id próprio), mesmo que haja um aberto.
+async function recolherProjeto(nome, { novo = false } = {}) {
   const cenas = [];
   for (const [i, img] of state.images.entries()) {
     const cena = state.scenes[i] || {};
@@ -99,9 +140,9 @@ async function recolherProjeto(nome) {
     });
   }
   return {
-    id: projetos.idAtual || crypto.randomUUID(),
+    id: novo || !projetos.idAtual ? crypto.randomUUID() : projetos.idAtual,
     nome: String(nome || '').trim() || 'Projeto sem nome',
-    criadoEm: projetos.criadoEm || Date.now(),
+    criadoEm: novo || !projetos.criadoEm ? Date.now() : projetos.criadoEm,
     cenas,
     config: {
       servico: state.servico,
@@ -143,31 +184,45 @@ function binarioDeBase64(b64) {
 export async function guardarProjetoAgora() {
   if (!state.images.length) return toast('Importe as imagens primeiro.', 'err');
   const btn = $('btn-projeto-guardar');
-  const nome = $('projeto-nome').value;
+  const nome = nomeDoCampo();
+  const nomeAnterior = String(projetos.nomeAtual || '').trim();
+  const comoNovo = vaiSerProjetoNovo();
   btn.disabled = true;
   estadoProjeto(state.images.length > 20 ? 'a guardar… (são muitas imagens, isto demora um pouco)' : 'a guardar…');
   try {
     const mod = await modProjetos();
-    const dados = await recolherProjeto(nome);
-    if (projetos.nuvemId) dados.nuvemId = projetos.nuvemId;
+    const dados = await recolherProjeto(nome, { novo: comoNovo });
+    // Só se escreve por cima da cópia da nuvem quando é o MESMO projeto.
+    if (!comoNovo && projetos.nuvemId) dados.nuvemId = projetos.nuvemId;
     await mod.guardarProjeto(dados);
     projetos.idAtual = dados.id;
     projetos.criadoEm = dados.criadoEm;
+    projetos.nomeAtual = dados.nome;
     $('projeto-nome').value = dados.nome;
-    // Projeto veio da nuvem? As alterações voltam para a nuvem: é o que
-    // mantém a cópia da app em dia quando se reedita e salva outra vez.
-    if (projetos.nuvemId) {
+    // Projeto veio da nuvem (e não mudou de nome)? As alterações voltam para a
+    // nuvem: é o que mantém a cópia da app em dia quando se reedita e salva
+    // outra vez. Um projeto NOVO só vai para a nuvem quando o utilizador pedir
+    // (ou ao guardar o vídeo dele).
+    if (!comoNovo && projetos.nuvemId) {
       estadoProjeto('a guardar também na nuvem…');
       const nuvem = await import('./projeto-nuvem.mjs');
       projetos.nuvemId = await nuvem.guardarProjetoNuvem(dados, projetos.nuvemId);
       await mod.guardarProjeto({ ...dados, nuvemId: projetos.nuvemId });
     }
     estadoProjeto(
-      `Projeto "${dados.nome}" guardado${projetos.nuvemId ? ' (aqui e na nuvem)' : ''} · ` +
+      (comoNovo
+        ? `Projeto NOVO "${dados.nome}" guardado${nomeAnterior ? ` — o "${nomeAnterior}" ficou como estava` : ''} · `
+        : `Projeto "${dados.nome}" guardado${projetos.nuvemId ? ' (aqui e na nuvem)' : ''} · `) +
         `${dados.cenas.length} imagem(ns) · ${mod.tamanhoLegivel(mod.tamanhoDe(dados))}`,
       'ok',
     );
-    toast(`Projeto "${dados.nome}" guardado${projetos.nuvemId ? ', inclusive na nuvem' : ''}.`, 'ok');
+    toast(
+      comoNovo
+        ? `Projeto novo "${dados.nome}" guardado. O anterior ficou intacto.`
+        : `Projeto "${dados.nome}" guardado${projetos.nuvemId ? ', inclusive na nuvem' : ''}.`,
+      'ok',
+    );
+    atualizarRotuloGuardar();
     await desenharProjetos();
   } catch (e) {
     estadoProjeto(`❌ ${e.message}`, 'err');
@@ -186,14 +241,19 @@ export async function guardarProjetoAgora() {
 // projeto só está neste computador não se reedita em lado nenhum.
 export async function guardarProjetoNaNuvem() {
   if (!state.images.length) throw new Error('Importe as imagens primeiro.');
-  const dados = await recolherProjeto($('projeto-nome').value);
+  // Se o nome mudou, é um projeto NOVO: não se escreve por cima da cópia da
+  // nuvem do projeto anterior (era isto que fazia o "Reeditar" abrir sempre o
+  // último projeto usado).
+  const comoNovo = vaiSerProjetoNovo();
+  const dados = await recolherProjeto(nomeDoCampo(), { novo: comoNovo });
   const nuvem = await import('./projeto-nuvem.mjs');
-  projetos.nuvemId = await nuvem.guardarProjetoNuvem(dados, projetos.nuvemId);
+  projetos.nuvemId = await nuvem.guardarProjetoNuvem(dados, comoNovo ? null : projetos.nuvemId);
   // Também fica no histórico local (com a ligação à cópia da nuvem).
   const mod = await modProjetos();
   await mod.guardarProjeto({ ...dados, nuvemId: projetos.nuvemId });
   projetos.idAtual = dados.id;
   projetos.criadoEm = dados.criadoEm;
+  projetos.nomeAtual = dados.nome;
   return projetos.nuvemId;
 }
 
@@ -379,7 +439,11 @@ export async function abrirProjeto(id) {
 
     projetos.idAtual = p.id;
     projetos.criadoEm = p.criadoEm;
+    // O nome com que este projeto está guardado. É a referência para saber se o
+    // próximo "Guardar" ATUALIZA este projeto ou cria um NOVO (nome diferente).
+    projetos.nomeAtual = p.nome;
     $('projeto-nome').value = p.nome;
+    atualizarRotuloGuardar();
 
     // Volta a desenhar tudo com o projeto carregado.
     renderThumbs();
@@ -413,6 +477,8 @@ export async function apagarProjeto(id, nome) {
     if (projetos.idAtual === id) {
       projetos.idAtual = null;
       projetos.criadoEm = null;
+      projetos.nomeAtual = null;
+      atualizarRotuloGuardar();
     }
     await desenharProjetos();
     toast('Projeto apagado.', '');
@@ -437,8 +503,14 @@ export function iniciarProjetos() {
     ver.hidden = true;
     $('btn-projetos-ver').textContent = '📂 Os meus projetos';
   };
-  // O nome escrito à mão fica guardado nas preferências, para não se perder.
-  $('projeto-nome').addEventListener('input', () => guardar());
+  // O nome escrito à mão fica guardado nas preferências, para não se perder — e
+  // o botão passa a dizer o que vai fazer: "Guardar projeto" (escrita por cima
+  // do projeto aberto) ou "Guardar como novo" (nome diferente = projeto novo).
+  $('projeto-nome').addEventListener('input', () => {
+    guardar();
+    atualizarRotuloGuardar();
+  });
   const cfg = lerConfig();
   if (cfg.projetoNome) $('projeto-nome').value = cfg.projetoNome;
+  atualizarRotuloGuardar();
 }

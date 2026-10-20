@@ -56,13 +56,61 @@ async function cliente() {
 // uso normal; e mesmo depois disso há a renovação automática (ver `miniatura`).
 const VALIDADE_MINIATURA = 24 * 60 * 60; // 24 horas
 
-// Ficheiros de vídeo ficam no armazenamento privado: abrem por URL assinado.
-async function assinar(uri, expira = VALIDADE_MINIATURA) {
+// ---------------------------------------------------------------- URLs assinados
+//
+// O trabalho pesado (cache, fila de um pedido de cada vez, recuo no 429) está em
+// `urls-assinados.mjs`, que é o MESMO para o Painel e para os projetos da nuvem: a
+// Base44 respondia **429 Too Many Requests** quando o Painel pedia um URL por cada
+// miniatura de uma vez (12 vídeos = 12 pedidos seguidos).
+let modUrls = null;
+
+const pedirUrlAoCliente = async (uri, expira) => {
   const b = await cliente();
   const r = await b.integrations.Core.CreateFileSignedUrl({ file_uri: uri, expires_in: expira });
-  return r.signed_url;
+  return (r && r.signed_url) || '';
+};
+
+// Ficheiros de vídeo ficam no armazenamento privado: abrem por URL assinado.
+// `expira` em segundos. `renovar` ignora o URL em cache (pedido de um novo).
+async function assinar(uri, expira = VALIDADE_MINIATURA, { renovar = false } = {}) {
+  if (!uri) return '';
+  if (!modUrls) modUrls = await import('./urls-assinados.mjs');
+  return modUrls.assinar(uri, expira, { pedir: pedirUrlAoCliente, renovar });
 }
 
+// O módulo avisa quando desiste por causa do 429; aqui explica-se em português.
+function avisarLimite() {
+  const av = $('aviso-painel');
+  if (av) {
+    av.hidden = false;
+    av.textContent =
+      'A Base44 está a limitar pedidos (429). As miniaturas aparecem à medida que forem possíveis — recarregue dentro de um minuto. Os vídeos estão guardados.';
+  }
+}
+
+try {
+  if (typeof window !== 'undefined' && window.addEventListener) {
+    window.addEventListener('rh-limite-pedidos', avisarLimite);
+  }
+} catch {
+  /* sem janela (testes) */
+}
+
+// Chama `fn` quando o elemento entrar no ecrã (delega no módulo partilhado).
+// Enquanto o módulo não chegou, NÃO se chama já: era isso que fazia a rajada na
+// primeira abertura do Painel.
+function quandoVisivel(el, fn) {
+  if (modUrls) {
+    modUrls.quandoVisivel(el, fn);
+    return;
+  }
+  import('./urls-assinados.mjs')
+    .then((m) => {
+      modUrls = m;
+      m.quandoVisivel(el, fn);
+    })
+    .catch(() => fn());
+}
 // ---------------------------------------------------------------- vistas
 function hashAtual() {
   try {
@@ -151,45 +199,67 @@ function desenharResumo() {
 function miniatura(p) {
   const m = document.createElement('div');
   m.className = 'miniatura';
-  if (p.thumb_uri && p.thumbUrl) {
+
+  // O ícone fica SEMPRE lá; a imagem tapa-o quando chega. Assim nunca há
+  // quadrado vazio à espera do URL assinado.
+  const ic = document.createElement('span');
+  ic.className = 'icone';
+  ic.textContent = '🎬';
+  m.append(ic);
+
+  if (p.thumb_uri) {
     const img = document.createElement('img');
-    img.src = p.thumbUrl;
     img.alt = '';
     img.loading = 'lazy';
-    // O URL assinado vale 10 minutos e o <img> só pede o ficheiro quando entra
-    // no ecrã (loading="lazy"). Se a página ficou aberta mais do que isso, o
-    // pedido chega com o token já expirado (401): assina OUTRA VEZ e recarrega.
-    // As miniaturas usam `loading="lazy"`: o ficheiro só é pedido quando o
-    // cartão entra no ecrã — e isso pode acontecer muito depois de o Painel ter
-    // sido aberto. Se o URL assinado já tiver expirado, o pedido chega com 401
-    // (era o erro na consola). Aqui assina-se OUTRO URL e recarrega-se uma vez.
+    img.hidden = true;
+    img.onload = () => {
+      img.hidden = false;
+      ic.hidden = true;
+    };
     img.onerror = () => {
+      // O URL pode ter expirado (fica guardado 24 h). Pede um NOVO uma vez —
+      // pelo caminho da fila, para não voltar a fazer rajada.
       if (img.dataset.renovado === '1') {
-        // Falhou também a renovação: mostra o ícone em vez de um quadrado vazio.
-        const ic = document.createElement('span');
-        ic.className = 'icone';
-        ic.textContent = '🎬';
-        m.replaceChildren(ic);
+        img.hidden = true;
         return;
       }
       img.dataset.renovado = '1';
-      assinar(p.thumb_uri)
+      p.thumbUrl = '';
+      assinar(p.thumb_uri, VALIDADE_MINIATURA, { renovar: true })
         .then((url) => {
           if (!url) return;
           p.thumbUrl = url;
           img.src = url;
         })
         .catch(() => {
-          /* sem miniatura renovada, o cartão fica como estava */
+          /* sem miniatura renovada, fica o ícone */
         });
     };
     m.append(img);
-  } else {
-    const ic = document.createElement('span');
-    ic.className = 'icone';
-    ic.textContent = '🎬';
-    m.append(ic);
+
+    if (p.thumbUrl) {
+      img.src = p.thumbUrl;
+    } else {
+      // Só se pede o URL quando o cartão APARECE no ecrã: é isto que evita
+      // 12 pedidos de uma vez ao abrir o Painel (o 429 da Base44).
+      quandoVisivel(m, () => {
+        if (p.thumbUrl) {
+          img.src = p.thumbUrl;
+          return;
+        }
+        assinar(p.thumb_uri)
+          .then((url) => {
+            if (!url) return;
+            p.thumbUrl = url;
+            img.src = url;
+          })
+          .catch(() => {
+            /* o ícone continua */
+          });
+      });
+    }
   }
+
   const t = document.createElement('span');
   t.className = 'tempo';
   t.textContent = formatarMinutos(p.duracao);
@@ -522,37 +592,23 @@ async function apagarVideo(p) {
 }
 
 // ---------------------------------------------------------------- carregar
-// Quando foi a última vez que os miniaturas foram assinadas (ms). Serve para
-// renovar os URLs ao voltar ao Painel sem refazer tudo a cada clique.
-let miniaturasAssinadasEm = 0;
-
-// `jaAssinadas` = reutiliza os URLs que a lista já tem (pedido de fundo do
-// painel.js, que reutiliza o cartão). Por omissão assina-se de novo, para o
-// utilizador ver sempre as miniaturas — e não um 401 do token antigo.
-async function carregar({ jaAssinadas = false } = {}) {
+// `jaAssinadas` = reaproveita os URLs que a lista já tinha. Já não se assina
+// TUDO ao carregar: cada miniatura pede o seu URL quando aparece no ecrã
+// (ver `miniatura`) — e, se estiver em cache, é instantâneo, sem pedido nenhum.
+// Era esta assinatura em rajada que dava o 429.
+async function carregar({ jaAssinadas = true } = {}) {
   const btn = $('btn-recarregar');
   if (btn) btn.disabled = true;
   try {
     const b = await cliente();
     const page = await b.entities.VideoProducao.filter({}, { sort: '-created_date', limit: 50 });
     const itens = page.items || [];
-    // As miniaturas vêm de ficheiros privados: um URL assinado por cartão.
-    // Se já estavam assinadas há pouco, reaproveitam-se.
-    const reaproveitar = jaAssinadas && miniaturasAssinadasEm && Date.now() - miniaturasAssinadasEm < 5 * 60 * 1000;
     const anteriores = new Map(lista.map((p) => [p.id, p.thumbUrl]));
     for (const p of itens) {
-      if (!p.thumb_uri) continue;
-      if (reaproveitar && anteriores.get(p.id)) {
-        p.thumbUrl = anteriores.get(p.id);
-        continue;
-      }
-      try {
-        p.thumbUrl = await assinar(p.thumb_uri);
-      } catch {
-        p.thumbUrl = '';
-      }
+      // Reaproveita o URL que já se tinha; senão fica vazio e a miniatura pede-o
+      // quando aparecer no ecrã (o `assinar` devolve-o da cache quando existe).
+      p.thumbUrl = jaAssinadas ? anteriores.get(p.id) || '' : '';
     }
-    if (!reaproveitar) miniaturasAssinadasEm = Date.now();
     lista = itens;
     const av = $('aviso-painel');
     if (av) av.hidden = true;
@@ -732,12 +788,15 @@ if (typeof window !== 'undefined') {
   }
   // O evento "rh-vista" devolve a vista a quem a mudou (é idempotente).
 
-  // AO VOLTAR AO PAINEL, RENOVAM-SE OS URLS DAS MINIATURAS.
+  // AO VOLTAR AO PAINEL, a lista é atualizada — mas SEM assinar miniaturas em
+  // rajada.
   //
-  // O URL assinado de uma miniatura tem prazo. Se o Painel ficar aberto muito
-  // tempo (ou o portátil suspender), as imagens passam a dar 401 quando o
-  // browser as pede. Ao voltar ao Painel — ou quando a janela volta a estar à
-  // frente —, se a assinatura já tem mais de 5 minutos, assina-se de novo.
+  // Antes, cada regresso ao Painel (e cada vez que a janela voltava à frente)
+  // mandava assinar TODAS as miniaturas outra vez: era isto que a Base44
+  // respondia com 429. Agora os URLs estão em cache (24 h) e cada miniatura só
+  // pede o seu quando aparece no ecrã. A lista também não se recarrega mais do
+  // que uma vez a cada 30 s (mudar de vista e voltar não é um pedido novo).
+  let ultimaAtualizacao = 0;
   const renovarSePreciso = () => {
     let vista = 'painel';
     try {
@@ -746,7 +805,9 @@ if (typeof window !== 'undefined') {
       /* modo privado */
     }
     if (vista !== 'painel') return;
-    if (!miniaturasAssinadasEm || Date.now() - miniaturasAssinadasEm > 5 * 60 * 1000) carregar();
+    if (Date.now() - ultimaAtualizacao < 30 * 1000) return;
+    ultimaAtualizacao = Date.now();
+    carregar({ jaAssinadas: true });
   };
   window.addEventListener('rh-vista', renovarSePreciso);
   document.addEventListener('visibilitychange', () => {

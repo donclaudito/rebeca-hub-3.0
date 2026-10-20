@@ -14,6 +14,24 @@ const cliente = async () => {
   return base44;
 };
 
+// Os ficheiros de cada cena (imagem + áudio) são privados: cada download precisa
+// de um URL assinado. Um projeto de 15 cenas seriam 30 pedidos seguidos — e a
+// Base44 responde 429 a isso. Passa tudo pela fila partilhada, que guarda os
+// URLs em cache, faz um pedido de cada vez e recua no 429.
+let modUrls = null;
+const lerUrls = async () => {
+  if (!modUrls) modUrls = await import('./urls-assinados.mjs');
+  return modUrls;
+};
+
+const assinar = async (b, uri) =>
+  (await lerUrls()).assinar(uri, 600, {
+    pedir: async (endereco, expira) => {
+      const r = await b.integrations.Core.CreateFileSignedUrl({ file_uri: endereco, expires_in: expira });
+      return (r && r.signed_url) || '';
+    },
+  });
+
 // Guarda (ou atualiza, quando há id) um projeto na nuvem. Devolve o id.
 export async function guardarProjetoNuvem(dados, idNuvem) {
   const b = await cliente();
@@ -82,11 +100,6 @@ export async function lerProjetoNuvem(id) {
   if (!reg) return null;
   return await converterNuvem(reg, b);
 }
-
-const assinar = async (b, uri) => {
-  const r = await b.integrations.Core.CreateFileSignedUrl({ file_uri: uri, expires_in: 600 });
-  return r.signed_url;
-};
 
 const baixar = async (b, uri) => {
   if (!uri) return null;

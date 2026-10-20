@@ -295,16 +295,31 @@ function removerDuplicadas() {
 // de cenas só aparecia DEPOIS de gerar a narração — e antes disso não havia
 // onde escrever texto nem onde ouvir, o que tornava a app inutilizável.
 // Preserva o texto e o áudio já feitos quando as imagens mudam de ordem.
+// O casamento cena ↔ imagem é pelo ID ÚNICO da imagem, nunca pelo nome do
+// ficheiro: importações repetidas criam ficheiros com o MESMO nome (o Windows
+// e a gravação de ecrã fazem isso), e casar pelo nome fazia o arraste copiar
+// a narração de uma cena para a outra — o texto de uma apagava o da outra.
+// Cenas antigas, sem id guardado, casam pelo nome e cada uma é usada UMA vez.
 function sincronizarCenas() {
-  const porNome = new Map(state.scenes.map((s) => [s.filename, s]));
+  const porId = new Map();
+  const porNome = new Map();
+  state.scenes.forEach((s) => {
+    if (s.imageId) {
+      if (!porId.has(s.imageId)) porId.set(s.imageId, s);
+    } else if (!porNome.has(s.filename)) {
+      porNome.set(s.filename, s);
+    }
+  });
   state.scenes = state.images.map((img) => {
-    const antes = porNome.get(img.name);
+    const antes = porId.get(img.id) || porNome.get(img.name);
+    if (antes) porNome.delete(img.name);
     // Cenas de vídeo: a duração e o som vêm do próprio ficheiro.
     const video = Boolean(img?.video);
     const duracaoVideo = Number(img?.duracao) || 0;
     return antes
-      ? { ...antes, video, duracaoVideo }
+      ? { ...antes, imageId: img.id, video, duracaoVideo }
       : {
+          imageId: img.id,
           filename: img.name,
           texto: '',
           audioUrl: null,
@@ -902,7 +917,7 @@ async function gerar() {
 
     state.scenes = dados.scenes.map((s) => {
       const antes = state.scenes.find((p) => p.filename === s.filename);
-      return { filename: s.filename, texto: s.texto || '', audioUrl: antes?.audioUrl || null, audioB64: antes?.audioB64 || null, audioExt: antes?.audioExt || '' };
+      return { imageId: antes?.imageId || '', filename: s.filename, texto: s.texto || '', audioUrl: antes?.audioUrl || null, audioB64: antes?.audioB64 || null, audioExt: antes?.audioExt || '' };
     });
     renderScenes();
     progress(true, 100, 'narração pronta');

@@ -5,6 +5,13 @@
 //  do vídeo pronto + as cenas à função de nuvem analisarProducao, que devolve
 //  o feedback estruturado: composição/ritmo, sincronia com o áudio, melhorias
 //  de edição e um prompt refinado para regerar as imagens.
+//
+//  Antes disso corre a AUDITORIA DE ENQUADRAMENTO (auditoria-enquadramento.mjs):
+//  as mesmas contas do motor de vídeo dizem, cena a cena, se o personagem está
+//  centrado, se lhe falta a cabeça ou os pés, e se o problema é do recorte do
+//  vídeo ou da própria imagem. O resultado aparece no diálogo E segue como
+//  contexto para o Diretor — é o que condiciona o prompt refinado a corrigir
+//  tudo o que é possível corrigir.
 // ============================================================
 
 const $ = (id) => document.getElementById(id);
@@ -13,6 +20,8 @@ let ctx = null;
 // A análise mais recente (com as melhorias convertidas em controlos): é dela
 // que o botão "Aplicar melhorias e gerar de novo" parte.
 let ultimaAnalise = null;
+// A auditoria de enquadramento da última análise (números, não opiniões).
+let ultimaAuditoria = null;
 
 export function iniciarAnalise(c) {
   ctx = c;
@@ -50,11 +59,70 @@ function abrirDialogo() {
   const corpo = $('analise-corpo');
   if (corpo) corpo.hidden = true;
   ultimaAnalise = null;
+  ultimaAuditoria = null;
+  const listaEnq = $('analise-enquadramento');
+  if (listaEnq) listaEnq.replaceChildren();
+  const txtEnq = $('analise-enquadramento-texto');
+  if (txtEnq) txtEnq.textContent = '';
   const botao = $('btn-analise-aplicar');
   if (botao) botao.hidden = true;
   const dlg = $('dlg-analise');
   if (dlg && !dlg.open) dlg.showModal();
   estadoAnalise('O diretor está a ver o material — demora alguns segundos…', 'wait');
+}
+
+// O formato do vídeo em pixels ("1920x1080" → 1920, 1080).
+function alvoDoFormato() {
+  const { state } = ctx;
+  const partes = String(state.videoFormato || '1920x1080').split('x').map(Number);
+  const w = partes[0] > 0 ? partes[0] : 1920;
+  const h = partes[1] > 0 ? partes[1] : 1080;
+  return { w, h };
+}
+
+// Mede o enquadramento de cada cena (sem IA: são as contas do próprio motor).
+async function auditar() {
+  const { state } = ctx;
+  if (!state.images.length) return null;
+  try {
+    const mod = await import('./auditoria-enquadramento.mjs');
+    const { w, h } = alvoDoFormato();
+    return await mod.auditarCenas(state.images, w, h, { modo: 'personagem' });
+  } catch {
+    return null; // a análise do Diretor segue sem os números
+  }
+}
+
+// Mostra a auditoria no diálogo: uma linha por cena com problema + o resumo.
+function mostrarAuditoria(aud) {
+  const txt = $('analise-enquadramento-texto');
+  const lista = $('analise-enquadramento');
+  if (!txt || !lista) return;
+  lista.replaceChildren();
+  if (!aud || !aud.total) {
+    txt.textContent = 'Sem imagens para medir o enquadramento.';
+    return;
+  }
+  txt.textContent =
+    `${aud.veredicto}. ` +
+    (aud.faltas.length
+      ? `A corrigir: ${aud.faltas.join(' · ')}. O prompt refinado abaixo já inclui estas exigências.`
+      : 'Nada a corrigir no enquadramento: o personagem fica inteiro e centrado.');
+
+  const comProblema = aud.cenas.filter((c) => c.gravidade !== 'ok');
+  for (const c of comProblema) {
+    const li = document.createElement('li');
+    const icone = c.gravidade === 'grave' ? '⛔' : '⚠️';
+    const b = document.createElement('b');
+    b.textContent = `${icone} ${c.nome}`;
+    li.append(b, document.createTextNode(` — ${c.avisos.join('; ')}`));
+    lista.append(li);
+  }
+  if (!comProblema.length) {
+    const li = document.createElement('li');
+    li.textContent = `✅ As ${aud.total} cenas com o personagem inteiro e centrado.`;
+    lista.append(li);
+  }
 }
 
 // Os dados da montagem que a análise usa como contexto.
@@ -93,6 +161,11 @@ export async function analisarDiretor() {
   abrirDialogo();
 
   try {
+    // 1) MEDIR o enquadramento (números do motor, não opinião do modelo).
+    estadoAnalise('A medir o enquadramento das cenas…', 'wait');
+    const aud = await auditar();
+    ultimaAuditoria = aud;
+
     const b = await clienteBase44();
 
     // As imagens vão ao armazenamento privado (só esta app as abre) e o
@@ -122,6 +195,16 @@ export async function analisarDiretor() {
     const resposta = await b.functions.invoke('analisarProducao', {
       arquivos,
       meta: metaDaMontagem(resultado),
+      // Os números do enquadramento vão como contexto: o Diretor tem de os
+      // respeitar nas melhorias e no prompt refinado.
+      enquadramento: aud
+        ? {
+            veredicto: aud.veredicto,
+            faltas: aud.faltas,
+            exigencias: aud.exigencias,
+            cenas: aud.cenas.map((c) => ({ nome: c.nome, avisos: c.avisos, gravidade: c.gravidade })),
+          }
+        : null,
     });
 
     // Desembrulha: o SDK pode devolver { data: {...} } ou o próprio objeto.
@@ -129,8 +212,36 @@ export async function analisarDiretor() {
     if (dados?.data && typeof dados.data === 'object') dados = dados.data;
     if (!dados || !dados.ok) throw new Error(dados?.error || 'a análise falhou sem explicação');
 
+    // 2) As faltas MEDIDAS entram na lista de melhorias — mesmo que o modelo as
+    //    tenha esquecido. "Incluir na atualização" é isto: o que foi medido não
+    //    se perde.
+    const melhorias = Array.isArray(dados.melhorias) ? [...dados.melhorias] : [];
+    if (aud && aud.faltas.length) {
+      melhorias.unshift({
+        titulo: '⛔ Enquadramento (medido)',
+        detalhe: `${aud.faltas.join('; ')}. Isto resolve-se a gerar de novo as imagens com o prompt refinado: ${aud.exigencias.join('; ')}.`,
+      });
+    }
+
+    // 3) Garantir que o prompt refinado leva as exigências de enquadramento,
+    //    mesmo quando o modelo se esquece delas.
+    let promptRefinado = String(dados.promptRefinado || '');
+    if (aud && aud.faltas.length) {
+      const mod = await import('./auditoria-enquadramento.mjs');
+      const jaFala = /framing|full body|whole character|head.{0,20}feet|centred|centered/i.test(promptRefinado);
+      if (!jaFala) {
+        const clausula = mod.clausulaDeEnquadramento(aud.exigencias);
+        promptRefinado = `${promptRefinado.trim()} ${clausula}`.trim();
+      }
+    }
+
     const corpo = $('analise-corpo');
     if (corpo) corpo.hidden = false;
+    mostrarAuditoria(aud);
+    // A leitura do Diretor sobre o enquadramento (o que ele viu nas imagens)
+    // fica por baixo das medidas — uma complementa a outra.
+    const enqIa = $('analise-enquadramento-ia');
+    if (enqIa) enqIa.textContent = dados.enquadramento || '';
     const comp = $('analise-composicao');
     if (comp) comp.textContent = dados.composicao || '';
     const sinc = $('analise-sincronia');
@@ -138,7 +249,7 @@ export async function analisarDiretor() {
     const lista = $('analise-melhorias');
     if (lista) {
       lista.innerHTML = '';
-      (dados.melhorias || []).forEach((m) => {
+      melhorias.forEach((m) => {
         const li = document.createElement('li');
         const b1 = document.createElement('b');
         b1.textContent = m.titulo;
@@ -152,11 +263,16 @@ export async function analisarDiretor() {
       }
     }
     const prompt = $('analise-prompt');
-    if (prompt) prompt.value = dados.promptRefinado || '';
-    ultimaAnalise = dados;
+    if (prompt) prompt.value = promptRefinado;
+    ultimaAnalise = { ...dados, melhorias, promptRefinado };
     const botao = $('btn-analise-aplicar');
     if (botao) botao.hidden = !dados.aplicar || !Object.keys(dados.aplicar).length;
-    estadoAnalise('✅ Análise pronta — veja abaixo. O prompt refinado pode ser colado no gerador de imagens.', 'ok');
+    estadoAnalise(
+      aud && aud.faltas.length
+        ? `✅ Análise pronta. Enquadramento: ${aud.veredicto} — copie o prompt refinado para gerar as imagens já com as correções.`
+        : '✅ Análise pronta — veja abaixo. O prompt refinado pode ser colado no gerador de imagens.',
+      'ok',
+    );
     toast('Análise do diretor pronta.', 'ok');
   } catch (e) {
     estadoAnalise(`❌ ${e.message}`, 'err');
@@ -264,7 +380,20 @@ async function aplicarEGerar() {
       '',
     );
   }
-  if (!aplicados.length) return; // nada a mudar nos controlos — não regenera à toa
+  if (!aplicados.length) {
+    // Nada a mudar nos controlos. Se o problema medido for de enquadramento, a
+    // app não o resolve sozinha: só imagens novas (ou o recorte) o resolvem — e
+    // dizê-lo evita regenerar à espera de uma melhoria que não vem.
+    const faltas = ultimaAuditoria?.faltas || [];
+    if (faltas.length) {
+      toast(
+        `O enquadramento não se corrige a regerar o vídeo: ${faltas.join('; ')}. Copie o prompt refinado e gere as imagens de novo com ele.`,
+        '',
+      );
+      $('analise-prompt')?.select?.();
+    }
+    return;
+  }
 
   $('dlg-analise')?.close();
   toast(`✨ Melhorias aplicadas: ${aplicados.join(' · ')}. A gerar de novo…`, 'ok');

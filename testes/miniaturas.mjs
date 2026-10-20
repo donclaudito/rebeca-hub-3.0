@@ -174,9 +174,10 @@ console.log('\n[3] Recarregar a página também aproveita os URLs guardados');
   check(contagem.assinar === antes, `o botão "recarregar" não assina de novo (${contagem.assinar} no total)`, `fez ${contagem.assinar - antes} pedidos novos`);
 }
 
-// Os botões do cartão, pelos títulos (a ordem pode mudar).
+// Os botões do cartão, pelos títulos (a ordem e a estrutura podem mudar).
+const acoesDoCartao = (cartao) => cartao.children.find((c) => String(c.className || '').includes('cartao-acoes'));
 const botaoDoCartao = (cartao, titulo) =>
-  cartao.children[1].children[3].children.find((b) => String(b.title || '').toLowerCase().includes(titulo));
+  acoesDoCartao(cartao).children.find((b) => String(b.title || '').toLowerCase().includes(titulo));
 
 console.log('\n[4] Apagar um vídeo que o servidor já não tem (404) tira-o do Painel');
 {
@@ -241,7 +242,35 @@ console.log('\n[5] 🏷️ Muda o nome do cartão no Painel (o "Projeto sem nome
   check(renomeados.length === 1, 'cancelar a janela não faz pedido nenhum', `${renomeados.length} pedidos`);
 }
 
-console.log('\n[6] Sem erros de JavaScript');
+console.log('\n[6] Cada vídeo aparece como na lista de projetos: miniatura · nome · Abrir');
+{
+  // O utilizador conhecia a lista de projetos do estúdio e o Painel era uma
+  // grelha de cartões grandes. Agora é a MESMA forma: uma linha por vídeo.
+  const cartao = reg.get('grade').children[0];
+  check(String(cartao.className).includes('video-cartao'), 'cada vídeo é uma linha (.video-cartao)', String(cartao.className));
+  const [mini, corpo, acoes] = cartao.children;
+  check(String(mini.className).includes('miniatura'), '1.º: a miniatura à esquerda', String(mini && mini.className));
+  check(String(corpo.className).includes('cartao-corpo'), '2.º: o bloco de texto', String(corpo && corpo.className));
+  check(String(acoes.className).includes('cartao-acoes'), '3.º: as ações à direita', String(acoes && acoes.className));
+
+  const nome = corpo.children[0];
+  const meta = corpo.children[1];
+  check(String(nome.className).includes('cartao-nome'), 'com o nome em destaque', String(nome.className));
+  check(String(meta.className).includes('cartao-meta'), 'e uma linha de detalhes', String(meta.className));
+  const partes = String(meta.textContent).split('·').map((x) => x.trim()).filter(Boolean);
+  check(partes.length >= 4, `a linha de detalhes tem formato, tamanho, duração e quando (${partes.join(' | ')})`, meta.textContent);
+  check(partes[partes.length - 1] === 'agora mesmo' || /^há /.test(partes[partes.length - 1]), `o "quando" é relativo, como na lista de projetos ("${partes[partes.length - 1]}")`, partes[partes.length - 1]);
+
+  const primeiro = acoes.children[0];
+  check(/Abrir/i.test(String(primeiro.textContent)), `o botão principal é "Abrir" ("${primeiro.textContent}")`, String(primeiro.textContent));
+
+  // E o CSS tem mesmo a lista em coluna (não a grelha antiga).
+  const css = readFileSync('E:/youtube rebeca2/rebeca-hub-3.0-base44/public/painel.css', 'utf8');
+  check(/\.grade \{[^}]*display: flex;[^}]*flex-direction: column/.test(css), 'o CSS põe a lista em coluna', 'o CSS ainda tem grelha');
+  check(/\.miniatura \{[^}]*width: 58px/.test(css), 'a miniatura é pequena (58 px)', 'a miniatura não tem tamanho fixo');
+}
+
+console.log('\n[7] Sem erros de JavaScript');
 if (erros.length) erros.slice(0, 4).forEach((e) => fail('erro: ' + e));
 else ok('nenhum erro não tratado');
 

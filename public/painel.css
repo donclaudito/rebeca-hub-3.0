@@ -10,20 +10,32 @@
 .resumo-caixa b { display: block; font-size: 19px; color: var(--accent-2); }
 .resumo-caixa span { font-size: 11.5px; color: var(--txt-2); }
 
-.grade { display: grid; grid-template-columns: repeat(auto-fill, minmax(258px, 1fr)); gap: 16px; }
-.video-cartao { background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; display: flex; flex-direction: column; transition: transform .15s ease, border-color .15s ease; }
-.video-cartao:hover { transform: translateY(-2px); border-color: var(--accent); }
-.miniatura { position: relative; aspect-ratio: 16 / 9; background: linear-gradient(135deg, #241f45, #101322); display: flex; align-items: center; justify-content: center; }
+/* ---------- lista de vídeos ----------
+   O MESMO formato da lista de projetos do estúdio: miniatura pequena à
+   esquerda, nome + uma linha de detalhes, e as ações à direita. Antes era uma
+   grelha de cartões grandes, com a miniatura por cima — e a lista de projetos
+   (que o utilizador conhece) não se parecia nada com isto. */
+.grade { display: flex; flex-direction: column; gap: 8px; }
+.video-cartao {
+  display: flex; align-items: center; gap: 11px; padding: 8px 10px;
+  background: var(--bg-2); border: 1px solid var(--line); border-radius: 10px;
+  transition: border-color .15s ease, background .15s ease;
+}
+.video-cartao:hover { border-color: var(--accent); background: var(--bg-3); }
+.miniatura {
+  position: relative; width: 58px; height: 58px; flex: none; border-radius: 8px;
+  overflow: hidden; background: linear-gradient(135deg, #241f45, #101322);
+  border: 1px solid var(--line); display: flex; align-items: center; justify-content: center;
+}
 .miniatura img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.miniatura .tempo { position: absolute; right: 8px; bottom: 8px; background: rgba(0,0,0,.72); color: #fff; font-size: 11.5px; padding: 2px 8px; border-radius: 99px; font-variant-numeric: tabular-nums; }
-.miniatura .icone { font-size: 40px; opacity: .5; }
-.cartao-corpo { padding: 12px 14px 14px; display: flex; flex-direction: column; gap: 8px; flex: 1; }
-.cartao-nome { font-weight: 650; font-size: 14.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cartao-meta { font-size: 11.5px; color: var(--txt-2); }
-.etiquetas { display: flex; gap: 6px; flex-wrap: wrap; }
+.miniatura .icone { font-size: 22px; opacity: .55; }
+.cartao-corpo { flex: 1; min-width: 0; display: block; padding: 0; }
+.cartao-nome { font-weight: 650; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cartao-meta { font-size: 11.5px; color: var(--txt-2); margin-top: 3px; line-height: 1.45; }
+.etiquetas { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 5px; }
 .etiqueta { font-size: 10.5px; padding: 2px 8px; border-radius: 99px; background: var(--bg-3); border: 1px solid var(--line); color: var(--txt-2); }
 .etiqueta.sim { color: var(--ok); border-color: #1f4d3d; background: #10241d; }
-.cartao-acoes { display: flex; gap: 8px; margin-top: auto; }
+.cartao-acoes { display: flex; gap: 6px; flex: none; align-items: center; }
 
 .painel-vazio { border: 1px dashed var(--line); border-radius: var(--radius); padding: 46px 20px; text-align: center; color: var(--txt-2); }
 .painel-vazio .icone { font-size: 40px; }
@@ -52,5 +64,6 @@
 
 @media (max-width: 640px) {
   .painel-corpo { padding: 18px 14px 40px; }
-  .grade { grid-template-columns: 1fr; }
+  .video-cartao { flex-wrap: wrap; }
+  .cartao-acoes { width: 100%; justify-content: flex-end; }
 }

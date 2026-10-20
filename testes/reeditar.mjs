@@ -189,9 +189,9 @@ console.log('\n[1] O cartão do vídeo abre a janela de detalhes');
   const cartao = reg.get('grade').children[0];
   check(Boolean(cartao), `o vídeo aparece na lista (${reg.get('grade').children.length} cartão(ões))`, 'a lista está vazia');
   // article → [miniatura, corpo] ; corpo → [nome, meta, etiquetas, acoes]
-  const acoes = cartao.children[1].children[3];
+  const acoes = cartao.children.find((c) => String(c.className || '').includes('cartao-acoes'));
   const ver = acoes.children[0];
-  check(String(ver.textContent).includes('Ver detalhes'), `o botão "Ver detalhes" existe ("${ver.textContent}")`, String(ver.textContent));
+  check(/Abrir|detalhes/i.test(String(ver.textContent)), `o botão de abrir existe ("${ver.textContent}")`, String(ver.textContent));
   ver.click();
   await new Promise((r) => setTimeout(r, 400));
   check(reg.get('dlg-detalhes').open === true, 'a janela de detalhes abriu', 'não abriu');
@@ -228,7 +228,7 @@ console.log('\n[3] O atalho ✏️ do próprio cartão também abre o projeto');
   reg.get('btn-ir-painel').click();
   await new Promise((r) => setTimeout(r, 500));
   const cartao = reg.get('grade').children[0];
-  const acoes = cartao.children[1].children[3];
+  const acoes = cartao.children.find((c) => String(c.className || '').includes('cartao-acoes'));
   // Pelo título: a ordem dos botões do cartão pode mudar (há um 🏷️ para o nome).
   const reedit = acoes.children.find((b) => String(b.title || '').includes('Reeditar'));
   check(String(reedit.textContent).includes('✏️'), `o botão ✏️ do cartão existe ("${reedit.textContent}")`, String(reedit.textContent));

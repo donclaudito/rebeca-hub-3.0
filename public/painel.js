@@ -200,12 +200,12 @@ function desenharResumo() {
 }
 
 // ---------------------------------------------------------------- lista
+// A miniatura da lista: um quadrado pequeno (58 px) à esquerda, como na lista
+// de projetos do estúdio. O ícone 🎬 fica lá enquanto o URL assinado não chega.
 function miniatura(p) {
   const m = document.createElement('div');
   m.className = 'miniatura';
 
-  // O ícone fica SEMPRE lá; a imagem tapa-o quando chega. Assim nunca há
-  // quadrado vazio à espera do URL assinado.
   const ic = document.createElement('span');
   ic.className = 'icone';
   ic.textContent = '🎬';
@@ -271,17 +271,25 @@ function miniatura(p) {
       });
     }
   }
-
-  const t = document.createElement('span');
-  t.className = 'tempo';
-  t.textContent = formatarMinutos(p.duracao);
-  m.append(t);
   return m;
 }
 
 function nomeFicheiroDe(p) {
   const limpo = String(p.nome || 'video').replace(/[^\w-]+/g, '-').replace(/^-+|-+$/g, '').toLowerCase();
   return `${limpo || 'video'}.webm`;
+}
+
+// "agora mesmo", "há 33 min", "há 2 h", "há 3 dias" — como na lista de projetos
+// do estúdio (a data absoluta fica na janela de detalhes).
+function quandoFoi(quando) {
+  const ms = typeof quando === 'number' ? quando : Date.parse(String(quando || ''));
+  if (!Number.isFinite(ms) || ms <= 0) return '';
+  const segundos = Math.round((Date.now() - ms) / 1000);
+  if (segundos < 60) return 'agora mesmo';
+  if (segundos < 3600) return `há ${Math.round(segundos / 60)} min`;
+  if (segundos < 86400) return `há ${Math.round(segundos / 3600)} h`;
+  if (segundos < 7 * 86400) return `há ${Math.round(segundos / 86400)} dia(s)`;
+  return formatarData(ms);
 }
 
 function cartao(p) {
@@ -298,7 +306,15 @@ function cartao(p) {
 
   const meta = document.createElement('div');
   meta.className = 'cartao-meta';
-  meta.textContent = `${p.formato || '—'} · ${formatarTamanho(p.video_tamanho)} · ${formatarData(p.created_date)}`;
+  // A mesma ideia da lista de projetos: uma linha só com o que interessa.
+  meta.textContent = [
+    p.formato || '—',
+    formatarTamanho(p.video_tamanho),
+    formatarMinutos(p.duracao),
+    quandoFoi(p.created_date),
+  ]
+    .filter(Boolean)
+    .join(' · ');
 
   const et = document.createElement('div');
   et.className = 'etiquetas';
@@ -323,10 +339,12 @@ function cartao(p) {
 
   const acoes = document.createElement('div');
   acoes.className = 'cartao-acoes';
+  // O botão principal é "Abrir", como na lista de projetos do estúdio.
   const ver = document.createElement('button');
   ver.type = 'button';
   ver.className = 'primary small';
-  ver.textContent = '▶️ Ver detalhes';
+  ver.textContent = '▶️ Abrir';
+  ver.title = 'ver os detalhes e o vídeo';
   ver.onclick = () => abrirDetalhes(p);
   const descarregar = document.createElement('button');
   descarregar.type = 'button';
@@ -363,8 +381,10 @@ function cartao(p) {
   yt.onclick = () => prepararYouTube(p);
   acoes.append(ver, nomear, yt, reedit, descarregar, apagar);
 
-  corpo.append(nome, meta, et, acoes);
-  c.append(miniatura(p), corpo);
+  // Miniatura à esquerda, texto no meio, ações à direita — a mesma ordem da
+  // lista de projetos do estúdio.
+  corpo.append(nome, meta, et);
+  c.append(miniatura(p), corpo, acoes);
   return c;
 }
 

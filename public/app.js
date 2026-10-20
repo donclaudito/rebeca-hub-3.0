@@ -7,6 +7,8 @@
 //   - não há servidor nenhum no seu computador.
 // ============================================================
 
+import { ehFicheiroVideo } from './estudio-video-carregado.mjs';
+
 const $ = (id) => document.getElementById(id);
 
 const state = {
@@ -40,6 +42,7 @@ const state = {
   // Letra da música: o texto colado e se está a ser usada como legenda.
   letra: '',
   letraLigada: false,
+  legendasLetra: null,
   pararVideo: false,
   // Trilha sonora: o ficheiro escolhido (fica só nesta sessão) e a duração lida.
   musicaFicheiro: null,
@@ -47,6 +50,8 @@ const state = {
   musicaSegundos: 0,
   musicaLigada: true,
   musicaUrl: '',
+  // Trechos de voz da música (analisarVoz): onde a letra da legenda entra.
+  musicaVoz: null,
   servico: 'deepseek',
   modelo: '',
   busy: false,
@@ -107,7 +112,17 @@ function iniciarAbas() {
 // ---------------------------------------------------------------- imagens
 function updateLayout() {
   const tem = state.images.length > 0;
-  $('workspace').hidden = !tem;
+  // O PAINEL é a vista inicial: com ele aberto, o estúdio fica escondido
+  // (mesmo com imagens importadas) — é o painel.js que manda na vista.
+  let noPainel = false;
+  try {
+    // O estúdio só aparece na vista "estudio": o painel E a pesquisa de temas
+    // o escondem, mesmo com imagens importadas.
+    noPainel = (localStorage.getItem('rh3vista') || 'painel') !== 'estudio';
+  } catch {
+    /* modo privado */
+  }
+  $('workspace').hidden = !tem || noPainel;
   $('drop').classList.toggle('compact', tem);
   $('drop-title').textContent = tem ? 'Arraste mais imagens para aqui' : 'Arraste uma pasta de imagens para aqui';
   $('count').textContent = state.images.length;
@@ -150,14 +165,21 @@ function renderThumbs() {
     n.className = 'n';
     n.textContent = i + 1;
 
-    const im = document.createElement('img');
+    // Cena de vídeo: a miniatura é o próprio vídeo parado no primeiro fotograma.
+    const im = document.createElement(img.video ? 'video' : 'img');
+    if (img.video) {
+      im.muted = true;
+      im.playsInline = true;
+      im.preload = 'metadata';
+    } else {
+      im.alt = img.name;
+      im.loading = 'lazy';
+    }
     im.src = img.url;
-    im.alt = img.name;
-    im.loading = 'lazy';
 
     const nm = document.createElement('span');
     nm.className = 'nm';
-    nm.textContent = img.name;
+    nm.textContent = img.video ? `🎬 ${img.name}` : img.name;
     nm.title = img.name;
 
     const mover = (simbolo, delta, titulo) => {
@@ -217,7 +239,41 @@ function renderThumbs() {
     ul.append(li);
   });
   updateLayout();
+  atualizarSeletorCenaFinal();
   $('btn-generate').disabled = !state.images.length || state.busy;
+}
+
+// Remove cenas duplicadas da lista: imagens que são cópias da mesma (o
+// Windows e alguns editores gravam "nome (1).jpg", "nome (2).jpg"…). Fica a
+// PRIMEIRA de cada grupo, na ordem da lista. Cópias só contam quando o
+// ficheiro tem o MESMO tamanho (imagens diferentes com nome parecido ficam).
+function removerDuplicadas() {
+  if (state.busy) return;
+  const chaveDe = (nome) => {
+    let base = String(nome || '').toLowerCase();
+    let anterior = '';
+    while (anterior !== base) {
+      anterior = base;
+      base = base.replace(/\s*\(\d+\)(\.[a-z0-9]+)?$/i, '$1').replace(/\s*-cópia|\s*-copiazinha|-copia(\.[a-z0-9]+)?$/i, '$1');
+    }
+    return base;
+  };
+  const grupos = new Map();
+  state.images.forEach((img, i) => {
+    const tamanho = img.file && Number.isFinite(img.file.size) ? img.file.size : '';
+    const chave = `${chaveDe(img.name)}|${tamanho}`;
+    if (!grupos.has(chave)) grupos.set(chave, []);
+    grupos.get(chave).push(i);
+  });
+  const copias = [...grupos.values()].flatMap((idxs) => idxs.slice(1));
+  if (!copias.length) return toast('Nenhuma cena duplicada na lista.', 'ok');
+  const nomes = copias.map((i) => `${i + 1}. ${state.images[i].name}`).join('\n');
+  if (!window.confirm(`Remover ${copias.length} cena(s) duplicada(s)? Fica a primeira de cada grupo:\n\n${nomes}`)) return;
+  const ids = new Set(copias.map((i) => state.images[i].id));
+  state.images = state.images.filter((x) => !ids.has(x.id));
+  renderThumbs();
+  renderScenes();
+  toast(`${copias.length} cena(s) duplicada(s) removida(s).`, 'ok');
 }
 
 // ---------------------------------------------------------------- cenas
@@ -225,21 +281,41 @@ function renderThumbs() {
 // de cenas só aparecia DEPOIS de gerar a narração — e antes disso não havia
 // onde escrever texto nem onde ouvir, o que tornava a app inutilizável.
 // Preserva o texto e o áudio já feitos quando as imagens mudam de ordem.
+// O casamento cena ↔ imagem é pelo ID ÚNICO da imagem, nunca pelo nome do
+// ficheiro: importações repetidas criam ficheiros com o MESMO nome (o Windows
+// e a gravação de ecrã fazem isso), e casar pelo nome fazia o arraste copiar
+// a narração de uma cena para a outra — o texto de uma apagava o da outra.
+// Cenas antigas, sem id guardado, casam pelo nome e cada uma é usada UMA vez.
 function sincronizarCenas() {
-  const porNome = new Map(state.scenes.map((s) => [s.filename, s]));
+  const porId = new Map();
+  const porNome = new Map();
+  state.scenes.forEach((s) => {
+    if (s.imageId) {
+      if (!porId.has(s.imageId)) porId.set(s.imageId, s);
+    } else if (!porNome.has(s.filename)) {
+      porNome.set(s.filename, s);
+    }
+  });
   state.scenes = state.images.map((img) => {
-    const antes = porNome.get(img.name);
-    return (
-      antes || {
-        filename: img.name,
-        texto: '',
-        audioUrl: null,
-        audioB64: null,
-        audioExt: '',
-        previaUrl: null,
-        previaVoz: '',
-      }
-    );
+    const antes = porId.get(img.id) || porNome.get(img.name);
+    if (antes) porNome.delete(img.name);
+    // Cenas de vídeo: a duração e o som vêm do próprio ficheiro.
+    const video = Boolean(img?.video);
+    const duracaoVideo = Number(img?.duracao) || 0;
+    return antes
+      ? { ...antes, imageId: img.id, video, duracaoVideo }
+      : {
+          imageId: img.id,
+          filename: img.name,
+          texto: '',
+          audioUrl: null,
+          audioB64: null,
+          audioExt: '',
+          previaUrl: null,
+          previaVoz: '',
+          video,
+          duracaoVideo,
+        };
   });
 }
 
@@ -253,6 +329,24 @@ function renderScenes() {
     const img = state.images[i];
     const li = document.createElement('li');
     li.className = 'scene';
+
+    if (img?.video) {
+      // Cena de vídeo: os controlos (corte, som, substituir, remover) ficam no
+      // módulo da edição de cenas — o app.js já é grande demais.
+      if (modCenasEdit) {
+        modCenasEdit.preencherCenaVideo(li, cena, img, i);
+      } else {
+        const vid = document.createElement('video');
+        vid.src = img.url;
+        vid.muted = true;
+        vid.playsInline = true;
+        vid.preload = 'metadata';
+        li.append(vid);
+      }
+      ol.append(li);
+      ligarArrasteCena(li, i);
+      return;
+    }
 
     const im = document.createElement('img');
     im.src = img ? img.url : '';
@@ -271,7 +365,21 @@ function renderScenes() {
     nome.className = 'file';
     nome.textContent = cena.filename;
     nome.title = cena.filename;
-    topo.append(idx, nome);
+    const rm = document.createElement('button');
+    rm.type = 'button';
+    rm.className = 'icon ghost rm';
+    rm.textContent = '✕';
+    rm.title = 'Remover esta cena';
+    rm.onclick = (e) => {
+      e.stopPropagation();
+      if (cena.audioUrl) URL.revokeObjectURL(cena.audioUrl);
+      if (cena.previaUrl) URL.revokeObjectURL(cena.previaUrl);
+      URL.revokeObjectURL(img.url);
+      state.images = state.images.filter((x) => x.id !== img.id);
+      renderThumbs();
+      renderScenes();
+    };
+    topo.append(idx, nome, rm);
 
     const ta = document.createElement('textarea');
     ta.value = cena.texto || '';
@@ -433,9 +541,42 @@ function renderScenes() {
     corpo.append(topo, ta, rodape);
     li.append(im, corpo);
     ol.append(li);
+    ligarArrasteCena(li, i);
   });
   atualizarContador();
 }
+
+// Reordenar cenas por arraste, na própria lista "Narração por imagem".
+// A ordem MANDA nas imagens: movo state.images e a lista de cenas volta a
+// sincronizar (o texto e o áudio de cada cena seguem o nome do ficheiro).
+const ligarArrasteCena = (li, i) => {
+  li.draggable = true;
+  li.addEventListener('dragstart', (e) => {
+    li.classList.add('dragging');
+    e.dataTransfer.setData('text/plain', `cena:${state.images[i].id}`);
+  });
+  li.addEventListener('dragend', () => li.classList.remove('dragging'));
+  li.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    li.classList.add('over');
+  });
+  li.addEventListener('dragleave', () => li.classList.remove('over'));
+  li.addEventListener('drop', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    li.classList.remove('over');
+    const id = String(e.dataTransfer.getData('text/plain') || '');
+    // Ficheiros soltos na lista: quem trata é o listener geral da página.
+    if (!id.startsWith('cena:')) return;
+    const de = state.images.findIndex((x) => x.id === id.slice(5));
+    if (de < 0 || de === i) return;
+    const [m] = state.images.splice(de, 1);
+    state.images.splice(i, 0, m);
+    renderThumbs();
+    renderScenes();
+  });
+};
 
 function atualizarContador() {
   const el = $('narradas');
@@ -688,9 +829,17 @@ async function gerar() {
   $('btn-generate').disabled = true;
   progress(true, 5, 'a preparar as imagens…');
   try {
+    // Cenas de vídeo não vão para a narração: a fala delas é o próprio vídeo.
+    const enviaveis = state.images.filter((img) => !img.video);
+    if (!enviaveis.length) {
+      progress(false);
+      state.busy = false;
+      $('btn-generate').disabled = false;
+      return toast('Não há imagens para narrar — só cena(s) de vídeo.', 'err');
+    }
     const prontas = [];
-    for (const [i, img] of state.images.entries()) {
-      if (i % 4 === 0) progress(true, 5 + Math.round((i / state.images.length) * 25), `a preparar imagem ${i + 1} de ${state.images.length}…`);
+    for (const [i, img] of enviaveis.entries()) {
+      if (i % 4 === 0) progress(true, 5 + Math.round((i / enviaveis.length) * 25), `a preparar imagem ${i + 1} de ${enviaveis.length}…`);
       prontas.push(await preparar(img));
     }
     const totalMb = prontas.reduce((s, p) => s + p.file.size, 0) / 1048576;
@@ -700,8 +849,8 @@ async function gerar() {
     if (state.servico === 'local') {
       // Alternativa: o servidor local, se ainda o tiver a correr.
       const fd = new FormData();
-      prontas.forEach((p, i) => fd.append('images', p.file, state.images[i].name));
-      fd.append('order', state.images.map((i) => i.name).join('\u0001'));
+      prontas.forEach((p, i) => fd.append('images', p.file, enviaveis[i].name));
+      fd.append('order', enviaveis.map((img) => img.name).join('\u0001'));
       fd.append('tone', $('tone').value.trim());
       fd.append('extra', $('extra').value.trim());
       fd.append('minWords', $('minWords').value);
@@ -717,7 +866,7 @@ async function gerar() {
       const imagens = await Promise.all(
         prontas.map(async (p, i) => {
           const b64 = await paraBase64(p.file);
-          return { nome: state.images[i].name, dataUrl: `data:${p.file.type || 'image/jpeg'};base64,${b64}` };
+          return { nome: enviaveis[i].name, dataUrl: `data:${p.file.type || 'image/jpeg'};base64,${b64}` };
         }),
       );
 
@@ -754,7 +903,7 @@ async function gerar() {
 
     state.scenes = dados.scenes.map((s) => {
       const antes = state.scenes.find((p) => p.filename === s.filename);
-      return { filename: s.filename, texto: s.texto || '', audioUrl: antes?.audioUrl || null, audioB64: antes?.audioB64 || null, audioExt: antes?.audioExt || '' };
+      return { imageId: antes?.imageId || '', filename: s.filename, texto: s.texto || '', audioUrl: antes?.audioUrl || null, audioB64: antes?.audioB64 || null, audioExt: antes?.audioExt || '' };
     });
     renderScenes();
     progress(true, 100, 'narração pronta');
@@ -771,10 +920,14 @@ async function gerar() {
 }
 
 // ---------------------------------------------------------------- ElevenLabs
-// A chave vive como segredo na Base44; esta página só pede a lista de vozes e o
-// áudio. No plano gratuito a ElevenLabs recusa as vozes da biblioteca (402) —
-// por isso a lista mostra primeiro as vozes da CONTA, que são as que servem.
+// As vozes e o áudio da ElevenLabs vivem agora em estudio-eleven.mjs (o app.js
+// estava demasiado grande); aqui ficam só os atalhos usados pelos botões.
+let modEleven = null;
+const estadoEleven = (msg, tipo = '') => modEleven?.estadoEleven(msg, tipo);
+const carregarVozesEleven = () => modEleven?.carregarVozesEleven();
+const audioDaEleven = (texto) => modEleven?.audioDaEleven(texto);
 
+// O motor e o tom ficam cá: marcam os chips desenhados no arranque da página.
 function marcarMotor() {
   [...$('motores').children].forEach((b) => b.classList.toggle('on', b.dataset.motor === state.motor));
   $('grupo-browser').hidden = state.motor !== 'browser';
@@ -785,159 +938,6 @@ function marcarMotor() {
 function marcarTom() {
   [...$('tons-eleven').children].forEach((b) => b.classList.toggle('on', b.dataset.tom === state.tom));
   guardar();
-}
-
-// A pré-escuta guardada pertence à voz que a gerou. Ao mudar de voz, tem de ser
-// deitada fora — senão o botão "Ouvir" continuava a tocar a voz antiga e
-// parecia que a escolha não tinha efeito.
-function limparPrevias() {
-  state.scenes.forEach((s) => {
-    if (s.previaUrl) {
-      URL.revokeObjectURL(s.previaUrl);
-      s.previaUrl = null;
-      s.previaVoz = '';
-    }
-  });
-}
-
-// Marca a voz escolhida em AMBAS as listas (app e conta) e atualiza o estado.
-// Antes isto só limpava os botões da mesma secção: escolher uma voz da conta
-// deixava uma do app marcada ao mesmo tempo, e parecia que a escolha não pegava.
-function marcarVozEleven(id) {
-  if (state.vozEleven !== id) limparPrevias();
-  state.vozEleven = id || '';
-  const v = state.vozesEleven.find((x) => x.id === id);
-  ['vozes-app', 'vozes-conta'].forEach((qual) => {
-    [...$(qual).children].forEach((b) => b.classList.toggle('on', b.dataset.id === id));
-  });
-  $('voz-estado').textContent = v
-    ? `ElevenLabs · ${v.rotuloDoApp || v.nome}`
-    : id
-      ? `ElevenLabs · ${id.slice(0, 8)}…`
-      : 'ElevenLabs · escolha uma voz';
-  guardar();
-}
-
-function desenharVozesEleven(dados) {
-  const app = $('vozes-app');
-  const conta = $('vozes-conta');
-  app.innerHTML = '';
-  conta.innerHTML = '';
-  state.vozesEleven = dados.vozes || [];
-
-  const doApp = state.vozesEleven.filter((v) => v.doApp);
-  const daConta = state.vozesEleven.filter((v) => !v.doApp);
-  $('linha-vozes-app').hidden = doApp.length === 0;
-  $('linha-vozes-conta').hidden = daConta.length === 0;
-
-  const criar = (v, caixa) => {
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.className = 'chip';
-    b.dataset.id = v.id;
-    b.textContent = v.rotuloDoApp || v.nome;
-    b.title =
-      `${v.nome}${v.categoria ? ` [${v.categoria}]` : ''}${v.descricao ? ` — ${v.descricao}` : ''}` +
-      `\nid: ${v.id}\nClique para usar esta voz na narração.`;
-    b.onclick = () => marcarVozEleven(v.id);
-    caixa.append(b);
-  };
-
-  doApp.forEach((v) => criar(v, app));
-  daConta.forEach((v) => criar(v, conta));
-
-  // Escolhe uma por omissão: a que já estava escolhida; senão a primeira da
-  // CONTA (o plano gratuito aceita essas); senão a primeira do app.
-  const preferida = state.vozesEleven.find((v) => v.id === state.vozEleven) || daConta[0] || doApp[0];
-  marcarVozEleven(preferida ? preferida.id : '');
-}
-
-function estadoEleven(msg, tipo = '') {
-  const el = $('eleven-estado');
-  if (!msg) {
-    el.hidden = true;
-    return;
-  }
-  el.hidden = false;
-  el.className = `cfg-result ${tipo}`;
-  el.textContent = msg;
-}
-
-async function carregarVozesEleven() {
-  const btn = $('btn-carregar-vozes');
-  btn.disabled = true;
-  estadoEleven('a pedir as vozes à ElevenLabs…', 'wait');
-  try {
-    const { base44 } = await import('@/base44Client.js');
-    let d;
-    try {
-      const r = await base44.functions.invoke('listElevenVoices', {});
-      d = r?.data && !r.ok ? r.data : r;
-    } catch (e) {
-      d = e?.response?.data || { ok: false, error: e?.message };
-    }
-    if (!d?.ok) {
-      estadoEleven(`❌ ${d?.error || 'não consegui obter as vozes'}`, 'err');
-      return;
-    }
-    if (!d.vozes?.length) {
-      estadoEleven('⚠️ A sua conta não tem vozes. Crie uma em elevenlabs.io e tente de novo.', 'err');
-      return;
-    }
-    desenharVozesEleven(d);
-    const quantasConta = d.vozes.filter((v) => !v.doApp).length;
-    const marcada = d.vozes.find((v) => v.id === state.vozEleven);
-    estadoEleven(
-      `✅ ${d.total} voz(es) na sua conta (${quantasConta} suas, ${d.total - quantasConta} do app).` +
-        (marcada ? ` Voz escolhida: "${marcada.nome}".` : '') +
-        (d.biblioteca ? ' As do app podem ser recusadas se o plano for gratuito.' : ''),
-      'ok',
-    );
-  } catch (e) {
-    estadoEleven(`❌ ${e.message}`, 'err');
-  } finally {
-    btn.disabled = false;
-  }
-}
-
-// Gera o áudio de UMA cena pela ElevenLabs e devolve o blob.
-async function audioDaEleven(texto) {
-  if (!state.vozEleven) throw new Error('escolha uma voz da ElevenLabs (clique em "Carregar as minhas vozes")');
-  const { base44 } = await import('@/base44Client.js');
-  let d;
-  try {
-    const r = await base44.functions.invoke('narrateEleven', {
-      texto,
-      voz: state.vozEleven,
-      tom: state.tom,
-    });
-    d = r?.data && !r.ok ? r.data : r;
-  } catch (e) {
-    d = e?.response?.data || { ok: false, error: e?.message };
-  }
-  if (!d?.ok) {
-    // Leva as tentativas para a mensagem: quando a ElevenLabs recusa, é a lista
-    // de tentativas que diz se o problema é a chave ou o modelo/plano.
-    const det = (d.tentativas || []).map((t) => `${t.modelo}: HTTP ${t.http} — ${t.erro}`).join(' | ');
-    const err = new Error(d?.error || 'a ElevenLabs não gerou o áudio');
-    err.tentativas = det;
-    if (det) console.warn('Tentativas da ElevenLabs:', det);
-    throw err;
-  }
-  // Se o plano recusou o modelo preferido, o servidor usou outro: dizemo-lo.
-  if (d.nota) toast(d.nota, '');
-  const bin = atob(d.audioB64);
-  const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  return {
-    blob: new Blob([bytes], { type: d.tipo || 'audio/mpeg' }),
-    ext: 'mp3',
-    caracteres: d.caracteres,
-    // O servidor confirma qual voz usou — é o que prova que a escolha pegou.
-    nomeVoz: d.nomeVoz || '',
-    voz: d.voz || state.vozEleven,
-    modelo: d.modelo || '',
-  };
 }
 
 // ---------------------------------------------------------------- ações
@@ -1139,6 +1139,7 @@ async function descarregarZip() {
     ficheiros.push({ nome: `audio/${String(i + 1).padStart(2, '0')}-${s.filename.replace(/\.[^.]+$/, '')}.${s.audioExt || 'webm'}`, dados: bytes });
   }
 
+  const { criarZip } = await import('./zip.mjs');
   const zip = criarZip(ficheiros);
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([zip], { type: 'application/zip' }));
@@ -1146,75 +1147,6 @@ async function descarregarZip() {
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 5000);
   toast('Pacote descarregado.', 'ok');
-}
-
-// ZIP mínimo (método "store": sem compressão), com CRC32.
-function criarZip(ficheiros) {
-  const tabela = (() => {
-    const t = new Int32Array(256);
-    for (let i = 0; i < 256; i++) {
-      let c = i;
-      for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
-      t[i] = c;
-    }
-    return t;
-  })();
-  const crc32 = (b) => {
-    let c = -1;
-    for (let i = 0; i < b.length; i++) c = tabela[(c ^ b[i]) & 0xff] ^ (c >>> 8);
-    return (c ^ -1) >>> 0;
-  };
-
-  const locais = [];
-  const centrais = [];
-  let offset = 0;
-  const enc = new TextEncoder();
-
-  for (const f of ficheiros) {
-    const nome = enc.encode(f.nome);
-    const dados = f.dados;
-    const crc = crc32(dados);
-    const l = new Uint8Array(30 + nome.length);
-    const dv = new DataView(l.buffer);
-    dv.setUint32(0, 0x04034b50, true);
-    dv.setUint16(4, 20, true);
-    dv.setUint16(6, 0x0800, true);
-    dv.setUint16(8, 0, true); // store
-    dv.setUint32(14, crc, true);
-    dv.setUint32(18, dados.length, true);
-    dv.setUint32(22, dados.length, true);
-    dv.setUint16(26, nome.length, true);
-    l.set(nome, 30);
-    locais.push(l, dados);
-
-    const c = new Uint8Array(46 + nome.length);
-    const cv = new DataView(c.buffer);
-    cv.setUint32(0, 0x02014b50, true);
-    cv.setUint16(4, 20, true);
-    cv.setUint16(6, 20, true);
-    cv.setUint16(8, 0x0800, true);
-    cv.setUint16(10, 0, true);
-    cv.setUint32(16, crc, true);
-    cv.setUint32(20, dados.length, true);
-    cv.setUint32(24, dados.length, true);
-    cv.setUint16(28, nome.length, true);
-    cv.setUint32(42, offset, true);
-    c.set(nome, 46);
-    centrais.push(c);
-
-    offset += l.length + dados.length;
-  }
-
-  const central = centrais.reduce((s, c) => s + c.length, 0);
-  const fim = new Uint8Array(22);
-  const fv = new DataView(fim.buffer);
-  fv.setUint32(0, 0x06054b50, true);
-  fv.setUint16(8, ficheiros.length, true);
-  fv.setUint16(10, ficheiros.length, true);
-  fv.setUint32(12, central, true);
-  fv.setUint32(16, offset, true);
-
-  return new Blob([...locais, ...centrais, fim]);
 }
 
 // ---------------------------------------------------------------- vídeo
@@ -1244,13 +1176,111 @@ function marcarModoVideo() {
   if (grupo) grupo.hidden = querVoz();
 }
 
+// Marca a orientação de encerramento escolhida e mostra/esconde a linha da
+// imagem final (o epílogo só se aplica com orientação).
+function marcarOrientacao() {
+  const co = $('vid-orientacao');
+  if (co) [...co.children].forEach((x) => x.classList.toggle('on', x.dataset.id === state.orientacao));
+  const linha = $('linha-cena-final');
+  if (linha) linha.hidden = !state.orientacao;
+  guardar();
+}
+
+// Os seletores da imagem inicial (introdução) e da imagem final (epílogo)
+// seguem a lista de imagens: refazem as opções a cada mudança e preservam a
+// escolha quando o nome ainda existe.
+function atualizarSeletorCenaFinal() {
+  const nomes = state.images.map((img) => (img.video ? `🎬 ${img.name}` : img.name));
+
+  // Epílogo e INTRODUÇÃO: VÁRIAS cenas, marcadas em listas de caixas IGUAIS;
+  // a numeração e a ordem são sempre as DA LISTA (refeito a cada mudança).
+  const construirCaixas = (idCaixa, escolhidas, aoMudar) => {
+    const caixa = $(idCaixa);
+    if (!caixa) return;
+    caixa.innerHTML = '';
+    nomes.forEach((nome, i) => {
+      const lab = document.createElement('label');
+      lab.className = 'chip';
+      const c = document.createElement('input');
+      c.type = 'checkbox';
+      c.value = nome;
+      const marcada = escolhidas.includes(nome);
+      c.checked = marcada;
+      lab.classList.toggle('on', marcada);
+      lab.append(c, document.createTextNode(` ${i + 1}. ${nome}`));
+      c.onchange = () => {
+        aoMudar([...caixa.querySelectorAll('input:checked')].map((x) => x.value));
+        [...caixa.querySelectorAll('label')].forEach((l) =>
+          l.classList.toggle('on', l.querySelector('input')?.checked),
+        );
+        guardar();
+        resumoVideo();
+      };
+      caixa.append(lab);
+    });
+  };
+
+  state.cenasFinais = (state.cenasFinais || []).filter((n) => nomes.includes(n));
+  construirCaixas('vid-cenas-finais', state.cenasFinais, (marcadas) => {
+    state.cenasFinais = marcadas;
+    // Compatibilidade: a primeira marcada segue a valer como "cena final".
+    state.cenaFinal = state.cenasFinais[0] || '';
+  });
+
+  state.cenasIniciais = (state.cenasIniciais || []).filter((n) => nomes.includes(n));
+  construirCaixas('vid-cenas-iniciais', state.cenasIniciais, (marcadas) => {
+    state.cenasIniciais = marcadas;
+    // Compatibilidade: a primeira marcada segue a valer como "cena inicial".
+    state.cenaInicial = state.cenasIniciais[0] || '';
+  });
+}
+
+// Nota do epílogo, para o resumo: diz qual imagem fecha o vídeo e como.
+function notaEpilogo() {
+  if (!state.orientacao) return '';
+  const finais = (state.cenasFinais || []).filter(Boolean);
+  const nome = finais.length
+    ? finais.length === 1 ? finais[0] : `${finais.slice(0, -1).join(', ')} e ${finais.at(-1)}`
+    : 'a última cena';
+  const plural = finais.length > 1 ? 's' : '';
+  const tempo = Number(state.durEpilogo) > 0
+    ? finais.length > 1 ? `, durante ${state.durEpilogo}s (divididos entre elas)` : `, durante ${state.durEpilogo}s`
+    : '';
+  return ` 🎬 Encerramento "${state.orientacaoRotulo || state.orientacao}": o vídeo acaba em ${nome}, parada${plural} como epílogo${tempo}, sem repetir a sequência.`;
+}
+
+// Nota da introdução: a imagem que abre o vídeo, parada, e que não repete.
+function notaIntro() {
+  const iniciais = (state.cenasIniciais || []).filter(Boolean);
+  if (!iniciais.length) return '';
+  const nome = iniciais.length === 1
+    ? `"${iniciais[0]}"`
+    : `${iniciais.length} cenas (${iniciais.slice(0, -1).join(', ')} e ${iniciais.at(-1)})`;
+  const tempo = Number(state.durIntro) > 0
+    ? iniciais.length > 1 ? ` durante ${state.durIntro}s (divididos entre elas)` : ` durante ${state.durIntro}s`
+    : '';
+  const plural = iniciais.length > 1 ? 's' : '';
+  return ` 🎬 Introdução: o vídeo abre com ${nome}${tempo}, parada${plural}, antes da sequência — ela${plural} não volta${iniciais.length > 1 ? 'm' : ''} no meio.`;
+}
+
+// Nota do fecho: com trilha sonora, o vídeo acaba quando a música acaba — a
+// última cena fica o tempo que faltar e, no fim, som e imagem apagam suaves.
+function notaFecho() {
+  if (!state.musicaFicheiro || !state.musicaLigada) return '';
+  // Com epílogo de tempo ESCOLHIDO, a escolha manda: a música (em ciclo) é
+  // parada no fim do vídeo, em vez de a última cena se esticar até ela acabar.
+  if (Number(state.durEpilogo) > 0 && state.orientacao) {
+    return ' 🎬 Fecho: o tempo do epílogo foi escolhido — a música toca em ciclo e é parada exatamente no fim do vídeo.';
+  }
+  return ' 🎬 Fecho: o vídeo acaba quando a música acaba — a última cena fica o tempo que faltar, com som e imagem a apagar suavemente no fim.';
+}
+
 // Nota da letra, para o resumo: diz quantos versos e quanto tempo cada um leva.
 function notaLetra() {
   if (!state.letraLigada) return '';
   const cues = cuesDaLetra();
   if (!cues.length) return ' ⚠️ A letra está ligada, mas falta o texto ou a música — vão sair as legendas da narração.';
-  const cada = (cues[0].fim - cues[0].inicio).toFixed(1).replace('.', ',');
-  return ` 💬 Legenda: a LETRA da música, ${cues.length} verso(s) de ${cada}s cada (substitui a legenda da narração).`;
+  return ` 💬 Legenda: a LETRA da música, ${cues.length} verso(s), com os tempos da aba Legendas (substitui a legenda da narração).`;
 }
 
 // O texto que fica por baixo dos controlos: diz exatamente o que vai sair.
@@ -1269,7 +1299,7 @@ function resumoVideo() {
     return estadoVideo(
       `Vai sair um vídeo de ${n} imagem(ns), cerca de ${formatarMinutos(seg)}, com a trilha ` +
         `"${state.musicaFicheiro.name}" em ciclo e sem voz. Transição "${transicaoRotulo()}".` +
-        `${nota}${notaCiclo()} Demora cerca de ${formatarMinutos(vezesQueRepete().total || seg)} a gravar.`,
+        `${nota}${notaIntro()}${notaEpilogo()}${notaCiclo()}${notaFecho()} Demora cerca de ${formatarMinutos(vezesQueRepete().total || seg)} a gravar.`,
       '',
     );
   }
@@ -1289,7 +1319,7 @@ function resumoVideo() {
     return estadoVideo(
       `Pronto para o vídeo de letra: ${state.images.length} imagem(ns), transição "${transicaoRotulo()}", ` +
         `trilha "${state.musicaFicheiro.name}".` +
-        `${nota}${notaCiclo()} A gravação demora o tempo do vídeo.`,
+        `${nota}${notaIntro()}${notaEpilogo()}${notaCiclo()}${notaFecho()} A gravação demora o tempo do vídeo.`,
       '',
     );
   }
@@ -1314,7 +1344,7 @@ function resumoVideo() {
     `Pronto: ${n} imagem(ns), transição "${transicaoRotulo()}", ${m.rotulo.toLowerCase()}` +
       `${semAudio ? ` — ${semAudio} cena(s) sem áudio` : ''}` +
       `${musica ? `, trilha "${state.musicaFicheiro.name}"` : state.videoModo === 'ambos' ? ' (sem trilha escolhida)' : ''}.` +
-      `${nota}${notaCiclo()} A gravação demora o tempo do vídeo.`,
+      `${nota}${notaIntro()}${notaEpilogo()}${notaCiclo()}${notaFecho()} A gravação demora o tempo do vídeo.`,
     semAudio ? 'wait' : '',
   );
 }
@@ -1349,6 +1379,46 @@ function marcarModoDuracao() {
   }
 }
 
+// Reaplica as preferências do projeto nos controlos da página. Os chips são
+// desenhados UMA vez no arranque; ao abrir um projeto guardado, o estado muda
+// por baixo — sem isto, a interface continuava a mostrar as escolhas antigas
+// enquanto o vídeo saía com as do projeto (era o que enganava quem reeditava).
+function aplicarPreferenciasNaInterface() {
+  // atributo: o nome DENTRO de dataset ('id' por omissão; 'r' nas velocidades).
+  const marcar = (id, valor, atributo = 'id') => {
+    const grupo = $(id);
+    if (!grupo) return;
+    [...grupo.children].forEach((x) => x.classList.toggle('on', String(x.dataset[atributo]) === String(valor)));
+  };
+  const sel = $('vid-formato');
+  if (sel) sel.value = state.videoFormato || '1920x1080';
+  marcar('vid-transicoes', state.videoTransicao);
+  marcar('vid-duracoes', state.videoDuracao);
+  marcar('vid-cena', state.videoDuracaoCena);
+  marcar('vid-legendas', String(Boolean(state.legendas)));
+  marcar('vid-modos', state.videoModo);
+  marcar('vid-codec', state.codec);
+  marcar('vid-orientacao', state.orientacao);
+  const linhaF = $('linha-cena-final');
+  if (linhaF) linhaF.hidden = !state.orientacao;
+  atualizarSeletorCenaFinal();
+  const selIni = $('vid-cena-inicial');
+  if (selIni) selIni.value = state.cenaInicial || '';
+  const selDurIntro = $('vid-intro-dur');
+  if (selDurIntro) selDurIntro.value = String(Number(state.durIntro) || '');
+  const selDurEp = $('vid-epilogo-dur');
+  if (selDurEp) selDurEp.value = String(Number(state.durEpilogo) || '');
+  marcar('velocidades', state.velocidade, 'r');
+  $('cfg-servico').value = state.servico;
+  $('cfg-modelo').value = state.modelo || '';
+  const lt = $('letra-texto');
+  if (lt) lt.value = state.letra || '';
+  atualizarLetra();
+  marcarModoVideo();
+  marcarModoDuracao();
+  atualizarTrilha();
+}
+
 // Quantas vezes as imagens vão repetir, para o resumo poder prometê-lo.
 function vezesQueRepete() {
   const natural = duracaoNaturalPrevista();
@@ -1371,12 +1441,12 @@ function notaCiclo() {
   if (r.passagens === 1) {
     return ` ℹ️ A música (${formatarMinutos(r.alvo)}) não é mais longa do que o vídeo (${formatarMinutos(r.total)}): não há nada a repetir.`;
   }
-  return ` 🔁 REPETE: as imagens passam ${r.passagens}×, até acabar a música de ${formatarMinutos(r.alvo)}. O vídeo fica com ${formatarMinutos(r.total)}.`;
+  return ` 🔁 REPETE: as imagens passam ${r.passagens}×, até cobrir a música de ${formatarMinutos(r.alvo)}. O vídeo acaba na última cena (${formatarMinutos(r.total)}) e a música para junto.`;
 }
 
 // Quanto tempo o vídeo levaria sem repetir nada.
 function duracaoNaturalPrevista() {
-  const comTexto = state.scenes.filter((s) => (s.texto || '').trim());
+  const comTexto = state.scenes.filter((s) => (s.texto || '').trim() || s.video);
   const lista = querVoz() ? comTexto : state.images;
   if (!lista.length) return 0;
   if (!querVoz()) return lista.length * (Number(state.videoDuracaoCena) || 3.5);
@@ -1384,148 +1454,26 @@ function duracaoNaturalPrevista() {
   // estima-se pela contagem de palavras (~2,4 palavras por segundo, o mesmo
   // ritmo das vozes usadas) para o resumo não prometer um número inventado.
   return lista.reduce((soma, s) => {
+    // Cena de vídeo: a duração é a do TRECHO escolhido, não a do ficheiro todo.
+    if (s.video) {
+      const d = modCenasEdit ? modCenasEdit.duracaoDaCenaVideo(s) : Number(s.duracaoVideo) || 0;
+      return soma + Math.max(1.2, d);
+    }
     const w = palavras(s.texto);
     return soma + Math.max(1.2, w / 2.4);
   }, 0);
 }
 
 // ---------------------------------------------------------------- letra da música
-// A letra vem colada pelo utilizador (uma linha por verso) e é distribuída pelo
-// tempo da música. NÃO há transcrição automática: a app não tem chave que
-// transcreva áudio, e transcrever música cantada com instrumentos por cima é
-// notoriamente pouco fiável. Colar a letra dá um resultado certo, custa zero e
-// o utilizador pode corrigir o que quiser.
-
-let letraTimer = null; // o relógio da pré-escuta da letra
-
-// A letra já temporizada: cada verso com o seu segundo de entrada e de saída.
-// Precisa da duração da música; sem ela não há como distribuir.
-function cuesDaLetra() {
-  const versos = leg.versosDaLetra ? leg.versosDaLetra(state.letra) : [];
-  const duracao = state.musicaSegundos || 0;
-  if (!versos.length || !duracao) return [];
-  return leg.legendasDaLetra(versos, duracao);
-}
-
-function estadoLetra(msg, tipo = '') {
-  const el = $('letra-estado');
-  if (!el) return;
-  el.className = tipo === 'err' ? 'hint err' : tipo === 'ok' ? 'letra-passo' : 'hint';
-  el.textContent = msg;
-}
-
-function atualizarLetra() {
-  const versos = leg.versosDaLetra ? leg.versosDaLetra(state.letra) : [];
-  const duracao = state.musicaSegundos || 0;
-  const btn = $('btn-letra-usar');
-  const previa = $('btn-letra-previa');
-  const limpar = $('btn-letra-limpar');
-  const tem = versos.length > 0;
-
-  if (limpar) limpar.hidden = !tem && !state.letra;
-  if (previa) previa.hidden = !tem || !state.musicaFicheiro;
-  if (btn) {
-    btn.disabled = !tem || !duracao;
-    btn.textContent = state.letraLigada ? '💬 Letra em uso (clique para tirar)' : '💬 Usar a letra como legenda';
-    btn.title = !duracao
-      ? 'escolha primeiro a música (é preciso saber quanto dura)'
-      : !tem
-        ? 'cole a letra, uma linha por verso'
-        : `legendar ${versos.length} verso(s) da música`;
-  }
-
-  if (!tem) {
-    estadoLetra('Cole a letra (uma linha por verso) para legendar a música.');
-    return;
-  }
-  if (!duracao) {
-    estadoLetra(`${versos.length} verso(s), mas ainda não sei quanto dura a música — escolha a trilha.`, 'err');
-    return;
-  }
-  const cada = duracao / versos.length;
-  const minutos = (s) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`;
-  estadoLetra(
-    `${versos.length} verso(s) · ${minutos(cada)} cada um · a letra cobre ${minutos(duracao)}` +
-      `${state.letraLigada ? ' · ✅ em uso como legenda' : ''}`,
-    'ok',
-  );
-}
-
-// Liga ou desliga a letra como legenda do vídeo.
-function alternarLetra() {
-  if (!state.letraLigada && !cuesDaLetra().length) {
-    return toast('Cole a letra e escolha a música primeiro.', 'err');
-  }
-  state.letraLigada = !state.letraLigada;
-  guardar();
-  atualizarLetra();
-  resumoVideo();
-  if (state.letraLigada) {
-    const cues = cuesDaLetra();
-    toast(`A letra passa a ser a legenda do vídeo (${cues.length} versos).`, 'ok');
-  }
-}
-
-// Pré-escuta: toca a música e mostra, verso a verso, o que vai aparecer no
-// vídeo. É a forma de confirmar o sincronismo antes de gravar dois minutos.
-function pararPreviaLetra() {
-  if (letraTimer) {
-    clearTimeout(letraTimer);
-    letraTimer = null;
-  }
-  const b = $('btn-letra-previa');
-  if (b) b.textContent = '▶️ Ver a letra a passar';
-  document.querySelectorAll?.('.letra-passo.on')?.forEach?.((el) => el.classList.remove('on'));
-}
-
-async function preverLetra() {
-  if (letraTimer) {
-    pararPreviaLetra();
-    return;
-  }
-  const cues = cuesDaLetra();
-  if (!cues.length) return toast('Cole a letra e escolha a música primeiro.', 'err');
-  if (!state.musicaFicheiro) return toast('Escolha a música primeiro.', 'err');
-
-  pararPreviaTrilha();
-  const url = URL.createObjectURL(state.musicaFicheiro);
-  trilhaAudio = new Audio(url);
-  trilhaAudio.volume = 0.5;
-  $('btn-letra-previa').textContent = '⏹ Parar';
-
-  // Em vez de esperar pelo fim, agenda cada verso no seu segundo: se a música
-  // for parada, os relógios são limpos todos de uma vez.
-  const caixa = $('letra-estado');
-  const passo = (i) => {
-    if (i >= cues.length) {
-      pararPreviaLetra();
-      return;
-    }
-    const c = cues[i];
-    caixa.className = 'letra-passo on';
-    caixa.textContent = `${i + 1}/${cues.length} · ${c.texto}`;
-    letraTimer = setTimeout(() => passo(i + 1), Math.max(250, (c.fim - c.inicio) * 1000));
-  };
-  try {
-    await trilhaAudio.play();
-  } catch {
-    pararPreviaLetra();
-    toast('Não consegui tocar essa música neste browser.', 'err');
-    return;
-  }
-  passo(0);
-}
-
-function limparLetra() {
-  pararPreviaLetra();
-  state.letra = '';
-  state.letraLigada = false;
-  const ta = $('letra-texto');
-  if (ta) ta.value = '';
-  guardar();
-  atualizarLetra();
-  resumoVideo();
-}
+// A letra da música vive agora em estudio-letra-trilha.mjs (o app.js estava
+// demasiado grande para continuar a crescer); aqui ficam só os atalhos.
+let modLetraTrilha = null;
+const cuesDaLetra = () => (modLetraTrilha ? modLetraTrilha.cuesDaLetra() : []);
+const atualizarLetra = () => modLetraTrilha?.atualizarLetra();
+const limparLetra = () => modLetraTrilha?.limparLetra();
+const alternarLetra = () => modLetraTrilha?.alternarLetra();
+const preverLetra = () => modLetraTrilha?.preverLetra();
+const pararPreviaLetra = () => modLetraTrilha?.pararPreviaLetra();
 
 // ---------------------------------------------------------------- resultado do vídeo
 // O ficheiro fica guardado aqui depois de gerado, para o poder VER dentro da
@@ -1589,7 +1537,20 @@ async function guardarComo(blob, nome, descricao = 'Ficheiro') {
 }
 
 function mostrarResultado(r, nome) {
-  resultadoVideo = { blob: r.blob, nome, srt: r.srt || '' };
+  // Guarda o resultado INTEIRO: os detalhes (duração, formato, voz…) vão
+  // para o registo na nuvem quando o utilizador clica em "Guardar na nuvem".
+  resultadoVideo = { blob: r.blob, nome, srt: r.srt || '', r };
+  const btnNuvem = $('btn-video-nuvem');
+  if (btnNuvem) {
+    btnNuvem.hidden = false;
+    btnNuvem.disabled = false;
+    btnNuvem.textContent = '☁️ Guardar na nuvem';
+  }
+  const btnAnalise = $('btn-video-analise');
+  if (btnAnalise) {
+    btnAnalise.hidden = false;
+    btnAnalise.disabled = false;
+  }
   const caixa = $('vid-resultado');
   if (!caixa) return;
   caixa.hidden = false;
@@ -1934,254 +1895,21 @@ function iniciarProjetos() {
 }
 
 // ---------------------------------------------------------------- utilizador
-// Quem está a usar a app, no canto superior direito.
-//
-// A app NÃO obriga a entrar: tudo o que é essencial (imagens, narração, vídeo e
-// projetos guardados no computador) funciona sem conta. A conta serve para a app
-// saber quem está a trabalhar e para o trabalho poder ficar associado a uma
-// pessoa na Base44. Por isso não há redirecionamento para um ecrã de login
-// obrigatório — isso fecharia a app a quem só a quer experimentar.
-
-let utilizadorAtual = null;
-
-function mostrarEstadoUser(texto, dentro = false) {
-  const el = $('user-estado');
-  if (!el) return;
-  el.textContent = texto;
-  el.classList.toggle('dentro', dentro);
-}
-
-function nomeDoUtilizador(u) {
-  if (!u) return '';
-  const nome = (u.full_name || '').trim();
-  if (nome) return nome;
-  return String(u.email || '').split('@')[0] || u.email || 'utilizador';
-}
-
-async function clienteBase44() {
-  const { base44 } = await import('@/base44Client.js');
-  return base44;
-}
-
-// Vê quem está a usar. Nunca deixa a página em baixo se a Base44 responder mal:
-// sem sessão, a app continua a funcionar sem conta.
-async function verQuemEsta() {
-  const entrar = $('btn-user-entrar');
-  const sair = $('btn-user-sair');
-  mostrarEstadoUser('a ver quem está…');
-  try {
-    const base44 = await clienteBase44();
-    const u = await base44.auth.me();
-    if (u && (u.email || u.full_name)) {
-      utilizadorAtual = u;
-      mostrarEstadoUser(`👤 ${nomeDoUtilizador(u)}`, true);
-      const el = $('user-estado');
-      if (el) el.title = [u.full_name, u.email, u.role ? `perfil: ${u.role}` : ''].filter(Boolean).join(' · ');
-      if (entrar) entrar.hidden = true;
-      if (sair) sair.hidden = false;
-      return u;
-    }
-    throw new Error('sem sessão');
-  } catch {
-    utilizadorAtual = null;
-    mostrarEstadoUser('sem conta');
-    const el = $('user-estado');
-    if (el) el.title = 'a app funciona sem conta; entrar é opcional';
-    if (entrar) entrar.hidden = false;
-    if (sair) sair.hidden = true;
-    return null;
-  }
-}
-
-function erroUser(msg) {
-  const el = $('user-erro');
-  if (!el) return;
-  if (!msg) {
-    el.hidden = true;
-    return;
-  }
-  el.hidden = false;
-  el.textContent = msg;
-}
-
-// Passa o formulário de "Entrar" para "Criar conta" e ao contrário.
-function modoFormUser(modo) {
-  const criar = modo === 'criar';
-  $('user-titulo').textContent = criar ? 'Criar conta' : 'Entrar';
-  $('campo-nome').hidden = !criar;
-  $('campo-senha').hidden = false;
-  $('campo-otp').hidden = true;
-  $('link-user-trocar').textContent = criar ? 'Já tem conta? Entrar' : 'Ainda não tem conta? Criar uma';
-  $('btn-user-confirmar').textContent = criar ? 'Criar conta' : 'Entrar';
-  $('dlg-user').dataset.modo = criar ? 'criar' : 'entrar';
-  erroUser('');
-}
-
-function abrirDlgUser(modo = 'entrar') {
-  modoFormUser(modo);
-  const d = $('dlg-user');
-  if (d && typeof d.showModal === 'function') d.showModal();
-}
-
-async function submeterUser(ev) {
-  if (ev && ev.preventDefault) ev.preventDefault();
-  const modo = $('dlg-user').dataset.modo || 'entrar';
-  const email = $('user-email').value.trim();
-  const senha = $('user-senha').value;
-  const btn = $('btn-user-confirmar');
-
-  if (!email) return erroUser('Escreva o seu email.');
-  if (modo !== 'otp' && senha.length < 6) return erroUser('A palavra-passe precisa de pelo menos 6 caracteres.');
-
-  btn.disabled = true;
-  erroUser('');
-  btn.textContent = modo === 'criar' ? 'a criar…' : modo === 'otp' ? 'a confirmar…' : 'a entrar…';
-  try {
-    const base44 = await clienteBase44();
-
-    if (modo === 'criar') {
-      const params = { email, password: senha };
-      const nome = $('user-nome').value.trim();
-      if (nome) params.full_name = nome;
-      await base44.auth.register(params);
-      // O registo manda um código para o email: é preciso confirmá-lo.
-      $('campo-senha').hidden = true;
-      $('campo-nome').hidden = true;
-      $('campo-otp').hidden = false;
-      $('user-titulo').textContent = 'Confirmar o email';
-      $('dlg-user').dataset.modo = 'otp';
-      erroUser('');
-      toast('Enviámos um código para o seu email. Escreva-o para confirmar a conta.', 'ok');
-      return;
-    }
-
-    if (modo === 'otp') {
-      await base44.auth.verifyOtp({ email, otpCode: $('user-otp').value.trim() });
-      const u = await verQuemEsta();
-      if (u) {
-        if (typeof $('dlg-user').close === 'function') $('dlg-user').close();
-        toast(`Bem-vindo, ${nomeDoUtilizador(u)}!`, 'ok');
-      } else {
-        erroUser('A conta foi confirmada, mas não consegui abrir a sessão. Tente entrar.');
-        modoFormUser('entrar');
-      }
-      return;
-    }
-
-    const r = await base44.auth.loginViaEmailPassword(email, senha);
-    // O token pode vir no corpo ou já ter ficado no cliente; guarda-se se vier.
-    const token = r?.access_token || r?.data?.access_token;
-    if (token) base44.auth.setToken(token);
-    const u = await verQuemEsta();
-    if (u) {
-      if (typeof $('dlg-user').close === 'function') $('dlg-user').close();
-      toast(`Bem-vindo, ${nomeDoUtilizador(u)}!`, 'ok');
-    } else {
-      erroUser('Entrei, mas não consegui confirmar a sessão. Tente outra vez.');
-    }
-  } catch (e) {
-    const corpo = e?.response?.data;
-    const msg = String(corpo?.message || corpo?.error || e?.message || 'não consegui completar o pedido');
-    const estado = e?.response?.status ? ` (HTTP ${e.response.status})` : '';
-    if (/invalid|incorrect|credential|password/i.test(msg)) erroUser('Email ou palavra-passe não conferem.');
-    else if (/not found|404/i.test(msg)) erroUser('A app não está a responder na Base44 (404). Publique a app primeiro — ver o README.');
-    else if (/already|exists/i.test(msg)) erroUser('Já existe uma conta com este email. Use "Já tem conta? Entrar".');
-    else erroUser(`${msg}${estado}`);
-  } finally {
-    btn.disabled = false;
-    const m = $('dlg-user').dataset.modo || 'entrar';
-    btn.textContent = m === 'criar' ? 'Criar conta' : m === 'otp' ? 'Confirmar' : 'Entrar';
-  }
-}
-
-function sairUser() {
-  if (utilizadorAtual && !window.confirm(`Sair da conta de ${nomeDoUtilizador(utilizadorAtual)}?`)) return;
-  clienteBase44()
-    .then((base44) => {
-      try {
-        base44.auth.logout();
-      } catch {
-        /* segue */
-      }
-      utilizadorAtual = null;
-      verQuemEsta();
-      toast('Saiu da conta.', '');
-    })
-    .catch(() => {
-      utilizadorAtual = null;
-      verQuemEsta();
-    });
-}
-
-function iniciarUtilizador() {
-  $('btn-user-entrar').onclick = () => abrirDlgUser('entrar');
-  $('btn-user-sair').onclick = sairUser;
-  $('btn-user-fechar').onclick = () => {
-    if (typeof $('dlg-user').close === 'function') $('dlg-user').close();
-  };
-  $('form-user').addEventListener('submit', submeterUser);
-  $('link-user-trocar').onclick = (e) => {
-    if (e && e.preventDefault) e.preventDefault();
-    modoFormUser($('dlg-user').dataset.modo === 'criar' ? 'entrar' : 'criar');
-  };
-  // "sem conta" no arranque; a resposta da Base44 substitui isto.
-  mostrarEstadoUser('sem conta');
-  $('btn-user-entrar').hidden = false;
-  // Pergunta quem está, mas sem segurar o arranque da app.
-  verQuemEsta();
-}
+// A lógica de "quem está a usar a app" vive agora em estudio-utilizador.mjs.
+let modUtilizadorUI = null;
+let modVideoCarregado = null;
+let modCenasEdit = null;
+let modAnalise = null;
+const iniciarUtilizador = () => modUtilizadorUI?.iniciarUtilizador({ toast });
 
 // ---------------------------------------------------------------- trilha sonora
-// A música vem do computador do utilizador (não há faixas dentro da app, para
-// ela continuar leve e sem licenças). Fica só nesta sessão — um ficheiro de
-// música não cabe no armazenamento do browser sem o encher.
-let trilhaAudio = null; // o <audio> da pré-escuta
-
-function pararPreviaTrilha() {
-  if (!trilhaAudio) return;
-  try {
-    trilhaAudio.pause();
-  } catch {
-    /* já parado */
-  }
-  trilhaAudio = null;
-  const b = $('btn-trilha-ouvir');
-  if (b) b.textContent = '▶️ Ouvir';
-}
-
-// Sem música escolhida, "até acabar a música" não faz sentido: fica desativado.
-// A letra também depende da duração da música, por isso se atualiza aqui.
-function aoMudarTrilha() {
-  marcarModoDuracao();
-  atualizarLetra();
-  resumoVideo();
-}
-
-// Desenha o estado da trilha: nome, duração, e que botões fazem sentido.
-function atualizarTrilha() {
-  const tem = Boolean(state.musicaFicheiro);
-  const est = $('trilha-estado');
-  if (est) {
-    if (!tem) {
-      est.className = 'hint';
-      est.textContent = 'Nenhuma música escolhida — o vídeo sai só com a narração.';
-    } else {
-      est.className = 'trilha-estado-nome';
-      const dur = state.musicaDuracao ? ` · ${formatarMinutos(state.musicaDuracao)}` : '';
-      const nome = state.musicaFicheiro.name || 'música';
-      est.textContent = `🎵 ${nome}${dur}`;
-    }
-  }
-  const ouvir = $('btn-trilha-ouvir');
-  const tirar = $('btn-trilha-tirar');
-  const ligada = $('trilha-ligada');
-  if (ouvir) ouvir.hidden = !tem;
-  if (tirar) tirar.hidden = !tem;
-  if (ligada) {
-    ligada.disabled = !tem;
-    ligada.checked = tem && state.musicaLigada;
-  }
-}
+// A trilha sonora vive também em estudio-letra-trilha.mjs; aqui ficam os atalhos.
+const pararPreviaTrilha = () => modLetraTrilha?.pararPreviaTrilha();
+const escolherTrilha = () => modLetraTrilha?.escolherTrilha();
+const tirarTrilha = () => modLetraTrilha?.tirarTrilha();
+const ouvirTrilha = () => modLetraTrilha?.ouvirTrilha();
+const ligarTrilha = () => modLetraTrilha?.ligarTrilha();
+const atualizarTrilha = () => modLetraTrilha?.atualizarTrilha();
 
 // "1:23" — usado para a duração da música e para o tempo previsto do vídeo.
 // O módulo da trilha tem a sua própria versão, com o mesmo formato.
@@ -2190,110 +1918,7 @@ const formatarMinutos = (s) => {
   return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
 };
 
-// Lê a duração real do ficheiro com um <audio> temporário. A leitura é feita
-// pelo módulo audio-info.mjs, que ouve VÁRIOS eventos e ainda pergunta em
-// intervalos: um `loadedmetadata` que não chega deixava a duração a 0, o ciclo
-// ficava sem alvo e a música era cortada a meio.
-async function medirTrilha(ficheiro) {
-  const url = URL.createObjectURL(ficheiro);
-  try {
-    const mod = await import('./audio-info.mjs');
-    return await mod.medirDuracaoAudio(url);
-  } catch {
-    // Sem conseguir medir, o ciclo "até acabar a música" não tem alvo: a página
-    // avisa e o vídeo fica com a duração das imagens, em vez de falhar.
-    return 0;
-  } finally {
-    setTimeout(() => URL.revokeObjectURL(url), 30000);
-  }
-}
 
-async function escolherTrilha() {
-  const input = $('input-trilha');
-  const f = input?.files?.[0];
-  if (!f) return;
-
-  pararPreviaTrilha();
-  state.musicaFicheiro = f;
-  state.musicaLigada = true;
-  state.musicaDuracao = 0;
-  state.musicaMedida = false;
-  // O modo "até acabar a música" fica disponível assim que há música.
-  state.modoDuracao = 'trilha';
-  if (state.videoModo === 'narracao') state.videoModo = 'ambos';
-  atualizarTrilha();
-  aoMudarTrilha();
-
-  const dur = await medirTrilha(f);
-  // Se entretanto o utilizador escolheu outra, não estragamos o estado novo.
-  if (state.musicaFicheiro !== f) return;
-  state.musicaDuracao = dur;
-  state.musicaMedida = dur > 0;
-  atualizarTrilha();
-
-  // O tempo da música é lido aqui (o motor não descodifica só para medir).
-  state.musicaSegundos = dur;
-  guardar();
-  aoMudarTrilha();
-
-  if (!dur) {
-    toast(
-      `Não consegui ler a duração de ${f.name}. O vídeo vai ficar com a duração das imagens ` +
-        '(o ciclo até acabar a música não pode ser calculado). Experimente um MP3 ou um WAV.',
-      'err',
-    );
-  }
-
-  const mb = (f.size / 1048576).toFixed(1);
-  toast(
-    dur
-      ? `Trilha: ${f.name} (${formatarMinutos(dur)}, ${mb} MB). Ouça antes de gerar.`
-      : `Trilha: ${f.name} (${mb} MB).`,
-    'ok',
-  );
-  if (input) input.value = ''; // permite escolher o mesmo ficheiro outra vez
-}
-
-function tirarTrilha() {
-  pararPreviaTrilha();
-  state.musicaFicheiro = null;
-  state.musicaDuracao = 0;
-  state.musicaUrl = '';
-  state.musicaSegundos = 0;
-  state.musicaMedida = false;
-  atualizarTrilha();
-  aoMudarTrilha();
-  toast('Trilha tirada.', '');
-}
-
-async function ouvirTrilha() {
-  if (trilhaAudio) {
-    pararPreviaTrilha();
-    return;
-  }
-  const f = state.musicaFicheiro;
-  if (!f) return;
-  if (state.musicaUrl) URL.revokeObjectURL(state.musicaUrl);
-  state.musicaUrl = URL.createObjectURL(f);
-  trilhaAudio = new Audio(state.musicaUrl);
-  trilhaAudio.volume = 0.6;
-  trilhaAudio.onended = pararPreviaTrilha;
-  $('btn-trilha-ouvir').textContent = '⏹ Parar';
-  try {
-    await trilhaAudio.play();
-  } catch {
-    pararPreviaTrilha();
-    toast('Não consegui tocar essa música neste browser.', 'err');
-  }
-}
-
-function ligarTrilha() {
-  const c = $('trilha-ligada');
-  if (!c) return;
-  state.musicaLigada = c.checked;
-  guardar();
-  resumoVideo();
-}
 
 // ---------------------------------------------------------------- vídeo
 // O vídeo é montado no browser (não há ffmpeg na nuvem). Ver public/video.mjs.
@@ -2561,9 +2186,14 @@ async function iniciarVideo() {
     const ok = await guardarComo(blob, 'rebeca-video.srt', 'Legendas (SubRip)');
     if (ok) toast('Legendas guardadas onde escolheu.', 'ok');
   };
+  $('btn-video-nuvem').onclick = guardarNaNuvem;
+  $('btn-video-analise').onclick = () => modAnalise?.analisarDiretor();
   rotularBotoesGuardar();
 }
 
+// A montagem do vídeo vive agora em estudio-video-final.mjs (o app.js ficou
+// grande demais). Aqui fica só a ponta que os botões usam.
+let modFinal = null;
 async function gerarVideoFinal() {
   if (state.busy) return;
 
@@ -2690,79 +2320,80 @@ async function gerarVideoFinal() {
       },
       deveParar: () => state.pararVideo,
     });
+  }
+  return modFinal.gerarVideoFinal();
+}
 
-    if (!r.ok) throw new Error(r.erro);
-
-    // O motor mediu a música pelo áudio descodificado, que é a verdade. Se a
-    // página tinha medido outra coisa, fica a certa para a próxima vez (e o
-    // desvio vai para a consola, porque um desvio grande é um defeito a olhar).
-    if (r.musicaSegundos > 0 && Math.abs(r.musicaSegundos - (state.musicaSegundos || 0)) > 1) {
-      if (state.musicaSegundos > 0) {
-        console.warn(
-          `[trilha] a página mediu ${state.musicaSegundos.toFixed(2)}s e o áudio descodificado tem ` +
-            `${r.musicaSegundos.toFixed(2)}s; passei a usar o valor do áudio.`,
-        );
-      }
-      state.musicaSegundos = r.musicaSegundos;
-      state.musicaDuracao = r.musicaSegundos;
-      state.musicaMedida = true;
-      atualizarTrilha();
-      guardar();
-    }
-
-    const nome = `rebeca-video.${r.extensao}`;
-
-    // Guarda o resultado e mostra-o para se poder VER aqui dentro.
-    mostrarResultado(r, nome);
-
-    // Com a janela "Guardar como" (Chrome/Edge), o utilizador escolhe a pasta e
-    // o nome. É o passo que faltava: antes o ficheiro caía sempre na pasta das
-    // transferências sem se poder escolher. Nos browsers sem esta janela, cai
-    // numa descarga normal — o mesmo de antes.
-    const escolheu = await guardarComo(r.blob, nome, 'Vídeo WebM');
-
-    // O .srt sai dos MESMOS blocos que foram desenhados no vídeo, e também
-    // pergunta onde guardar (só depois de o vídeo estar tratado, para não abrir
-    // duas janelas de uma vez).
-    if (r.srt) {
-      const srtBlob = new Blob([r.srt], { type: 'text/plain;charset=utf-8' });
-      if (!podeEscolherOnde() || escolheu) {
-        setTimeout(() => guardarComo(srtBlob, 'rebeca-video.srt', 'Legendas (SubRip)'), 400);
+// Guarda o vídeo pronto na nuvem: ficheiro + miniatura + detalhes, para o
+// 📺 Painel (vídeos prontos para subir ao YouTube).
+async function guardarNaNuvem() {
+  if (!resultadoVideo.blob) return;
+  const btn = $('btn-video-nuvem');
+  btn.disabled = true;
+  btn.textContent = 'a guardar…';
+  try {
+    const { base44 } = await import('@/base44Client.js');
+    estadoVideo('a guardar o vídeo na nuvem…', 'wait');
+    // O "Reeditar projeto" precisa do projeto NA NUVEM: sem ele, o vídeo só se
+    // reedita no computador onde as cenas ficaram. Por isso o projeto vai
+    // junto (uma vez) e o vídeo fica ligado ao id da cópia da nuvem.
+    let projetoId = String(projetos.nuvemId || '');
+    if (!projetoId && modProjetosUI?.guardarProjetoNaNuvem) {
+      try {
+        projetoId = String((await modProjetosUI.guardarProjetoNaNuvem()) || '');
+        estadoVideo('projeto guardado na nuvem também ✓', 'wait');
+      } catch (e) {
+        estadoVideo(`⚠️ o projeto não foi para a nuvem (${e.message}) — o vídeo guarda na mesma.`, 'wait');
       }
     }
-
-    estadoVideo(
-      `✅ Vídeo pronto: ${Math.round(r.duracao)}s, ${(r.blob.size / 1048576).toFixed(1)} MB, ` +
-        `formato ${r.formato}, transição "${r.transicao}", ${r.comVoz ? 'com narração' : 'sem voz'}` +
-        `${r.comMusica ? ' e com trilha' : musica ? ' e SEM trilha' : ''}. ` +
-        `${r.repetido
-          ? `🔁 As imagens passaram ${r.passagens}× (${Math.round(r.duracaoNatural)}s cada passagem).`
-          : state.modoDuracao === 'trilha'
-            ? `ℹ️ Não repeti as imagens${r.semCiclo ? `: ${r.semCiclo}` : ''}.`
-            : ''} ` +
-        `${r.legendas ? `${r.legendas} bloco(s) de legenda${r.legendasDaLetra ? ' (da letra)' : ''}. ` : ''}` +
-        `Descarregado como ${nome}${r.srt ? ' e rebeca-video.srt' : ''}.` +
-        `${r.musicaAviso ? ` ⚠️ ${r.musicaAviso}` : ''} (motor v${r.versao})` +
-        (r.codec === 'vp9'
-          ? ' · ⚠️ Gravado em VP9: o Windows pode recusar abri-lo — use o VLC, ou mude "Ficheiro" para Compatível (VP8).'
-          : ''),
-      r.musicaAviso ? 'wait' : 'ok',
-    );
-    toast(
-      `${r.comVoz ? 'Vídeo pronto' : 'Vídeo só com música'} (${Math.round(r.duracao)}s)` +
-        `${r.comMusica ? ', com trilha' : ''}${r.repetido ? `, ${r.passagens}× em ciclo` : ''}` +
-        `${r.srt ? ' + legendas .srt' : ''}.`,
-      'ok',
-    );
+    if (!projetoId) projetoId = String(projetos.idAtual || '');
+    const nome = resultadoVideo.nome;
+    const { file_uri } = await base44.integrations.Core.UploadPrivateFile({
+      file: new File([resultadoVideo.blob], nome, { type: 'video/webm' }),
+    });
+    let thumb_uri = '';
+    if (state._miniatura) {
+      try {
+        const t = await base44.integrations.Core.UploadPrivateFile({
+          file: new File([state._miniatura], 'miniatura.jpg', { type: 'image/jpeg' }),
+        });
+        thumb_uri = t.file_uri;
+      } catch {
+        /* a miniatura é opcional — o cartão mostra o ícone */
+      }
+    }
+    const r = resultadoVideo.r || {};
+    const voz = state.vozesEleven.find((v) => v.id === state.vozEleven);
+    await base44.entities.VideoProducao.create({
+      nome: ($('projeto-nome').value || '').trim() || 'Projeto sem nome',
+      // Liga o vídeo ao projeto guardado neste computador: é o que deixa o
+      // Painel reabrir o projeto original no estúdio ("✏️ Reeditar projeto").
+      projetoId,
+      video_uri: file_uri,
+      video_tamanho: resultadoVideo.blob.size,
+      thumb_uri,
+      duracao: Math.round(r.duracao || 0),
+      formato: r.formato || state.videoFormato,
+      transicao: state.videoTransicaoRotulo || state.videoTransicao,
+      comVoz: Boolean(r.comVoz),
+      comMusica: Boolean(r.comMusica),
+      musicaNome: state.musicaFicheiro ? state.musicaFicheiro.name : '',
+      codec: r.codec || state.codec,
+      legendas: r.legendas || 0,
+      motorVoz: state.motor === 'eleven' ? 'ElevenLabs' : 'Voz do browser',
+      vozUsada: state.motor === 'eleven' ? (r.nomeVoz || (voz ? voz.nome : '')) : state.voz,
+    });
+    const btnPainel = $('btn-video-painel');
+    if (btnPainel) btnPainel.hidden = false;
+    btn.textContent = '☁️ Guardado ✓';
+    estadoVideo('✅ Guardado na nuvem — está no 📺 Painel de vídeos prontos.', 'ok');
+    toast('Vídeo guardado na nuvem. Está no 📺 Painel.', 'ok');
   } catch (e) {
-    estadoVideo(`❌ ${e.message}`, 'err');
-    toast(e.message, 'err');
+    estadoVideo(`❌ Não consegui guardar na nuvem: ${e.message}`, 'err');
+    toast(`Não consegui guardar na nuvem: ${e.message}`, 'err');
   } finally {
-    state.busy = false;
-    state.pararVideo = false;
-    $('btn-video').disabled = false;
-    $('btn-video-parar').hidden = true;
-    setTimeout(() => progress(false), 1500);
+    btn.disabled = false;
+    if (btn.textContent === 'a guardar…') btn.textContent = '☁️ Guardar na nuvem';
   }
 }
 
@@ -2794,6 +2425,7 @@ function guardar() {
         legendas: state.legendas,
         letra: state.letra,
         letraLigada: state.letraLigada,
+        legendasLetra: state.legendasLetra,
         modoDuracao: state.modoDuracao,
         codec: state.codec,
         enquadramento: state.enquadramento,
@@ -2814,61 +2446,109 @@ function lerConfig() {
   }
 }
 
-async function testarLigacao() {
-  const caixa = $('cfg-resultado');
-  caixa.hidden = false;
-  caixa.className = 'cfg-result wait';
-  caixa.textContent = 'a testar…';
-  const servico = $('cfg-servico').value;
-  try {
-    if (servico === 'local') {
-      const r = await fetch('http://127.0.0.1:3100/api/health').catch(() => null);
-      if (!r || !r.ok) throw new Error('não há servidor local a responder em 127.0.0.1:3100');
-      const d = await r.json();
-      caixa.className = 'cfg-result ok';
-      caixa.textContent = `✅ Servidor local respondeu (versão ${d.versao || '?'}).`;
-      return;
-    }
-    const { base44 } = await import('@/base44Client.js');
-    // Teste propositado: sem imagens, a função responde 400 com a explicação.
-    // Se essa explicação chegar, então a função está viva e a falar com o SDK.
-    let d;
-    try {
-      const r = await base44.functions.invoke('generateNarration', { servico, imagens: [] });
-      d = r?.data && !r.ok ? r.data : r;
-    } catch (e) {
-      d = e?.response?.data || { ok: false, error: e?.message };
-      if (e?.response?.status) d.http = e.response.status;
-    }
-    if (d?.ok) {
-      caixa.className = 'cfg-result ok';
-      caixa.textContent = '✅ A função de nuvem respondeu.';
-    } else if (/Nenhuma imagem recebida/i.test(d?.error || '')) {
-      // É a resposta CERTA para um teste sem imagens: a função está a funcionar.
-      caixa.className = 'cfg-result ok';
-      caixa.textContent =
-        '✅ A função de nuvem está a responder' +
-        (d.http ? ` (HTTP ${d.http})` : '') +
-        '. O teste não envia imagens, por isso ela pede imagens — é o esperado.';
-    } else if (/Falta o segredo/i.test(d?.error || '')) {
-      caixa.className = 'cfg-result err';
-      caixa.textContent =
-        `⚠️ A função responde, mas falta o segredo. Corra:  base44 secrets set DEEPSEEK_API_KEY=sk_...\n\n${d.error}`;
-    } else {
-      caixa.className = 'cfg-result err';
-      caixa.textContent = `❌ ${d?.error || 'a função respondeu de forma inesperada'}`;
-    }
-  } catch (e) {
-    caixa.className = 'cfg-result err';
-    caixa.textContent = `❌ ${e.message}`;
-  }
+// ---------------------------------------------------------------- carregar vídeo
+// O vídeo carregado (estúdio como cena, ou painel direto) vive em
+// estudio-video-carregado.mjs; cá fica só a ponta que a lista de imagens usa.
+function carregarVideoFicheiro(file) {
+  if (modVideoCarregado) modVideoCarregado.carregarVideoFicheiro(file);
+}
+
+// ---------------------------------------------------------------- novo projeto
+// "✨ Novo projeto": começa uma produção limpa. Reaproveita a limpeza do botão
+// "🗑 Limpar" (imagens, narração e áudio) e acrescenta o que ele não faz:
+// letra da música, trilha e o nome do projeto. Os projetos guardados ficam.
+async function novoProjeto() {
+  $('btn-clear').onclick();
+  limparLetra();
+  tirarTrilha();
+  $('projeto-nome').value = '';
+  guardar();
+  estadoProjeto('Projeto novo: importe as imagens desta produção.');
+  toast('Projeto novo — tudo limpo para a próxima produção.', 'ok');
+  await desenharProjetos();
+}
+// O script corre no fim do body (módulo, depois da análise): os elementos já
+// existem quando esta linha corre, por isso a ligação pode ser direta.
+$('btn-projeto-novo').onclick = novoProjeto;
+// "✨ Novo projeto" do PAINEL: chega aqui pelo evento do painel.js — abre o
+// estúdio limpo, sem puxar projetos anteriores.
+if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+  window.addEventListener('rh-novo-projeto', () => novoProjeto());
+  // "✏️ Reeditar projeto" (Painel e detalhes): abre o projeto original no
+  // estúdio. O Painel já confirmou que o projeto existe antes de mandar o id.
+  window.addEventListener('rh-reeditar-projeto', (e) => {
+    const id = e && e.detail ? e.detail.id : '';
+    if (id) abrirProjeto(id);
+  });
 }
 
 // ---------------------------------------------------------------- arranque
-function init() {
+// Cliente Base44 (o mesmo padrão de sempre: import dinâmico, reescrevível nos testes).
+async function clienteBase44() {
+  const { base44 } = await import('@/base44Client.js');
+  return base44;
+}
+
+// Módulos extraídos do app.js: trilha, letra, projetos e utilizador.
+async function carregarModulosExtras() {
+  const ctx = {
+    state, toast, guardar, resumoVideo, marcarModoDuracao, marcarMotor, marcarTom, atualizarLetra,
+    atualizarContador, renderThumbs, renderScenes, updateLayout, preparar, paraBase64,
+    pararPreviaTrilha, pararPreviaLetra, lerConfig, projetos, leg, clienteBase44,
+    aplicarPreferenciasNaInterface,
+  };
+  try {
+    modEleven = await import('./estudio-eleven.mjs');
+    modEleven.iniciar({ state, toast, guardar });
+  } catch (e) {
+    console.warn('módulo da ElevenLabs não chegou:', e && e.message);
+  }
+  try {
+    modLetraTrilha = await import('./estudio-letra-trilha.mjs');
+    modLetraTrilha.iniciar(ctx);
+  } catch (e) {
+    console.warn('módulo da letra/trilha não chegou:', e && e.message);
+  }
+  try {
+    modProjetosUI = await import('./estudio-projetos.mjs');
+    modProjetosUI.iniciar(ctx);
+  } catch (e) {
+    console.warn('módulo dos projetos não chegou:', e && e.message);
+  }
+  try {
+    modUtilizadorUI = await import('./estudio-utilizador.mjs');
+    modUtilizadorUI.iniciarUtilizador({ toast, clienteBase44 });
+  } catch (e) {
+    console.warn('módulo do utilizador não chegou:', e && e.message);
+  }
+  try {
+    modVideoCarregado = await import('./estudio-video-carregado.mjs');
+    modVideoCarregado.iniciar({ state, toast, renderThumbs, renderScenes, updateLayout, clienteBase44 });
+  } catch (e) {
+    console.warn('módulo do vídeo carregado não chegou:', e && e.message);
+  }
+  try {
+    modCenasEdit = await import('./estudio-edicao-cenas.mjs');
+    modCenasEdit.iniciar({ state, toast, renderThumbs, renderScenes, resumoVideo, guardar });
+  } catch (e) {
+    console.warn('módulo da edição de cenas não chegou:', e && e.message);
+  }
+  try {
+    modAnalise = await import('./estudio-analise.mjs');
+    modAnalise.iniciarAnalise({
+      state, $, toast, clienteBase44, videoAtual: () => resultadoVideo,
+      guardar, resumoVideo, aplicarPreferenciasNaInterface, gerarVideoFinal,
+    });
+  } catch (e) {
+    console.warn('módulo da análise não chegou:', e && e.message);
+  }
+}
+
+async function init() {
   $('btn-folder').onclick = pickFolder;
   $('btn-files').onclick = pickFiles;
   $('btn-add').onclick = pickFiles;
+  $('btn-dedup').onclick = removerDuplicadas;
   $('btn-generate').onclick = gerar;
   $('btn-clear').onclick = () => {
     stopSpeak();
@@ -2885,6 +2565,7 @@ function init() {
     // de escrever por cima do que estava aberto.
     projetos.idAtual = null;
     projetos.criadoEm = null;
+    projetos.nuvemId = null;
     const btnAtualizar = $('btn-projeto-atualizar');
     if (btnAtualizar) btnAtualizar.hidden = true;
     estadoProjeto('Guarde o trabalho para o voltar a abrir noutro dia.');
@@ -2956,11 +2637,12 @@ function init() {
   // separadores
   iniciarAbas();
 
-  // projetos guardados (histórico)
-  iniciarProjetos();
-
-  // utilizador (quem está a usar)
-  iniciarUtilizador();
+  // O painel manda quando a vista muda (o estúdio tem de se redesenhar).
+  if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+    window.addEventListener('rh-vista', updateLayout);
+  }
+  // Só anunciar pronto depois de carregar os módulos usados pelos controlos.
+  await carregarModulosExtras();
 
   // arrastar para a página (ficheiros ou pastas)
   const drop = $('drop');
@@ -2993,12 +2675,18 @@ function init() {
     } else {
       ficheiros.push(...(e.dataTransfer?.files || []));
     }
-    if (ficheiros.length) addImages(ficheiros);
+    if (ficheiros.length) {
+      // Vídeo arrastado pergunta o destino; imagens seguem para o estúdio.
+      const videos = ficheiros.filter(ehFicheiroVideo);
+      const imagens = ficheiros.filter((f) => !videos.includes(f));
+      if (videos.length) carregarVideoFicheiro(videos[0]);
+      if (imagens.length) addImages(imagens);
+    }
   });
 
   // configurações
   $('btn-config').onclick = () => $('dlg').showModal();
-  $('cfg-testar').onclick = testarLigacao;
+  $('cfg-testar').onclick = () => import('./teste-ligacao.mjs').then((m) => m.testarLigacao());
   $('cfg-guardar').onclick = (e) => {
     e.preventDefault();
     state.servico = $('cfg-servico').value;
@@ -3041,13 +2729,32 @@ function init() {
   state.legendas = c.legendas !== false;
   state.letra = typeof c.letra === 'string' ? c.letra : '';
   state.letraLigada = c.letraLigada === true && state.letra.trim().length > 0;
+  state.legendasLetra = c.legendasLetra || null;
   state.modoDuracao = c.modoDuracao === 'trilha' ? 'trilha' : 'natural';
   state.codec = c.codec === 'vp9' ? 'vp9' : 'vp8';
   state.enquadramento = c.enquadramento === 'centro' ? 'centro' : 'personagem';
   state.musicaLigada = c.musicaLigada !== false;
+  state.orientacao = typeof c.orientacao === 'string' ? c.orientacao : '';
+  state.orientacaoRotulo = '';
+  // Epílogo com VÁRIAS cenas: lista nova; projetos antigos tinham uma só.
+  const finaisGuardadas = Array.isArray(c.cenasFinais)
+    ? c.cenasFinais.filter((x) => typeof x === 'string' && x)
+    : [];
+  state.cenasFinais = finaisGuardadas.length ? finaisGuardadas : (typeof c.cenaFinal === 'string' && c.cenaFinal ? [c.cenaFinal] : []);
+  state.cenaFinal = state.cenasFinais[0] || '';
+  state.cenaInicial = typeof c.cenaInicial === 'string' ? c.cenaInicial : '';
+  // Introdução com VÁRIAS cenas: lista nova; projetos antigos tinham uma só.
+  const iniciaisGuardadas = Array.isArray(c.cenasIniciais)
+    ? c.cenasIniciais.filter((x) => typeof x === 'string' && x)
+    : [];
+  state.cenasIniciais = iniciaisGuardadas.length
+    ? iniciaisGuardadas
+    : state.cenaInicial ? [state.cenaInicial] : [];
+  state.durIntro = Number(c.durIntro) || 0;
+  state.durEpilogo = Number(c.durEpilogo) || 0;
   marcarMotor();
   marcarTom();
-  iniciarVideo();
+  await iniciarVideo();
   // A voz escolhida só se pode marcar depois de a lista chegar do servidor;
   // o botão "Carregar as minhas vozes" trata disso e repõe a escolha guardada.
   if (state.vozEleven) $('voz-estado').textContent = `ElevenLabs · ${state.vozEleven.slice(0, 8)}… (por confirmar)`;

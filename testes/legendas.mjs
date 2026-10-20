@@ -1,7 +1,8 @@
 // Testes das legendas: corte em blocos, temporização, .srt e caber no ecrã.
 // A lógica é pura (não precisa de canvas), por isso corre-se diretamente.
-const BASE = 'file:///E:/youtube%20rebeca2/rebeca-hub-3.0-base44/public/';
+const BASE = new URL('../public/', import.meta.url).href;
 const core = await import(BASE + 'legendas-core.mjs');
+await import(new URL('./legendas-manuais.mjs', import.meta.url).href);
 
 const falhas = [];
 const ok = (m) => console.log('  ok:', m);
@@ -124,9 +125,9 @@ console.log('\n[6] Ficheiro .srt com os mesmos blocos do vídeo');
   // O SRT aguenta acentos (é escrito em UTF-8).
   check(srt.includes('também'), 'os acentos ficam intactos no .srt', 'acentos perdidos');
   check(core.legendasParaSrt([]) === '', 'sem blocos, o .srt é vazio', 'devolveu lixo');
-  // Uma legenda muito curta é esticada no .srt para não piscar.
+  // O .srt preserva o fim exato, inclusive em ajustes manuais curtos.
   const rapido = core.legendasParaSrt([{ texto: 'Oi', inicio: 0, fim: 0.2 }]);
-  check(/00:00:00,000 --> 00:00:00,800/.test(rapido), 'uma legenda de 0,2s sai com 0,8s no .srt', rapido.replace(/\n/g, ' | '));
+  check(/00:00:00,000 --> 00:00:00,200/.test(rapido), 'uma legenda de 0,2s preserva o fim exato no .srt', rapido.replace(/\n/g, ' | '));
 }
 
 console.log('\n[7] Cabe em 2 linhas sem perder palavras');
@@ -217,6 +218,15 @@ console.log('\n[10] Letra da música: versos e distribuição do tempo');
   check(versos[1] === 'Segunda linha com espaços', `os espaços a mais são limpos ("${versos[1]}")`, versos[1]);
   check(core.versosDaLetra('').length === 0 && core.versosDaLetra(null).length === 0, 'letra vazia não dá versos', 'deu versos');
 
+  // Marcações de estrutura vindo do Suno/IA: "**[Verso 2]**" NÃO é verso —
+  // nem aparece como legenda, nem desalinha a distribuição do tempo.
+  const comMarcas = 'Os passarinhos cantam\n**[Verso 2]**\n[Refrão]\nO sol vai se pôr\n__(Refrão)__\nA noite vem chegando\n**(Chorus)**';
+  const limpos = core.versosDaLetra(comMarcas);
+  check(limpos.length === 3, `só os 3 versos de verdade ficam (${limpos.length})`, JSON.stringify(limpos));
+  check(!limpos.some((v) => /verso|refrão|chorus/i.test(v)), 'nenhuma marcação sobra nos versos', JSON.stringify(limpos));
+  check(limpos[0] === 'Os passarinhos cantam', 'o verso normal passa intacto', limpos[0]);
+  check(!core.versosDaLetra('**[Verso 2]**\n[Chorus]\n`[Ponte]`').length, 'letra só de marcações não dá versos', 'deu versos');
+
   // 4 versos numa música de 120s: 30s cada, encaixados sem buracos.
   const cues = core.legendasDaLetra(versos.concat('Quarta'), 120);
   check(cues.length === 4, `4 versos temporizados (${cues.length})`, String(cues.length));
@@ -250,6 +260,109 @@ console.log('\n[10] Letra da música: versos e distribuição do tempo');
   check(core.legendasDaLetra(['Um'], 0).length === 0, 'sem duração de música não há legendas', 'gerou legendas');
   check(core.legendasDaLetra(null, 100).length === 0, 'letra nula não rebenta', 'rebentou');
   check(core.legendasDaLetra(['Um'], 'abc').length === 0, 'duração inválida não rebenta', 'rebentou');
+}
+
+console.log('\n[11] Letra sincronizada com o canto (trechos de voz)');
+{
+  // Música de 60s com canto em duas seções: 10–25s e 35–55s. A intro (0–10) e
+  // o interlúdio (25–35) são só instrumento: nenhum verso deve aparecer ali.
+  const secoes = [
+    { inicio: 10, fim: 25 },
+    { inicio: 35, fim: 55 },
+  ];
+  const cues = core.legendasDaLetra(
+    ['primeiro verso longo aqui', 'segundo verso longo aqui', 'terceiro', 'quarto'],
+    60,
+    { secoes },
+  );
+  check(cues.length === 4, `4 versos temporizados (${cues.length})`, String(cues.length));
+  check(perto(cues[0].inicio, 10, 0.01), `o 1.º verso entra QUANDO A VOZ ENTRA (${cues[0].inicio}s)`, String(cues[0].inicio));
+  check(perto(cues[3].fim, 55, 0.01), `o último acaba junto com o último canto (${cues[3].fim}s)`, String(cues[3].fim));
+  // Verso maior, mais tempo (proporcional às palavras do canto que resta).
+  check(cues[0].fim - cues[0].inicio > cues[2].fim - cues[2].inicio, 'o verso maior fica mais tempo no ecrã', `${cues[0].fim - cues[0].inicio} ≤ ${cues[2].fim - cues[2].inicio}`);
+  // Nenhum verso COMEÇA dentro de um trecho instrumental.
+  const dentro = cues.every((c) => secoes.some((s) => c.inicio >= s.inicio - 0.01 && c.inicio < s.fim));
+  check(dentro, 'cada verso começa dentro de um trecho de canto', JSON.stringify(cues.map((c) => [c.inicio.toFixed(1), c.fim.toFixed(1)])));
+  // Nenhum verso anda para trás.
+  const paraTras = cues.filter((c, i) => i > 0 && c.inicio < cues[i - 1].inicio);
+  check(paraTras.length === 0, 'a ordem dos versos nunca recua', String(paraTras.length));
+  // Verso cortado onde a voz para: um verso que atravesse o interlúdio é
+  // cortado no fim da seção de canto.
+  const atravessador = core.legendasDaLetra(['a', 'b', 'c'], 60, { secoes });
+  check(perto(atravessador[1].fim, 25, 0.01), `o verso é cortado onde a voz para (${atravessador[1].fim}s)`, String(atravessador[1].fim));
+
+  // Voz contínua (cobertura ~total): os trechos não dizem nada — divisão igual.
+  const continua = core.legendasDaLetra(['a', 'b'], 60, { secoes: [{ inicio: 0, fim: 59 }] });
+  check(perto(continua[0].inicio, 0) && perto(continua[0].fim, 30), 'canto contínuo: divisão igual de sempre', `${continua[0].inicio}–${continua[0].fim}`);
+  // Sem trechos (análise falhou ou não correu): comportamento de sempre.
+  const antigo = core.legendasDaLetra(['a', 'b'], 60);
+  check(perto(antigo[0].inicio, 0) && perto(antigo[0].fim, 30), 'sem trechos: comportamento de sempre', `${antigo[0].inicio}–${antigo[0].fim}`);
+  // Trechos malformados não rebentam.
+  check(core.legendasDaLetra(['a'], 60, { secoes: [null, {}, { inicio: 5 }] }).length === 1, 'trechos inválidos são ignorados', 'rebentou');
+}
+
+console.log('\n[12] Detetor de voz: onde a música tem canto');
+{
+  const modMusica = await import(BASE + 'musica.mjs');
+  // Música falsa de 10s: 0–2s silêncio, 2–5s "canto", 5–8s silêncio, 8–10s "canto".
+  const taxa = 44100;
+  const data = new Float32Array(taxa * 10);
+  const voz = (de, ate) => {
+    for (let i = taxa * de; i < taxa * ate; i++) data[i] = 0.5 * Math.sin(i / 20);
+  };
+  voz(2, 5);
+  voz(8, 10);
+  const musicaFalsa = {
+    numberOfChannels: 1,
+    sampleRate: taxa,
+    length: data.length,
+    duration: 10,
+    getChannelData: () => data,
+  };
+  globalThis.AudioContext = class {
+    decodeAudioData() { return Promise.resolve(musicaFalsa); }
+    close() { return Promise.resolve(); }
+  };
+  const ficheiro = { arrayBuffer: () => Promise.resolve(new ArrayBuffer(8)) };
+  const analise = await modMusica.analisarVoz(ficheiro);
+  check(Boolean(analise), 'a análise devolve um resultado', 'devolveu nada');
+  check(perto(analise?.duracao, 10, 0.01), `a duração analisada é a da faixa (${analise?.duracao})`, String(analise?.duracao));
+  check(perto(analise?.vozInicio, 2, 0.2), `a voz entra aos ${analise?.vozInicio}s (intro instrumental saltada)`, String(analise?.vozInicio));
+  check(analise?.secoes?.length === 2, `2 trechos de canto (${analise?.secoes?.length})`, JSON.stringify(analise?.secoes));
+  const [a, b] = analise.secoes;
+  check(perto(a.inicio, 2, 0.2) && perto(a.fim, 5, 0.2), `1.º trecho ≈ 2–5s (${a.inicio.toFixed(1)}–${a.fim.toFixed(1)})`, `${a.inicio}–${a.fim}`);
+  check(perto(b.inicio, 8, 0.2) && perto(b.fim, 10, 0.2), `2.º trecho ≈ 8–10s (${b.inicio.toFixed(1)}–${b.fim.toFixed(1)})`, `${b.inicio}–${b.fim}`);
+  // Canto contínuo do princípio ao fim: trechos vazios (nada a corrigir).
+  const cheia = new Float32Array(taxa * 10);
+  for (let i = 0; i < cheia.length; i++) cheia[i] = 0.4 * Math.sin(i / 20);
+  globalThis.AudioContext = class {
+    decodeAudioData() { return Promise.resolve({ ...musicaFalsa, getChannelData: () => cheia }); }
+    close() { return Promise.resolve(); }
+  };
+  const seguido = await modMusica.analisarVoz(ficheiro);
+  check(seguido?.secoes?.length === 0, `canto contínuo devolve trechos vazios (${seguido?.secoes?.length})`, JSON.stringify(seguido?.secoes));
+  // Falha sem rebentar: ficheiro ilegível.
+  const falha = await modMusica.analisarVoz({ arrayBuffer: () => Promise.reject(new Error('x')) });
+  check(falha === null, 'ficheiro ilegível devolve null', 'rebentou');
+  delete globalThis.AudioContext;
+}
+
+console.log('\n[13] Re-temporização do rascunho ao canto real');
+{
+  // Rascunho dividido igual (a análise da página não correu): 2 versos em 60s.
+  const secoes = [{ inicio: 10, fim: 30 }, { inicio: 40, fim: 55 }];
+  const rascunho = [{ texto: 'a', inicio: 0, fim: 30 }, { texto: 'b', inicio: 30, fim: 60 }];
+  const novas = core.ressincronizarPelaVoz(rascunho, secoes);
+  check(Boolean(novas), 'devolve os tempos corrigidos', 'devolveu nada');
+  check(perto(novas[0].inicio, 10, 0.01), `o 1.º verso entra quando a voz entra (${novas[0].inicio}s)`, String(novas[0].inicio));
+  check(perto(novas[0].fim, 30, 0.01), `o 1.º acaba onde a voz para (${novas[0].fim}s)`, String(novas[0].fim));
+  check(perto(novas[1].inicio, 40, 0.01), `o 2.º salta o instrumental e segue o canto (${novas[1].inicio}s)`, String(novas[1].inicio));
+  check(perto(novas.at(-1).fim, 55, 0.01), `o último acaba junto com o canto (${novas.at(-1).fim}s)`, String(novas.at(-1).fim));
+  const dentro = novas.every((c) => secoes.some((s) => c.inicio >= s.inicio - 0.01 && c.inicio < s.fim));
+  check(dentro, 'nenhum verso começa no instrumental', JSON.stringify(novas.map((c) => [c.inicio, c.fim])));
+  check(novas.every((c, i) => i === 0 || c.inicio >= novas[i - 1].inicio - 0.01), 'a ordem dos versos nunca recua', JSON.stringify(novas));
+  check(core.ressincronizarPelaVoz(rascunho, []) === null, 'sem trechos devolve null (fica como estava)', 'devolveu lista');
+  check(core.ressincronizarPelaVoz([], secoes) === null, 'sem cues devolve null', 'devolveu lista');
 }
 
 console.log(falhas.length ? `\n=== ${falhas.length} FALHA(S) ===` : '\n=== LEGENDAS OK ===');

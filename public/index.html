@@ -5,6 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Rebeca Hub 3.0 — nuvem</title>
     <link rel="stylesheet" href="/style.css" />
+    <link rel="stylesheet" href="/painel.css" />
+    <link rel="stylesheet" href="/pesquisa.css" />
+    <link rel="stylesheet" href="/legendas-editor.css" />
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎙️</text></svg>" />
   </head>
   <body>
@@ -17,6 +20,9 @@
         </div>
       </div>
       <div class="top-actions">
+        <button id="btn-ir-painel" class="ghost" type="button" title="os vídeos já prontos">📺 Painel</button>
+        <button id="btn-ir-estudio" class="ghost" type="button" hidden>🎙️ Estúdio</button>
+        <button id="btn-ir-pesquisa" class="ghost" type="button" title="sugestões de temas com IA">🔍 Temas</button>
         <span id="status" class="pill">a ligar…</span>
         <span id="versao" class="pill tiny-pill" title="versão do motor de vídeo que está a correr neste browser">v…</span>
 
@@ -83,6 +89,7 @@
         <div class="drop-buttons">
           <button id="btn-folder" class="primary" type="button">📁 Escolher pasta</button>
           <button id="btn-files" class="ghost" type="button">Selecionar imagens</button>
+          <button id="btn-video-load" class="ghost" type="button" title="sobe um vídeo já pronto para o Painel">🎬 Carregar vídeo</button>
         </div>
         <p class="hint">
           As imagens ficam no seu computador e são reduzidas antes de serem enviadas.
@@ -91,6 +98,7 @@
       </div>
       <input id="input-files" type="file" accept="image/*" multiple hidden />
       <input id="input-trilha" type="file" accept="audio/*,.mp3,.wav,.m4a,.ogg,.aac,.flac" hidden />
+      <input id="input-video" type="file" accept="video/*,.mp4,.webm,.mov,.mkv,.avi" hidden />
     </section>
 
     <main id="workspace" hidden>
@@ -98,6 +106,7 @@
         <div class="tb-left">
           <button id="btn-add" class="ghost small" type="button">＋ Adicionar</button>
           <button id="btn-clear" class="ghost small danger" type="button">🗑 Limpar</button>
+          <button id="btn-dedup" class="ghost small" type="button" title="Remove cópias do tipo “nome (1).jpg”, ficando a primeira de cada grupo">🧹 Remover duplicadas</button>
         </div>
         <div class="tb-mid">
           <label class="field">
@@ -139,7 +148,7 @@
           <div class="tab" id="tab-imagens">
             <header class="pane-head">
               <h2>Ordem das imagens</h2>
-              <span class="pane-hint">Arraste, ou use ▲ ▼</span>
+              <span class="pane-hint">Arraste as cenas para mudar a ordem · ✕ remove</span>
             </header>
 
             <!-- Projetos: guardar e voltar a um trabalho anterior -->
@@ -149,6 +158,8 @@
                   placeholder="Nome do projeto (ex.: A Borboleta)" />
                 <button id="btn-projeto-guardar" class="primary small" type="button">💾 Guardar projeto</button>
                 <button id="btn-projeto-atualizar" class="ghost small" type="button" hidden>🔁 Atualizar</button>
+                <button id="btn-projeto-nuvem" class="ghost small" type="button" title="guarda o projeto na app: reabre em qualquer computador">☁️ Guardar na nuvem</button>
+                <button id="btn-projeto-novo" class="primary small" type="button">✨ Novo projeto</button>
                 <button id="btn-projetos-ver" class="ghost small" type="button">📂 Os meus projetos</button>
               </div>
               <p id="projeto-estado" class="hint">Guarde o trabalho para o voltar a abrir noutro dia.</p>
@@ -281,6 +292,37 @@
                 <div id="vid-codec" class="chips"></div>
               </div>
 
+              <div class="vp-group" id="grupo-orientacao">
+                <span class="vp-label">Orientação do encerramento</span>
+                <div id="vid-orientacao" class="chips"></div>
+                <div class="trilha-linha" id="linha-cena-inicial">
+                  <label class="field">
+                    <span>Cenas da introdução (pode escolher várias)</span>
+                    <div id="vid-cenas-iniciais" class="cenas-finais"></div>
+                  </label>
+                  <label class="field">
+                    <span>Tempo da introdução</span>
+                    <select id="vid-intro-dur" class="select-simples"></select>
+                  </label>
+                  <span class="hint">sai da sequência e abre o vídeo, parada — nunca repete</span>
+                </div>
+                <div class="trilha-linha" id="linha-cena-final" hidden>
+                  <label class="field">
+                    <span>Cenas do epílogo (pode escolher várias)</span>
+                    <div id="vid-cenas-finais" class="cenas-finais"></div>
+                  </label>
+                  <label class="field">
+                    <span>Tempo do epílogo</span>
+                    <select id="vid-epilogo-dur" class="select-simples"></select>
+                  </label>
+                </div>
+                <p class="hint" style="margin:0">
+                  Com uma orientação escolhida, as cenas finais são retiradas do ciclo e voltam no fim,
+                  pela ordem do projeto, como epílogo — a duração escolhida divide-se entre elas.
+                  As cenas da introdução fazem o mesmo no começo: abrem o vídeo, paradas, pela ordem do projeto.
+                </p>
+              </div>
+
               <div class="vp-group vp-trilha">
                 <span class="vp-label">Letra da música</span>
                 <div class="trilha-caixa">
@@ -297,8 +339,8 @@
                   </div>
                   <div class="trilha-linha">
                     <span class="hint">
-                      O tempo é dividido igualmente pelos versos: uma música de 3:00 com 20 versos dá 9s a cada
-                      um. A letra passa a ser a legenda do vídeo e sai também no ficheiro .srt.
+                      Na aba Legendas, use Sincronizar com o canto para localizar as palavras no áudio.
+                      Confira a prévia e aplique os tempos antes de gerar; estimativas não serão exportadas.
                     </span>
                   </div>
                 </div>
@@ -340,6 +382,9 @@
                 </div>
                 <div class="trilha-linha">
                   <button id="btn-video-ver" class="ghost small" type="button">▶️ Ver o vídeo aqui</button>
+                  <button id="btn-video-analise" class="ghost small" type="button" hidden>🎥 Análise do Diretor</button>
+                  <button id="btn-video-nuvem" class="primary small" type="button" hidden>☁️ Guardar na nuvem</button>
+                  <button id="btn-video-painel" class="ghost small" type="button" hidden>📺 Ver no painel</button>
                   <button id="btn-video-guardar" class="ghost small" type="button">⬇️ Descarregar outra vez</button>
                   <button id="btn-video-guardar-srt" class="ghost small" type="button">⬇️ Guardar o .srt</button>
                 </div>
@@ -376,6 +421,7 @@
           <div class="abas" id="abas-dir">
             <button type="button" class="aba on" data-tab="tab-narracao">📝 Narração</button>
             <button type="button" class="aba" data-tab="tab-acoes">⚡ Ações</button>
+            <button type="button" class="aba" data-tab="tab-legendas">Legendas</button>
           </div>
 
           <div class="tab" id="tab-narracao">
@@ -385,6 +431,33 @@
             </header>
             <ol id="scenes" class="scenes"></ol>
             <p id="empty-scenes" class="empty">Importe imagens e clique em <b>Gerar narração das imagens</b>.</p>
+          </div>
+
+          <div class="tab" id="tab-legendas" hidden>
+            <header class="pane-head">
+              <h2>Tempos das legendas</h2>
+              <span id="legendas-resumo" class="pane-hint">0 legenda(s) da música</span>
+            </header>
+            <div class="legendas-editor">
+              <p class="hint">Revise os versos da letra antes de processar. Use mm:ss.mmm (00:32.500) ou segundos (32.5). O fim deve ser maior que o início, sem sobrepor o próximo verso.</p>
+              <div class="trilha-linha">
+                <button id="btn-legendas-sincronizar" class="primary small" type="button" disabled>Sincronizar com o canto</button>
+              </div>
+              <p class="hint">Alinha a letra exata com as palavras no áudio via ElevenLabs, com cobrança pela sua conta nesse serviço. Inclua versos repetidos. A música é enviada apenas ao solicitar o alinhamento, sem criar uma cópia na nuvem da app. O reconhecimento de canto pode errar: ouça e aplique os tempos conferidos.</p>
+              <p id="legendas-sincronia-estado" role="status"></p>
+              <audio id="legendas-audio" controls preload="metadata" aria-label="Música para conferir os tempos" hidden></audio>
+              <p id="legendas-previa" class="legendas-previa" aria-live="off">Sem legenda neste trecho</p>
+              <p id="legendas-vazio" class="hint">Cole a letra e escolha a trilha sonora na aba Vídeo para ver as legendas aqui.</p>
+              <fieldset id="legendas-campos" disabled aria-label="Editar tempos das legendas">
+                <ol id="legendas-lista" class="legendas-lista"></ol>
+                <div class="trilha-linha">
+                  <button id="btn-legendas-aplicar" class="primary small" type="button">Aplicar tempos</button>
+                  <button id="btn-legendas-restaurar" class="ghost small" type="button">Restaurar rascunho</button>
+                </div>
+              </fieldset>
+              <p id="legendas-editor-estado" class="cfg-result" role="status"></p>
+              <p class="hint">A prévia toca os tempos aplicados. Os ajustes ficam nas preferências deste navegador e acompanham o projeto ao guardar.</p>
+            </div>
           </div>
 
           <div class="tab" id="tab-acoes" hidden>
@@ -422,7 +495,7 @@
             <option value="deepseek">DeepSeek — deepseek-flash</option>
             <option value="openai">OpenAI — gpt-4o-mini</option>
             <option value="groq">Groq — Llama 4 Scout</option>
-            <option value="gemini">Google Gemini — gemini-2.5-flash</option>
+            <option value="gemini">Google Gemini — gemini-3.8-flash</option>
             <option value="local">Servidor local (127.0.0.1:3100)</option>
           </select>
         </label>
@@ -442,7 +515,220 @@
       </form>
     </dialog>
 
+    <!-- ============================================================ -->
+    <!-- Painel: os vídeos prontos, prontos para subir ao YouTube     -->
+    <!-- ============================================================ -->
+    <section id="painel-section" class="painel" hidden>
+      <div class="painel-corpo">
+        <div class="painel-cabeca">
+          <div class="painel-titulo">
+            <h2>Vídeos prontos</h2>
+            <p>Abra para assistir, ver os detalhes e descarregar o ficheiro para o YouTube.</p>
+            <p style="margin-top:10px">
+            <button id="btn-painel-novo" class="primary" type="button">✨ Novo projeto</button>
+            <button id="btn-links" class="ghost" type="button" title="cadastrar e abrir os seus links">🔗 Os meus links</button>
+          </p>
+          </div>
+          <div class="painel-resumo">
+            <div class="resumo-caixa"><b id="resumo-total">0</b><span>vídeo(s)</span></div>
+            <div class="resumo-caixa"><b id="resumo-tempo">0:00</b><span>duração total</span></div>
+            <div class="resumo-caixa"><b id="resumo-tamanho">0 MB</b><span>tamanho total</span></div>
+          </div>
+        </div>
+
+        <div id="aviso-painel" class="hint" style="margin-bottom:12px" hidden></div>
+
+        <section id="grade" class="grade"></section>
+
+        <section id="painel-vazio" class="painel-vazio" hidden>
+          <div class="icone">🎬</div>
+          <h2>Ainda não há vídeos guardados</h2>
+          <p>Gere um vídeo no estúdio e clique em <b>☁️ Guardar na nuvem</b> — ele aparece aqui.</p>
+          <p style="margin-top:14px"><button id="btn-ir-estudio-vazio" class="primary" type="button">🎙️ Abrir o estúdio</button></p>
+        </section>
+      </div>
+    </section>
+
+    <!-- Detalhes do vídeo (no painel) -->
+    <dialog id="dlg-detalhes" class="dlg">
+      <div class="dlg-form">
+        <div class="dlg-cabeca">
+          <h2 id="det-titulo">—</h2>
+          <button id="btn-det-fechar" class="ghost small" type="button">Fechar</button>
+        </div>
+        <div class="video-caixa" id="det-video-caixa"></div>
+        <div id="det-detalhes" class="detalhes-grade"></div>
+        <div class="dlg-acoes">
+          <button id="btn-det-reeditar" class="ghost" type="button">✏️ Reeditar projeto</button>
+          <button id="btn-det-descarregar" class="primary" type="button">⬇️ Descarregar o vídeo</button>
+          <button id="btn-det-ir-youtube" class="ghost" type="button">▶️ Abrir o YouTube Studio</button>
+        </div>
+        <p class="hint" style="margin:10px 0 0">
+          Para subir ao YouTube: descarregue o ficheiro WebM e envie-o no YouTube Studio —
+          ele aceita WebM sem converter. Os detalhes daqui servem para a descrição.
+        </p>
+      </div>
+    </dialog>
+
+    <!-- Preparar envio ao YouTube: confirmação antes de abrir o Studio -->
+    <dialog id="dlg-youtube" class="dlg">
+      <div class="dlg-form">
+        <div class="dlg-cabeca">
+          <h2>📤 <span id="yt-titulo">Preparar envio ao YouTube</span></h2>
+          <button id="btn-yt-fechar" class="ghost small" type="button">Fechar</button>
+        </div>
+        <p class="hint" style="margin:0 0 10px">
+          A app não conecta a sua conta do YouTube: o envio é <b>manual</b>.
+          Ao confirmar, o vídeo é descarregado e o YouTube Studio abre numa janela nova,
+          para você fazer o upload por lá.
+        </p>
+        <div id="yt-info" class="detalhes-grade"></div>
+        <p class="hint" style="margin:10px 0 0">
+          Visibilidade pretendida: <b>Público</b> — selecione “Público” no YouTube antes de publicar.
+          Cancelar ou fechar não inicia envio nenhum.
+        </p>
+        <div class="dlg-acoes">
+          <button id="btn-yt-baixar" class="ghost" type="button">⬇️ Baixar o vídeo</button>
+          <button id="btn-yt-confirmar" class="primary" type="button">▶️ Confirmar e abrir o YouTube Studio</button>
+        </div>
+      </div>
+    </dialog>
+
+    <!-- Links cadastrados: assunto + endereço, para abrir rápido -->
+    <dialog id="dlg-links" class="dlg">
+      <div class="dlg-form">
+        <div class="dlg-cabeca">
+          <h2>🔗 Os meus links</h2>
+          <button id="btn-links-fechar" class="ghost small" type="button">Fechar</button>
+        </div>
+        <form id="form-links" autocomplete="off">
+          <div class="links-form-linha">
+            <label class="field">
+              <span>Assunto</span>
+              <input id="link-assunto" type="text" maxlength="80" placeholder="ex.: Canal do YouTube" required />
+            </label>
+            <label class="field">
+              <span>Endereço (URL)</span>
+              <input id="link-url" type="url" placeholder="https://…" required />
+            </label>
+            <button id="btn-links-cadastrar" class="primary small" type="submit">＋ Cadastrar</button>
+          </div>
+          <div id="links-erro" class="cfg-result err" hidden></div>
+        </form>
+        <ul id="links-ul" class="links-ul"></ul>
+        <p id="links-vazio" class="hint" hidden>Ainda não há links cadastrados.</p>
+      </div>
+    </dialog>
+
+    <!-- Onde fica o vídeo escolhido: estúdio (misturar com imagens) ou painel -->
+    <dialog id="dlg-destino" class="dlg">
+      <form method="dialog" class="dlg-form">
+        <h2 id="destino-titulo">Vídeo</h2>
+        <p class="hint" style="margin:0 0 12px">Onde quer usar este vídeo?</p>
+        <div class="dlg-acoes">
+          <button id="btn-destino-estudio" class="primary" type="button">🎬 Abrir no estúdio (misturar com imagens)</button>
+          <button id="btn-destino-painel" class="ghost" type="button">📺 Enviar direto ao Painel</button>
+        </div>
+        <p class="hint" style="margin:10px 0 0">
+          No estúdio, o vídeo entra como cena: pode intercalar com as imagens, mudar a ordem
+          e gerar o vídeo final com narração, trilha e legendas como qualquer outra montagem.
+        </p>
+      </form>
+    </dialog>
+
+    <!-- Prompts do tema escolhido: imagem e música, prontos para copiar -->
+    <dialog id="dlg-prompts" class="dlg">
+      <form method="dialog" class="dlg-form">
+        <div class="dlg-cabeca">
+          <h2 id="prompts-titulo">Prompts</h2>
+          <button id="btn-prompts-fechar" class="ghost small" type="button">Fechar</button>
+        </div>
+        <div id="prompts-estado" class="cfg-result" hidden></div>
+        <label class="field wide">
+          <span>🎨 Prompt de imagem (em inglês, para os geradores de imagem)</span>
+          <textarea id="prompts-imagem" rows="5" spellcheck="false"></textarea>
+        </label>
+        <div class="dlg-acoes">
+          <button id="btn-copiar-imagem" class="ghost small" type="button">📋 Copiar o prompt de imagem</button>
+        </div>
+        <label class="field wide">
+          <span>🎵 Estilo da música (para geradores como o Suno)</span>
+          <textarea id="prompts-estilo" rows="3" spellcheck="false"></textarea>
+        </label>
+        <label class="field wide">
+          <span>🎼 Letra da música</span>
+          <textarea id="prompts-letra" rows="9" spellcheck="false"></textarea>
+        </label>
+        <div class="dlg-acoes">
+          <button id="btn-copiar-musica" class="ghost small" type="button">📋 Copiar a música (estilo + letra)</button>
+        </div>
+        <p class="hint" style="margin:8px 0 0">
+          Tudo é editável: mude o texto aqui e copie como ficou. Cole o prompt de imagem no gerador de imagens e o estilo + a letra no gerador de música.
+        </p>
+      </form>
+    </dialog>
+
+    <!-- Análise do diretor: feedback estruturado do vídeo gerado -->
+    <dialog id="dlg-analise" class="dlg">
+      <div class="dlg-form">
+        <div class="dlg-cabeca">
+          <h2>🎥 Análise do Diretor</h2>
+          <button id="btn-analise-fechar" class="ghost small" type="button">Fechar</button>
+        </div>
+        <div id="analise-estado" class="cfg-result" hidden></div>
+        <div id="analise-corpo" hidden>
+          <h3 class="analise-titulo">Composição e ritmo visual</h3>
+          <p id="analise-composicao" class="analise-texto"></p>
+          <h3 class="analise-titulo">Sincronização com o áudio/música</h3>
+          <p id="analise-sincronia" class="analise-texto"></p>
+          <h3 class="analise-titulo">Melhorias para a edição (pós-produção)</h3>
+          <ul id="analise-melhorias" class="analise-lista"></ul>
+          <label class="field wide">
+            <span>🎬 Prompt refinado (em inglês, para regerar as imagens)</span>
+            <textarea id="analise-prompt" rows="6" spellcheck="false"></textarea>
+          </label>
+          <div class="dlg-acoes">
+            <button id="btn-analise-aplicar" class="primary small" type="button">✨ Aplicar melhorias e gerar de novo</button>
+            <button id="btn-analise-copiar" class="ghost small" type="button">📋 Copiar o prompt refinado</button>
+          </div>
+        </div>
+      </div>
+    </dialog>
+
+    <!-- ============================================================ -->
+    <!-- Pesquisa de temas: sugestões da IA para vídeos infantis       -->
+    <!-- ============================================================ -->
+    <section id="pesquisa-section" class="pesquisa" hidden>
+      <div class="pesquisa-corpo">
+        <div class="pesquisa-cabeca">
+          <h2>🔍 Pesquisa de temas</h2>
+          <p>Sugestões da IA para vídeos infantis (0–12 anos): temas mais procurados, títulos prontos e faixa etária.</p>
+        </div>
+
+        <form id="form-pesquisa" class="pesq-form">
+          <label class="field">
+            <span>Palavras-chave</span>
+            <input id="pesq-palavras" type="text" maxlength="300"
+              placeholder="ex.: dinossauros, fazendinha, histórias de dormir" />
+          </label>
+          <label class="field">
+            <span>Link de um vídeo do YouTube (opcional, como referência)</span>
+            <input id="pesq-link" type="url" placeholder="https://www.youtube.com/watch?v=…" />
+          </label>
+          <div class="pesq-acoes">
+            <button id="btn-pesq" class="primary" type="submit">✨ Sugerir temas</button>
+          </div>
+          <div id="pesq-estado" class="cfg-result" hidden></div>
+          <div id="pesq-erro" class="cfg-result err" hidden></div>
+        </form>
+
+        <section id="pesq-resultados" class="pesq-resultados"></section>
+      </div>
+    </section>
+
     <div id="toast" class="toast" hidden></div>
     <script type="module" src="/app.js"></script>
+    <script type="module" src="/painel.js"></script>
+    <script type="module" src="/pesquisa.js"></script>
   </body>
 </html>

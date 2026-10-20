@@ -1,0 +1,624 @@
+// ============================================================
+//  Rebeca Hub 3.0 (nuvem) — Painel de vídeos prontos
+//
+//  Vista inicial do app: reúne os vídeos já gerados e guardados
+//  na nuvem, com os detalhes de cada um, prontos para subir ao
+//  YouTube. O estúdio fica em "#estudio" (botão 🎙️ Estúdio).
+//
+//  Este módulo é independente do app.js: troca de vista guarda o
+//  estado em localStorage("rh3vista") e avisa com o evento
+//  "rh-vista", que o estúdio usa para voltar a mostrar o ecrã.
+// ============================================================
+
+const $ = (id) => document.getElementById(id);
+
+let lista = [];
+
+// ---------------------------------------------------------------- formato
+const formatarMinutos = (s) => {
+  const t = Math.max(0, Math.round(Number(s) || 0));
+  return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
+};
+const formatarTamanho = (b) => {
+  const mb = (Number(b) || 0) / 1048576;
+  return mb >= 1 ? `${mb.toFixed(1)} MB` : `${Math.round((Number(b) || 0) / 1024)} kB`;
+};
+const formatarData = (iso) => {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '—';
+  return d.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' }) +
+    ' · ' + d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+};
+
+let toastTimer;
+function toast(msg, kind = '') {
+  const el = $('toast');
+  if (!el) return;
+  el.textContent = msg;
+  el.className = `toast ${kind}`;
+  el.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => (el.hidden = true), kind === 'err' ? 9000 : 4200);
+}
+
+// ---------------------------------------------------------------- nuvem
+async function cliente() {
+  const { base44 } = await import('@/base44Client.js');
+  return base44;
+}
+
+// Ficheiros de vídeo ficam no armazenamento privado: abrem por URL assinado.
+async function assinar(uri, expira = 600) {
+  const b = await cliente();
+  const r = await b.integrations.Core.CreateFileSignedUrl({ file_uri: uri, expires_in: expira });
+  return r.signed_url;
+}
+
+// ---------------------------------------------------------------- vistas
+function hashAtual() {
+  try {
+    return String(window.location.hash || '');
+  } catch {
+    return '';
+  }
+}
+
+function avisarVista() {
+  try {
+    window.dispatchEvent(new Event('rh-vista'));
+  } catch {
+    /* sem janela (testes) */
+  }
+}
+
+// O PAINEL É A PÁGINA INICIAL: ao abrir o app sem destino, chega-se aqui.
+// "#estudio" abre o estúdio diretamente (link, favorito, "Abrir o estúdio").
+function mostrarVista(vista) {
+  const noPainel = vista !== 'estudio';
+  try {
+    localStorage.setItem('rh3vista', noPainel ? 'painel' : 'estudio');
+  } catch {
+    /* modo privado */
+  }
+  const drop = $('drop');
+  const ws = $('workspace');
+  const secao = $('painel-section');
+  const pesq = $('pesquisa-section');
+  const btnPainel = $('btn-ir-painel');
+  const btnEstudio = $('btn-ir-estudio');
+  if (pesq) pesq.hidden = true;
+  if (drop) drop.hidden = noPainel;
+  if (secao) secao.hidden = !noPainel;
+  if (ws) ws.hidden = noPainel || !ws.hidden; // ao voltar, o estúdio decide (updateLayout)
+  if (btnPainel) btnPainel.hidden = noPainel;
+  if (btnEstudio) btnEstudio.hidden = !noPainel;
+  if (noPainel) carregar();
+  avisarVista();
+}
+
+// ---------------------------------------------------------------- resumo
+function desenharResumo() {
+  const total = $('resumo-total');
+  const tempo = $('resumo-tempo');
+  const tamanho = $('resumo-tamanho');
+  if (!total) return;
+  total.textContent = String(lista.length);
+  if (tempo) tempo.textContent = formatarMinutos(lista.reduce((s, p) => s + (Number(p.duracao) || 0), 0));
+  if (tamanho) tamanho.textContent = formatarTamanho(lista.reduce((s, p) => s + (Number(p.video_tamanho) || 0), 0));
+}
+
+// ---------------------------------------------------------------- lista
+function miniatura(p) {
+  const m = document.createElement('div');
+  m.className = 'miniatura';
+  if (p.thumb_uri && p.thumbUrl) {
+    const img = document.createElement('img');
+    img.src = p.thumbUrl;
+    img.alt = '';
+    img.loading = 'lazy';
+    // O URL assinado vale 10 minutos e o <img> só pede o ficheiro quando entra
+    // no ecrã (loading="lazy"). Se a página ficou aberta mais do que isso, o
+    // pedido chega com o token já expirado (401): assina OUTRA VEZ e recarrega.
+    img.onerror = () => {
+      if (img.dataset.renovado === '1') return;
+      img.dataset.renovado = '1';
+      assinar(p.thumb_uri, 600)
+        .then((url) => {
+          if (!url) return;
+          p.thumbUrl = url;
+          img.src = url;
+        })
+        .catch(() => {
+          /* sem miniatura renovada, o cartão fica como estava */
+        });
+    };
+    m.append(img);
+  } else {
+    const ic = document.createElement('span');
+    ic.className = 'icone';
+    ic.textContent = '🎬';
+    m.append(ic);
+  }
+  const t = document.createElement('span');
+  t.className = 'tempo';
+  t.textContent = formatarMinutos(p.duracao);
+  m.append(t);
+  return m;
+}
+
+function nomeFicheiroDe(p) {
+  const limpo = String(p.nome || 'video').replace(/[^\w-]+/g, '-').replace(/^-+|-+$/g, '').toLowerCase();
+  return `${limpo || 'video'}.webm`;
+}
+
+function cartao(p) {
+  const c = document.createElement('article');
+  c.className = 'video-cartao';
+
+  const corpo = document.createElement('div');
+  corpo.className = 'cartao-corpo';
+
+  const nome = document.createElement('div');
+  nome.className = 'cartao-nome';
+  nome.textContent = p.nome || 'Sem nome';
+  nome.title = p.nome || '';
+
+  const meta = document.createElement('div');
+  meta.className = 'cartao-meta';
+  meta.textContent = `${p.formato || '—'} · ${formatarTamanho(p.video_tamanho)} · ${formatarData(p.created_date)}`;
+
+  const et = document.createElement('div');
+  et.className = 'etiquetas';
+  if (p.comVoz) {
+    const e = document.createElement('span');
+    e.className = 'etiqueta sim';
+    e.textContent = `🎙️ ${p.motorVoz || 'com voz'}${p.vozUsada ? ` · ${p.vozUsada}` : ''}`;
+    et.append(e);
+  }
+  if (p.comMusica) {
+    const e = document.createElement('span');
+    e.className = 'etiqueta';
+    e.textContent = `🎵 ${p.musicaNome || 'com música'}`;
+    et.append(e);
+  }
+  if ((p.legendas || 0) > 0) {
+    const e = document.createElement('span');
+    e.className = 'etiqueta';
+    e.textContent = `💬 ${p.legendas} legenda(s)`;
+    et.append(e);
+  }
+
+  const acoes = document.createElement('div');
+  acoes.className = 'cartao-acoes';
+  const ver = document.createElement('button');
+  ver.type = 'button';
+  ver.className = 'primary small';
+  ver.textContent = '▶️ Ver detalhes';
+  ver.onclick = () => abrirDetalhes(p);
+  const descarregar = document.createElement('button');
+  descarregar.type = 'button';
+  descarregar.className = 'ghost small';
+  descarregar.textContent = '⬇️';
+  descarregar.title = 'descarregar o ficheiro do vídeo';
+  descarregar.onclick = () => descarregarVideo(p);
+  const apagar = document.createElement('button');
+  apagar.type = 'button';
+  apagar.className = 'ghost small danger';
+  apagar.textContent = '🗑';
+  apagar.title = 'apagar do painel';
+  apagar.onclick = () => apagarVideo(p);
+  const reedit = document.createElement('button');
+  reedit.type = 'button';
+  reedit.className = 'ghost small';
+  reedit.textContent = '✏️';
+  reedit.title = 'Reeditar projeto';
+  reedit.onclick = () => reeditar(p);
+  const yt = document.createElement('button');
+  yt.type = 'button';
+  yt.className = 'ghost small';
+  yt.textContent = '📤';
+  yt.title = 'Preparar envio ao YouTube';
+  yt.onclick = () => prepararYouTube(p);
+  acoes.append(ver, yt, reedit, descarregar, apagar);
+
+  corpo.append(nome, meta, et, acoes);
+  c.append(miniatura(p), corpo);
+  return c;
+}
+
+function desenharLista() {
+  const grade = $('grade');
+  if (!grade) return;
+  grade.innerHTML = '';
+  const vazio = $('painel-vazio');
+  if (vazio) vazio.hidden = lista.length > 0;
+  for (const p of lista) grade.append(cartao(p));
+  desenharResumo();
+}
+
+// ---------------------------------------------------------------- detalhes
+function detalhe(rotulo, valor) {
+  const d = document.createElement('div');
+  d.className = 'detalhe';
+  const s = document.createElement('span');
+  s.textContent = rotulo;
+  const b = document.createElement('b');
+  b.textContent = valor;
+  d.append(s, b);
+  return d;
+}
+
+async function abrirDetalhes(p) {
+  const dlg = $('dlg-detalhes');
+  if (!dlg) return;
+  const titulo = $('det-titulo');
+  if (titulo) titulo.textContent = p.nome || 'Sem nome';
+
+  const caixa = $('det-video-caixa');
+  if (caixa) {
+    caixa.innerHTML = '';
+    if (p.video_uri) {
+      const aviso = document.createElement('div');
+      aviso.className = 'sem-video';
+      aviso.textContent = 'a abrir o vídeo…';
+      caixa.append(aviso);
+      try {
+        const url = await assinar(p.video_uri, 3600);
+        caixa.innerHTML = '';
+        const v = document.createElement('video');
+        v.src = url;
+        v.controls = true;
+        v.playsInline = true;
+        caixa.append(v);
+      } catch (e) {
+        caixa.innerHTML = '';
+        const sv = document.createElement('div');
+        sv.className = 'sem-video';
+        sv.textContent = `Não consegui abrir o vídeo: ${e.message}`;
+        caixa.append(sv);
+      }
+    } else {
+      const sv = document.createElement('div');
+      sv.className = 'sem-video';
+      sv.textContent = 'O ficheiro deste vídeo não está disponível.';
+      caixa.append(sv);
+    }
+  }
+
+  const grade = $('det-detalhes');
+  if (grade) {
+    grade.innerHTML = '';
+    grade.append(
+      detalhe('Duração', formatarMinutos(p.duracao)),
+      detalhe('Tamanho', formatarTamanho(p.video_tamanho)),
+      detalhe('Formato', p.formato || '—'),
+      detalhe('Codec', String(p.codec || '—').toUpperCase()),
+      detalhe('Transição', p.transicao || '—'),
+      detalhe('Voz', p.comVoz ? `${p.motorVoz || 'sim'}${p.vozUsada ? ` · ${p.vozUsada}` : ''}` : 'sem voz'),
+      detalhe('Música', p.comMusica ? p.musicaNome || 'sim' : 'sem música'),
+      detalhe('Legendas', (p.legendas || 0) > 0 ? `${p.legendas} bloco(s)` : 'sem legendas'),
+      detalhe('Gerado em', formatarData(p.created_date)),
+    );
+  }
+
+  const btn = $('btn-det-descarregar');
+  if (btn) btn.onclick = () => descarregarVideo(p);
+  const re = $('btn-det-reeditar');
+  if (re) re.onclick = () => reeditar(p);
+  const yt = $('btn-det-ir-youtube');
+  if (yt) yt.onclick = () => prepararYouTube(p);
+
+  if (typeof dlg.showModal === 'function') dlg.showModal();
+}
+
+// ---------------------------------------------------------------- preparar envio ao YouTube
+// Envio MANUAL: a app não conecta conta nenhuma. Ao confirmar, baixa o
+// vídeo e abre o YouTube Studio, onde o upload é feito à mão.
+let videoYouTube = null;
+
+function prepararYouTube(p) {
+  const dlg = $('dlg-youtube');
+  if (!dlg) return;
+  videoYouTube = p;
+  const titulo = $('yt-titulo');
+  if (titulo) titulo.textContent = p.nome || 'Sem nome';
+  const info = $('yt-info');
+  if (info) {
+    info.innerHTML = '';
+    info.append(
+      detalhe('Vídeo', p.nome || '—'),
+      detalhe('Duração', formatarMinutos(p.duracao)),
+      detalhe('Tamanho', formatarTamanho(p.video_tamanho)),
+      detalhe('Formato', p.formato || '—'),
+    );
+  }
+  dlg.showModal();
+}
+
+function confirmarYouTube() {
+  const p = videoYouTube;
+  const dlg = $('dlg-youtube');
+  if (!p || !dlg) return;
+  dlg.close();
+  descarregarVideo(p);
+  window.open('https://studio.youtube.com', '_blank', 'noopener');
+}
+
+// ---------------------------------------------------------------- reeditar
+// Volta ao estúdio com o PROJETO ORIGINAL do vídeo (cenas, narração e
+// preferências), que vive no IndexedDB deste computador. Confirma que o
+// projeto existe ANTES de trocar de vista — assim nunca se limpa o trabalho
+// aberto no estúdio sem haver projeto para abrir.
+async function reeditar(p) {
+  let projeto = null;
+  const mod = await import('./projetos.mjs');
+  // Caminho normal: o vídeo sabe qual é o projeto dele.
+  if (p.projetoId) {
+    try {
+      projeto = await mod.lerProjeto(p.projetoId);
+    } catch {
+      projeto = null;
+    }
+  }
+  // Vídeos antigos, guardados antes de a app ligar vídeos a projetos: procura
+  // um projeto guardado NESTE computador com o mesmo nome do vídeo.
+  if (!projeto) {
+    try {
+      const todos = await mod.listarProjetos();
+      const nome = String(p.nome || '').trim().toLowerCase();
+      projeto = (todos || []).find((x) => String(x.nome || '').trim().toLowerCase() === nome) || null;
+    } catch {
+      projeto = null;
+    }
+  }
+  // Última tentativa: a NUVEM. O projeto pode estar guardado na app — por
+  // id (vídeos guardados com projeto na nuvem) ou pelo nome do vídeo.
+  // Só IDs da nuvem (24 caracteres hexadecimais) valem uma procura por id:
+  // os projetos só-deste-computador têm ids de UUID, e perguntar à nuvem por
+  // eles só devolvia um 404 no registo da app.
+  if (!projeto) {
+    try {
+      const nuvem = await import('./projeto-nuvem.mjs');
+      const idDaNuvem = /^[0-9a-f]{24}$/i.test(String(p.projetoId || ''));
+      if (idDaNuvem) projeto = await nuvem.lerProjetoNuvem(p.projetoId);
+      if (!projeto && p.nome) projeto = await nuvem.procurarProjetoNuvemPorNome(p.nome);
+    } catch {
+      projeto = null;
+    }
+  }
+  if (!projeto) {
+    toast(`O projeto original de "${p.nome || 'este vídeo'}" não está neste computador nem na nuvem. Abra o vídeo no estúdio e clique em ☁️ Guardar na nuvem para o poder reeditar em qualquer lugar.`, 'err');
+    return;
+  }
+  mostrarVista('estudio');
+  try {
+    window.dispatchEvent(new CustomEvent('rh-reeditar-projeto', { detail: { id: projeto.id } }));
+  } catch {
+    /* sem janela (testes) */
+  }
+}
+
+// ---------------------------------------------------------------- descarregar / apagar
+function descarregarBlob(blob, nome) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = nome;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+}
+
+async function descarregarVideo(p) {
+  if (!p.video_uri) return toast('Este vídeo não tem ficheiro disponível.', 'err');
+  try {
+    toast(`A preparar ${nomeFicheiroDe(p)}…`);
+    const url = await assinar(p.video_uri, 600);
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(`o ficheiro não respondeu (HTTP ${r.status})`);
+    descarregarBlob(await r.blob(), nomeFicheiroDe(p));
+  } catch (e) {
+    toast(`Não consegui descarregar: ${e.message}`, 'err');
+  }
+}
+
+async function apagarVideo(p) {
+  if (!window.confirm(`Apagar "${p.nome}" do painel? O vídeo deixa de estar disponível aqui.`)) return;
+  try {
+    const b = await cliente();
+    await b.entities.VideoProducao.delete(p.id);
+    toast('Vídeo apagado do painel.', '');
+    carregar();
+  } catch (e) {
+    // 404 = o vídeo já tinha sido apagado (por exemplo, noutra janela ou
+    // noutro computador): a lista fica desatualizada e o cartão aponta para um
+    // vídeo que já não existe. Tratar como feito e refrescar, em vez de erro.
+    if (/404|not found|não existe/i.test(`${e.status || ''} ${e.message}`)) {
+      toast('Este vídeo já tinha sido apagado. A lista foi atualizada.', '');
+      carregar();
+      return;
+    }
+    toast(`Não consegui apagar: ${e.message}`, 'err');
+  }
+}
+
+// ---------------------------------------------------------------- carregar
+async function carregar() {
+  const btn = $('btn-recarregar');
+  if (btn) btn.disabled = true;
+  try {
+    const b = await cliente();
+    const page = await b.entities.VideoProducao.filter({}, { sort: '-created_date', limit: 50 });
+    const itens = page.items || [];
+    // As miniaturas vêm de ficheiros privados: um URL assinado por cartão.
+    for (const p of itens) {
+      if (p.thumb_uri) {
+        try {
+          p.thumbUrl = await assinar(p.thumb_uri, 600);
+        } catch {
+          p.thumbUrl = '';
+        }
+      }
+    }
+    lista = itens;
+    const av = $('aviso-painel');
+    if (av) av.hidden = true;
+  } catch (e) {
+    lista = [];
+    const av = $('aviso-painel');
+    if (av) {
+      av.hidden = false;
+      av.textContent = `Não consegui carregar os vídeos: ${e.message}`;
+    }
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+  desenharLista();
+}
+
+// ---------------------------------------------------------------- links
+// Links cadastrados pelo utilizador: assunto + endereço. Clicar abre a página.
+async function carregarLinks() {
+  const b = await cliente();
+  const page = await b.entities.Link.filter({}, { sort: '-created_date', limit: 100 });
+  return page.items || [];
+}
+
+function desenharLinks(itens) {
+  const ul = $('links-ul');
+  if (!ul) return;
+  ul.innerHTML = '';
+  const vazio = $('links-vazio');
+  if (vazio) vazio.hidden = itens.length > 0;
+  for (const p of itens) {
+    const li = document.createElement('li');
+    li.className = 'links-li';
+    const abrir = document.createElement('button');
+    abrir.type = 'button';
+    abrir.className = 'links-abrir';
+    abrir.title = p.url;
+    abrir.textContent = p.assunto || p.url;
+    // O clique abre a página do link numa janela nova.
+    abrir.onclick = () => window.open(p.url, '_blank', 'noopener');
+    const meta = document.createElement('span');
+    meta.className = 'links-url';
+    meta.textContent = p.url;
+    const apagar = document.createElement('button');
+    apagar.type = 'button';
+    apagar.className = 'ghost small danger';
+    apagar.textContent = '🗑';
+    apagar.title = 'excluir este link';
+    apagar.onclick = () => excluirLink(p);
+    li.append(abrir, meta, apagar);
+    ul.append(li);
+  }
+}
+
+async function excluirLink(p) {
+  if (!window.confirm(`Excluir o link "${p.assunto || p.url}"?`)) return;
+  try {
+    const b = await cliente();
+    await b.entities.Link.delete(p.id);
+    await mostrarLinks();
+    toast('Link excluído.', '');
+  } catch (e) {
+    toast(`Não consegui excluir: ${e.message}`, 'err');
+  }
+}
+
+async function mostrarLinks() {
+  try {
+    desenharLinks(await carregarLinks());
+    const av = $('links-erro');
+    if (av) av.hidden = true;
+  } catch (e) {
+    const av = $('links-erro');
+    if (av) {
+      av.hidden = false;
+      av.textContent = `Não consegui carregar os links: ${e.message}`;
+    }
+  }
+}
+
+function iniciarLinks() {
+  const dlg = $('dlg-links');
+  const btn = $('btn-links');
+  if (!dlg || !btn) return;
+  // Abrir o pop-up: a lista vem da nuvem a cada abertura.
+  btn.onclick = () => {
+    dlg.showModal();
+    mostrarLinks();
+  };
+  $('btn-links-fechar').onclick = () => dlg.close();
+  // Cadastrar novo link.
+  $('form-links').onsubmit = async (e) => {
+    e.preventDefault();
+    const assunto = $('link-assunto').value.trim();
+    let url = $('link-url').value.trim();
+    const av = $('links-erro');
+    if (av) av.hidden = true;
+    if (!assunto || !url) return;
+    if (!/^https?:\/\//i.test(url)) url = `https://${url}`;
+    try {
+      const b = await cliente();
+      await b.entities.Link.create({ assunto, url });
+      $('link-assunto').value = '';
+      $('link-url').value = '';
+      await mostrarLinks();
+      toast('Link cadastrado.', 'ok');
+    } catch (err) {
+      if (av) {
+        av.hidden = false;
+        av.textContent = `Não consegui cadastrar: ${err.message}`;
+      }
+    }
+  };
+}
+
+// ---------------------------------------------------------------- arranque
+// Botoeiros e estado inicial — corre já com o DOM analisado (script de módulo).
+if (typeof window !== 'undefined') {
+  const irPainel = $('btn-ir-painel');
+  if (irPainel) irPainel.onclick = () => mostrarVista('painel');
+  const irEstudio = $('btn-ir-estudio');
+  if (irEstudio) irEstudio.onclick = () => mostrarVista('estudio');
+  const recarregar = $('btn-recarregar');
+  if (recarregar) recarregar.onclick = () => carregar();
+  const fechar = $('btn-det-fechar');
+  if (fechar) {
+    fechar.onclick = () => {
+      const dlg = $('dlg-detalhes');
+      const v = dlg && dlg.querySelector('video');
+      if (v) v.pause();
+      if (dlg && typeof dlg.close === 'function') dlg.close();
+    };
+  }
+  // O estúdio pede para abrir o painel (botão "📺 Ver no painel").
+  window.addEventListener('rh-abrir-painel', () => mostrarVista('painel'));
+  const irPainelDoVideo = $('btn-video-painel');
+  if (irPainelDoVideo) irPainelDoVideo.onclick = () => mostrarVista('painel');
+  const irEstudioVazio = $('btn-ir-estudio-vazio');
+  if (irEstudioVazio) irEstudioVazio.onclick = () => mostrarVista('estudio');
+  // Novo projeto a partir do painel: abre o estúdio JÁ LIMPO, sem puxar
+  // nenhum projeto anterior. O estúdio (app.js) ouve "rh-novo-projeto".
+  const painelNovo = $('btn-painel-novo');
+  if (painelNovo) {
+    painelNovo.onclick = () => {
+      mostrarVista('estudio');
+      try {
+        window.dispatchEvent(new Event('rh-novo-projeto'));
+      } catch {
+        /* sem janela (testes) */
+      }
+    };
+  }
+  // Preparar envio ao YouTube (confirmação antes de abrir o Studio).
+  const ytFechar = $('btn-yt-fechar');
+  if (ytFechar) ytFechar.onclick = () => $('dlg-youtube').close();
+  const ytConfirmar = $('btn-yt-confirmar');
+  if (ytConfirmar) ytConfirmar.onclick = confirmarYouTube;
+  const ytBaixar = $('btn-yt-baixar');
+  if (ytBaixar) ytBaixar.onclick = () => videoYouTube && descarregarVideo(videoYouTube);
+  // Links: botão do painel + pop-up de cadastro.
+  iniciarLinks();
+  // Vista inicial: "#estudio" abre o estúdio; em todos os outros casos, o painel.
+  mostrarVista(/estudio/.test(hashAtual()) ? 'estudio' : 'painel');
+}

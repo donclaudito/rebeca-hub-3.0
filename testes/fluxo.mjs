@@ -1,12 +1,17 @@
 // Reproduz o caminho do utilizador: importar imagens, escolher música, marcar
 // "até acabar a música" e carregar em gerar. Captura o que chega ao motor.
 import { readFileSync } from 'node:fs';
-const BASE = 'E:/youtube rebeca2/rebeca-hub-3.0-base44/public/';
+import { fileURLToPath } from 'node:url';
+const BASE = fileURLToPath(new URL('../public/', import.meta.url));
+const URLBASE = new URL('../public/', import.meta.url).href;
 let js = readFileSync(BASE + 'app.js', 'utf8');
 js = js.replace(/await import\('@\/base44Client\.js'\)/g, '({ base44: { functions: { invoke: async () => ({ ok: true }) } } })');
 js = js.replace(/await import\('\.\/video\.mjs'\)/g, "globalThis.__video");
-js = js.replace(/await import\('\.\/legendas-core\.mjs'\)/g, "await import('file:///E:/youtube%20rebeca2/rebeca-hub-3.0-base44/public/legendas-core.mjs')");
-js = js.replace(/await import\('\.\/audio-info\.mjs'\)/g, "await import('file:///E:/youtube%20rebeca2/rebeca-hub-3.0-base44/public/audio-info.mjs')");
+js = js.replace(/await import\('\.\/legendas-core\.mjs'\)/g, "await import('" + URLBASE + "legendas-core.mjs')");
+js = js.replace(/await import\('\.\/estudio-letra-trilha\.mjs'\)/g, "await import('" + URLBASE + "estudio-letra-trilha.mjs')");
+js = js.replace(/await import\('\.\/estudio-projetos\.mjs'\)/g, "await import('" + URLBASE + "estudio-projetos.mjs')");
+js = js.replace(/await import\('\.\/estudio-utilizador\.mjs'\)/g, "await import('" + URLBASE + "estudio-utilizador.mjs')");
+js = js.replace(/await import\('\.\/audio-info\.mjs'\)/g, "await import('" + URLBASE + "audio-info.mjs')");
 
 class El {
   constructor(tag = 'div') {
@@ -178,4 +183,3 @@ check(/motor v9\.9\.9/.test(fim), 'mostra a versão do motor (para confirmar o b
 
 console.log(falhas.length ? `\n=== ${falhas.length} FALHA(S) ===` : '\n=== FLUXO PONTA A PONTA OK ===');
 process.exit(falhas.length ? 1 : 0);
-

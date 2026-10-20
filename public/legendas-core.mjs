@@ -147,27 +147,74 @@ export function blocoAtivo(legendas, t) {
 // ---- letra de música ----
 // Uma linha por verso. Linhas vazias são ignoradas (é o que sai de copiar e
 // colar com espaçamento), e espaços a mais são limpos.
+//
+// DEFESA contra marcações de estrutura (o que motivou esta função a crescer):
+// letra vinda do Suno ou da IA chega com "**[Verso 2]**", "(Refrão)" e afins —
+// e uma marcação colada vira legenda no vídeo. Aqui: 1) linha que é SÓ marcação
+// sai da letra; 2) negrito/itálico/código são removidos em qualquer linha.
 export function versosDaLetra(texto) {
+  // Palavras de seção: é o que distingue "(Refrão)" (marcação) de "(ah, ah)"
+  // (versos de verdade, que ficam).
+  const SECAO = /pre[- ]?chorus|pré[- ]?refrão|pré[- ]?refrao|interlúdio|interlude|instrumental|refrão|refrao|chorus|verse|verso|bridge|ponte|outro|intro|solo|drop/i;
   return String(texto || '')
     .split(/\r?\n/)
-    .map((l) => l.replace(/\s+/g, ' ').trim())
+    .map((l) => l.replace(/\*\*|__|`/g, '').replace(/\s+/g, ' ').trim()) // negrito e espaços
+    // Linha que é SÓ marcação de seção sai da letra: [Verso 2], (Refrão),
+    // [Chorus]… com ou sem negrito/código em volta.
+    .filter((l) => !(/^\[[^\]]*\]$/.test(l) || (/^\([^\)]*\)$/.test(l) && SECAO.test(l))))
     .filter(Boolean);
 }
 
 // Distribui os versos pelo tempo da música.
 //
-// Decisão: divisão IGUAL entre os versos. Não é perfeito — numa música com
-// refrão repetido e versos de durações diferentes, o tempo exato de cada verso
-// só se sabe a ouvir. Mas é previsível, o utilizador vê o tempo de cada verso
-// antes de gravar e pode corrigir a letra (juntar ou separar linhas) para
-// acertar. Prometer precisão que não temos seria pior.
-export function legendasDaLetra(versos, duracaoSegundos, { avanco = 0, piso = CAPT_PISO } = {}) {
+// COM OS TRECHOS DE VOZ (de `analisarVoz`, em musica.mjs): os versos seguem
+// ONDE SE CANTA — o primeiro entra quando a voz entra (depois da intro
+// instrumental), a duração de cada verso é proporcional ao seu tamanho, um
+// verso nunca atravessa um trecho só de instrumentos (é cortado onde a voz
+// para) e os seguintes se repartem pelo canto que resta. Assim o texto aparece
+// no momento certo da letra, e não em fatias iguais.
+//
+// Sem trechos úteis (voz contínua, análise falhada, música sem gaps): divisão
+// IGUAL entre os versos, como sempre — previsível, e o utilizador vê o tempo
+// de cada verso antes de gravar.
+export function legendasDaLetra(versos, duracaoSegundos, { avanco = 0, piso = CAPT_PISO, secoes = null } = {}) {
   const lista = Array.isArray(versos) ? versos.filter(Boolean) : versosDaLetra(versos);
   const total = Math.max(0, Number(duracaoSegundos) || 0);
   if (!lista.length || !total) return [];
   const base = Math.max(0, Number(avanco) || 0);
   const janela = Math.max(0, total - base);
   if (!janela) return [];
+
+  const vocais = secoesUteis(secoes, base, janela);
+  if (vocais.length) {
+    const pesos = lista.map((t) => String(t).trim().split(/\s+/).filter(Boolean).length || 1);
+    const cues = [];
+    let k = 0;
+    let cursor = vocais[0].inicio;
+    for (let i = 0; i < lista.length; i++) {
+      // O tempo deste verso é a sua fatia DO CANTO QUE RESTA: a cada corte
+      // (voz acabou, a letra espera pelo próximo trecho), os versos seguintes
+      // se redistribuem pelo que sobrou — ninguém fica sem tempo e a letra
+      // acaba junto com a última voz.
+      const restaVocal = vocais
+        .slice(k)
+        .reduce((a, s) => a + (s.fim - Math.max(s.inicio, cursor)), 0);
+      const restaPesos = pesos.slice(i).reduce((a, p) => a + p, 0);
+      const dur = restaPesos > 0 ? (restaVocal * pesos[i]) / restaPesos : 0;
+      const inicio = Math.min(cursor, base + janela);
+      const fim = Math.min(base + total, inicio + dur, vocais[k].fim);
+      cues.push({ texto: lista[i], inicio, fim });
+      cursor = fim;
+      // Chegámos ao fim da voz desta seção: a letra salta o instrumental e
+      // espera pelo próximo trecho de canto.
+      if (cursor >= vocais[k].fim - 0.05 && k < vocais.length - 1) {
+        k++;
+        cursor = Math.max(cursor, vocais[k].inicio);
+      }
+    }
+    return cues;
+  }
+
   const cada = janela / lista.length;
   const minimo = Math.min(Math.max(0, Number(piso) || 0), cada);
   return lista.map((texto, i) => ({
@@ -177,6 +224,70 @@ export function legendasDaLetra(versos, duracaoSegundos, { avanco = 0, piso = CA
     // muito curta é esticada até ao mínimo, sem passar do fim do vídeo.
     fim: Math.min(base + total, base + (i + 1) * cada + (minimo - cada > 0 ? minimo - cada : 0)),
   }));
+}
+
+// Trechos de voz que valem a pena usar. Voz CONTÍNUA (ou quase nada de voz):
+// os trechos não dizem nada de útil — a divisão igual de sempre já está alinhada.
+function secoesUteis(secoes, base, janela) {
+  const fimTudo = base + janela;
+  const boas = (Array.isArray(secoes) ? secoes : [])
+    .map((s) => ({ inicio: Number(s?.inicio), fim: Number(s?.fim) }))
+    .filter((s) => Number.isFinite(s.inicio) && Number.isFinite(s.fim) && s.fim > s.inicio)
+    .map((s) => ({
+      inicio: Math.max(base, Math.min(s.inicio, fimTudo)),
+      fim: Math.max(base, Math.min(s.fim, fimTudo)),
+    }))
+    .filter((s) => s.fim > s.inicio + 0.2);
+  if (!boas.length) return [];
+  const cobertura = boas.reduce((a, s) => a + (s.fim - s.inicio), 0) / janela;
+  if (cobertura > 0.97 || cobertura < 0.05) return [];
+  return boas;
+}
+
+// Re-temporiza os versos ao canto REAL (trechos de voz da faixa descodificada,
+// de `analisarVozDeBuffer` em musica.mjs). É o que garante que a legenda entra
+// NO MOMENTO EXATO da voz, mesmo que a análise da página tenha faltado.
+//
+// O peso de cada verso é o tempo DE CANTO que o rascunho lhe deu (o silêncio
+// instrumental que ele atravessava NÃO conta) e os versos se repartem pelos
+// trechos de canto na ordem — a mesma redistribuição de `legendasDaLetra`:
+// o primeiro entra quando a voz entra, nenhum verso começa ou anda por um
+// silêncio instrumental e a ordem nunca recua.
+export function ressincronizarPelaVoz(cues, secoes) {
+  const boas = (Array.isArray(secoes) ? secoes : [])
+    .map((s) => ({ inicio: Number(s?.inicio), fim: Number(s?.fim) }))
+    .filter((s) => Number.isFinite(s.inicio) && Number.isFinite(s.fim) && s.fim > s.inicio + 0.2)
+    .sort((a, b) => a.inicio - b.inicio);
+  if (!boas.length || !Array.isArray(cues) || !cues.length) return null;
+  const cantoAte = (t) =>
+    boas.reduce((a, s) => a + Math.max(0, Math.min(Number(t), s.fim) - s.inicio), 0);
+  const pesos = cues.map((c) => {
+    const canto = cantoAte(c.fim) - cantoAte(c.inicio);
+    return canto > 0.05
+      ? canto
+      : Math.max(1, String(c.texto || '').trim().split(/\s+/).filter(Boolean).length);
+  });
+  const novas = [];
+  let k = 0;
+  let cursor = boas[0].inicio;
+  for (let i = 0; i < cues.length; i++) {
+    const restaVocal = boas
+      .slice(k)
+      .reduce((a, s) => a + (s.fim - Math.max(s.inicio, cursor)), 0);
+    const restaPesos = pesos.slice(i).reduce((a, p) => a + p, 0);
+    const dur = restaPesos > 0 ? (restaVocal * pesos[i]) / restaPesos : 0;
+    const inicio = Math.min(cursor, boas[boas.length - 1].fim);
+    const fim = Math.min(boas[boas.length - 1].fim, inicio + dur, boas[k].fim);
+    novas.push({ texto: cues[i].texto, inicio, fim });
+    cursor = fim;
+    // A voz acabou nesta seção: o texto salta o instrumental e espera pelo
+    // próximo trecho de canto.
+    if (cursor >= boas[k].fim - 0.05 && k < boas.length - 1) {
+      k++;
+      cursor = Math.max(cursor, boas[k].inicio);
+    }
+  }
+  return novas;
 }
 
 // ---- ficheiro .srt ----
@@ -193,7 +304,7 @@ export function legendasParaSrt(legendas) {
   if (!legendas || !legendas.length) return '';
   return (
     legendas
-      .map((b, i) => `${i + 1}\n${tempoSrt(b.inicio)} --> ${tempoSrt(Math.max(b.fim, b.inicio + CAPT_PISO))}\n${b.texto}`)
+      .map((b, i) => `${i + 1}\n${tempoSrt(b.inicio)} --> ${tempoSrt(b.fim)}\n${b.texto}`)
       .join('\n\n') + '\n'
   );
 }

@@ -107,9 +107,115 @@ export async function carregarTrilha(ficheiro, ctx) {
   return { ok: true, musica, duracao: musica.duration, aviso };
 }
 
+// ============================================================
+//  Achar ONDE se canta — para a letra da legenda seguir o canto.
+// ============================================================
+
+// Analisa a música e devolve os trechos com voz: é onde os versos da legenda
+// devem aparecer. Não é transcrição (nunca diz O QUE se canta): mede o volume
+// da música em janelas de 50 ms, compara com o piso da faixa (percentil baixo)
+// e chama de "voz" o som que fica claramente acima dele. Pausas curtas
+// (respiração entre linhas) não partem o trecho; rajadas curtíssimas
+// (percussão, aplauso) não contam como canto. Se o som for contínuo do
+// princípio ao fim, os trechos não dizem nada de útil e voltam vazios — a
+// página fica com a divisão igual de sempre.
+export async function analisarVoz(ficheiro) {
+  if (!ficheiro) return null;
+  let dados;
+  try {
+    dados = await ficheiro.arrayBuffer();
+  } catch {
+    return null;
+  }
+  let ctx = null;
+  try {
+    ctx = new AudioContext();
+  } catch {
+    return null;
+  }
+  let buffer;
+  try {
+    buffer = await ctx.decodeAudioData(dados.slice(0));
+  } catch {
+    try { await ctx.close(); } catch { /* já fechado */ }
+    return null;
+  }
+  try { await ctx.close(); } catch { /* já fechado */ }
+  return analisarVozDeBuffer(buffer);
+}
+
+// A MESMA análise, sobre um buffer JÁ descodificado — o que o motor do vídeo
+// tem em mãos quando a trilha foi carregada. O motor usa-a para RESSINCRONIZAR
+// a letra ao canto real na hora de gravar: assim os versos seguem o canto
+// mesmo que a análise da página tenha faltado (página recarregada, análise
+// ainda a correr ou falhada).
+export function analisarVozDeBuffer(buffer) {
+  if (!buffer || !buffer.duration || !isFinite(buffer.duration)) return null;
+
+  const QUADRO = 0.05; // janelas de 50 ms
+  const mono = paraMono(buffer);
+  const taxa = mono.sampleRate;
+  const janela = Math.max(1, Math.floor(taxa * QUADRO));
+  const n = Math.floor(mono.length / janela);
+  if (n < 40) return null;
+
+  const amostras = mono.getChannelData(0);
+  const rms = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    let s = 0;
+    const o = i * janela;
+    for (let k = 0; k < janela; k += 2) {
+      const v = amostras[o + k];
+      s += v * v;
+    }
+    rms[i] = Math.sqrt(s / (janela / 2));
+  }
+  const ordenado = Float32Array.from(rms).sort();
+  const piso = ordenado[Math.floor(n * 0.35)] || 0;
+  const limite = piso * 2 + 1e-4;
+
+  const comVoz = new Uint8Array(n);
+  for (let i = 0; i < n; i++) comVoz[i] = rms[i] > limite ? 1 : 0;
+  const MIN_VOZ = Math.round(0.5 / QUADRO); // rajada curta não é canto
+  const MAX_BURACO = Math.round(2.5 / QUADRO); // respiração não parte o trecho
+  const secoes = [];
+  let aberto = -1;
+  let buraco = -1;
+  for (let i = 0; i <= n; i++) {
+    const ativo = i < n && comVoz[i] === 1;
+    if (ativo) {
+      if (aberto < 0) aberto = i;
+      buraco = -1;
+    } else if (aberto >= 0) {
+      if (buraco < 0) buraco = i;
+      if (i - buraco >= MAX_BURACO) {
+        if (buraco - aberto >= MIN_VOZ) secoes.push({ inicio: aberto * QUADRO, fim: buraco * QUADRO });
+        aberto = -1;
+        buraco = -1;
+      }
+    }
+  }
+  if (aberto >= 0 && n - aberto >= MIN_VOZ) secoes.push({ inicio: aberto * QUADRO, fim: n * QUADRO });
+
+  // A análise cobre o MESMO tempo que o motor do vídeo vai usar (a faixa em
+  // mono, cortada ao limite): as marcações da letra ficam já no tempo certo.
+  const duracao = Math.min(buffer.duration, MINUTOS);
+  const cobertura = secoes.reduce((a, s) => a + (s.fim - s.inicio), 0) / duracao;
+  const util = cobertura > 0.05 && cobertura < 0.97;
+  return {
+    duracao,
+    // O instante em que a voz entra pela primeira vez (a intro instrumental
+    // termina aqui): é onde o primeiro verso entra.
+    vozInicio: util && secoes.length ? secoes[0].inicio : 0,
+    // Vazios quando o canto é contínuo: não há nada a corrigir.
+    secoes: util ? secoes : [],
+    cobertura: Number(cobertura.toFixed(3)),
+  };
+}
+
 // Liga a música ao destino da gravação. Fica em ciclo e começa já — o vídeo
 // abre na primeira imagem, por isso a música não fica desfasada da narração.
-export function tocarTrilha({ ctx, destino, musica }) {
+export function tocarTrilha({ ctx, destino, musica, quando = null }) {
   const ganho = ctx.createGain();
   ganho.gain.value = VOLUME_TRILHA;
   ganho.connect(destino);
@@ -122,8 +228,10 @@ export function tocarTrilha({ ctx, destino, musica }) {
   let comecou = false;
   let comecouEm = 0;
   try {
-    comecouEm = ctx.currentTime;
-    fonte.start();
+    // `quando` PROGRAMA o início (a música entra no instante exato da gravação,
+    // o que mantém a letra alinhada com ela); sem ele, começa já.
+    comecouEm = Number.isFinite(quando) && quando !== null ? Number(quando) : ctx.currentTime;
+    fonte.start(comecouEm);
     comecou = true;
   } catch {
     /* sem música é melhor do que sem vídeo */
@@ -134,6 +242,19 @@ export function tocarTrilha({ ctx, destino, musica }) {
     // O instante (no relógio do AudioContext) em que a música começou. É o que
     // permite ao motor saber o segundo EXATO em que ela vai acabar.
     comecouEm,
+    // Esmaece a música até ao instante `fimEm` (no relógio do AudioContext):
+    // o volume desce a zero nos últimos `duracao` segundos e a música acaba
+    // suave, em vez de ser cortada a seco no fim do vídeo.
+    esmaecerAte(fimEm, duracao = 2) {
+      try {
+        const d = Math.max(0.3, Number(duracao) || 2);
+        ganho.gain.cancelScheduledValues(comecouEm);
+        ganho.gain.setValueAtTime(VOLUME_TRILHA, fimEm - d);
+        ganho.gain.linearRampToValueAtTime(0.0001, fimEm);
+      } catch {
+        /* sem esmaecimento é melhor do que sem gravação */
+      }
+    },
     parar() {
       try {
         if (comecou) fonte.stop();

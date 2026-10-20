@@ -1,0 +1,70 @@
+{
+  "properties": {
+    "nome": {
+      "type": "string",
+      "description": "Nome do projeto (ex.: A Borboleta)"
+    },
+    "video_uri": {
+      "type": "string",
+      "description": "Ficheiro do v\u00eddeo guardado no armazenamento privado da app"
+    },
+    "video_tamanho": {
+      "type": "number",
+      "description": "Tamanho do ficheiro de v\u00eddeo, em bytes"
+    },
+    "thumb_uri": {
+      "type": "string",
+      "description": "Miniatura (fotograma do v\u00eddeo) guardada no armazenamento privado"
+    },
+    "duracao": {
+      "type": "number",
+      "description": "Dura\u00e7\u00e3o do v\u00eddeo, em segundos"
+    },
+    "formato": {
+      "type": "string",
+      "description": "Resolu\u00e7\u00e3o do v\u00eddeo (ex.: 1920x1080)"
+    },
+    "transicao": {
+      "type": "string",
+      "description": "Transi\u00e7\u00e3o usada (ex.: Fade Suave)"
+    },
+    "comVoz": {
+      "type": "boolean",
+      "description": "Se o v\u00eddeo tem narra\u00e7\u00e3o"
+    },
+    "comMusica": {
+      "type": "boolean",
+      "description": "Se o v\u00eddeo tem trilha sonora"
+    },
+    "musicaNome": {
+      "type": "string",
+      "description": "Nome do ficheiro da trilha sonora"
+    },
+    "codec": {
+      "type": "string",
+      "description": "Codec do ficheiro (vp8 ou vp9)"
+    },
+    "legendas": {
+      "type": "integer",
+      "description": "N\u00famero de blocos de legenda desenhados no v\u00eddeo"
+    },
+    "motorVoz": {
+      "type": "string",
+      "description": "Motor de voz usado (ElevenLabs ou Voz do browser)"
+    },
+    "vozUsada": {
+      "type": "string",
+      "description": "Nome da voz usada na narra\u00e7\u00e3o"
+    },
+    "projetoId": {
+      "type": "string",
+      "description": "ID do projeto original guardado neste computador, para voltar a editar no est\u00fadio"
+    }
+  },
+  "required": [
+    "nome",
+    "video_uri"
+  ],
+  "name": "VideoProducao",
+  "type": "object"
+}

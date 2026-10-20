@@ -6,8 +6,9 @@
 // browser. Isto testa o que o módulo faz, não o browser.
 import { readFileSync } from 'node:fs';
 
-const BASE = 'file:///E:/youtube%20rebeca2/rebeca-hub-3.0-base44/public/';
-const raiz = 'E:/youtube rebeca2/rebeca-hub-3.0-base44/public/';
+import { fileURLToPath } from 'node:url';
+const BASE = new URL('../public/', import.meta.url).href;
+const raiz = fileURLToPath(new URL('../public/', import.meta.url));
 
 const falhas = [];
 const ok = (m) => console.log('  ok:', m);
@@ -247,6 +248,9 @@ js = js.replace(/await import\('\.\/video\.mjs'\)/g, `await import('${BASE}video
 js = js.replace(/await import\('\.\/audio-info\.mjs'\)/g, `await import('${BASE}audio-info.mjs')`);
 js = js.replace(/await import\('\.\/legendas-core\.mjs'\)/g, `await import('${BASE}legendas-core.mjs')`);
 js = js.replace(/await import\('\.\/projetos\.mjs'\)/g, `await import('${BASE}projetos.mjs')`);
+js = js.replace(/await import\('\.\/estudio-projetos\.mjs'\)/g, `await import('${BASE}estudio-projetos.mjs')`);
+js = js.replace(/await import\('\.\/estudio-letra-trilha\.mjs'\)/g, `await import('${BASE}estudio-letra-trilha.mjs')`);
+js = js.replace(/await import\('\.\/estudio-utilizador\.mjs'\)/g, `await import('${BASE}estudio-utilizador.mjs')`);
 
 new Function(js)();
 document.dispatch('DOMContentLoaded');

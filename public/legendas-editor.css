@@ -1,0 +1,13 @@
+.legendas-editor { padding: 14px; display: flex; flex-direction: column; gap: 12px; }
+.legendas-editor > .hint { margin: 0; }
+.legendas-editor fieldset { min-width: 0; padding: 0; border: 0; margin: 0; }
+.legendas-editor fieldset:disabled { opacity: .65; }
+.legendas-editor .cfg-result { margin: 0; }
+.legendas-lista { list-style: none; padding: 0; margin: 0 0 12px; display: flex; flex-direction: column; gap: 10px; max-height: 58vh; overflow-y: auto; }
+.legenda-linha { display: grid; grid-template-columns: minmax(0, 1fr) minmax(112px, 140px) minmax(112px, 140px); gap: 12px; align-items: center; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg-3); }
+.legenda-texto { font-size: 13.5px; margin: 0; overflow-wrap: anywhere; }
+.legenda-linha .field { min-width: 0; }
+.legenda-linha .field input { width: 100%; min-width: 0; font-variant-numeric: tabular-nums; }
+.legendas-previa { padding: 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg-3); color: var(--accent-2); font-size: 14px; margin: 0; min-height: 48px; overflow-wrap: anywhere; }
+#legendas-audio { width: 100%; min-width: 0; height: 38px; }
+@media (max-width: 680px) { .legenda-linha { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } .legenda-texto { grid-column: 1 / -1; } }

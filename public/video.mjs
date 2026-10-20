@@ -19,7 +19,11 @@ import { calcularRecorte } from './enquadramento.mjs';
 // Versão do motor. Aparece no resumo da página: serve para saber, sem dúvidas,
 // qual build está a correr no browser (um build antigo em cache foi uma das
 // causas de "não funcionou" que já apanhei).
-export const VERSAO_VIDEO = '3.5.1';
+export const VERSAO_VIDEO = '3.9.7';
+
+// Duração do FECHO: nos últimos segundos do vídeo (quando há trilha), a música
+// esmaece até ao silêncio e a imagem apaga suavemente para preto.
+export const FECHO_SEGUNDOS = 3;
 
 export const FORMATOS = [
   { id: '1920x1080', rotulo: 'Horizontal 1920×1080 (YouTube)', w: 1920, h: 1080 },
@@ -65,6 +69,20 @@ export const MODOS_DURACAO = [
   { id: 'trilha', rotulo: 'Até acabar a música' },
 ];
 
+// Orientação do encerramento: COMO o vídeo acaba. Com orientação escolhida e
+// uma imagem final designada, essa imagem é TIRADA do ciclo (não repete) e
+// aparece no FIM, parada, como epílogo — cada opção dá-lhe um movimento:
+//  - 'natureza': aproximação lenta (a luz instala-se na imagem de fecho);
+//  - 'narrativa': a câmara sobe e revela a imagem final parada;
+//  - 'clipe': a imagem fica quieta e apaga suavemente para preto com o fim
+//    da música (ou do vídeo).
+export const ORIENTACOES = [
+  { id: '', rotulo: 'Sem orientação', nota: 'a montagem acaba como sempre' },
+  { id: 'natureza', rotulo: '🌿 Natureza / Cinematográfico', nota: 'termina numa imagem de fecho parada, em epílogo, com aproximação lenta' },
+  { id: 'narrativa', rotulo: '🧒 Narrativa / Personagem', nota: 'a câmara sobe e revela a imagem final parada, como epílogo da história' },
+  { id: 'clipe', rotulo: '🎵 Clipe Musical / Minimalista', nota: 'termina numa imagem só e apaga suavemente para preto com o fim da música' },
+];
+
 // Limite de segurança: 100 passagens. Sem isto, uma música de 3 horas com
 // imagens de 1 s gerava milhares de cenas e enchia a memória.
 const MAX_PASSAGENS = 100;
@@ -84,18 +102,37 @@ function explicarSemCiclo(modoDuracao, alvo, natural) {
 
 // Uma cena sem narração fica com o tempo escolhido, em vez da duração do
 // silêncio que lá foi posto, para não arrastar a montagem.
-function duracoesDasCenas(marcaSemFala, clipes, T, duracaoCena) {
+// Cena de vídeo: a duração é a DO PRÓPRIO FICHEIRO (duracaoVideo), não a do
+// silêncio nem a do clipe de narração — ela manda no ritmo da montagem.
+function duracoesDasCenas(marcaSemFala, clipes, T, duracaoCena, cenas = []) {
   const fixa = Math.max(2 * T + 0.2, Number(duracaoCena) || DURACAO_SEM_VOZ);
-  return clipes.map((c, i) => (marcaSemFala[i] ? fixa : Math.max(2 * T + 0.2, c.duration)));
+  return clipes.map((c, i) => {
+    const doVideo = duracaoDaCenaDeVideo(cenas[i]);
+    if (doVideo > 0) return Math.max(2 * T + 0.2, doVideo);
+    return marcaSemFala[i] ? fixa : Math.max(2 * T + 0.2, c.duration);
+  });
+}
+
+// Duração de uma cena de vídeo depois do CORTE escolhido (início/fim);
+// sem corte válido, é a duração inteira do ficheiro.
+function duracaoDaCenaDeVideo(c) {
+  const total = Number(c?.duracaoVideo);
+  if (!(Number.isFinite(total) && total > 0)) return 0;
+  const ini = Number(c?.videoInicio);
+  const fim = Number(c?.videoFim);
+  if (Number.isFinite(ini) && Number.isFinite(fim) && fim > ini) {
+    return Math.max(0.2, Math.min(fim, total) - Math.max(0, ini));
+  }
+  return total;
 }
 
 // Repete a lista de cenas até chegar à duração pedida.
 //
 // Devolve os itens já com `_passagem` e `_texto` (o texto da cena original), que
 // é o que o desenho usa para saber qual passagem está no ecrã. A repetição é
-// INTEIRA: conta-se o número de passagens que cobre a música. O corte final,
-// porém, é sempre o da MÚSICA: quando ela acaba, a gravação é encerrada naquele
-// instante (ver fimDaMusica em gerarVideo) — o vídeo dura exatamente a trilha.
+// INTEIRA: conta-se o número de passagens que cobre a música, ARREDONDANDO PARA
+// CIMA. O vídeo acaba sempre no fim da última cena — nunca é cortado pela
+// música: a trilha, que toca em ciclo, é parada exatamente nesse instante.
 function repetirAte(itens, duracoes, alvo, maxPassagens = MAX_PASSAGENS) {
   const natural = duracoes.reduce((a, d) => a + d, 0);
   if (!itens.length || !natural || !(alvo > natural)) return { itens: [], duracoes: [], passagens: 1 };
@@ -306,15 +343,40 @@ function analisarEnquadramento(img, alvoW, alvoH, modo) {
 // A legenda é desenhada por cima, já depois de a imagem estar no sítio. Liga-se
 // e desliga-se por instante (nada de guardar estado), para que um bloco que
 // atravesse uma transição continue a aparecer.
-function criarDesenhador({ ctx, w, h, imagens, inicios, duracoes, T, transicao, legendas = [], desenharLegenda = null }) {
+function criarDesenhador({ ctx, w, h, imagens, inicios, duracoes, T, transicao, legendas = [], desenharLegenda = null, epilogoEm = -1, orientacaoEpilogo = '', fechoEm = -1 }) {
   const corte = transicao === 'corte';
   const n = imagens.length;
   const querLegenda = Boolean(desenharLegenda && legendas.length);
+
+  // FECHO: com trilha sonora, a imagem apaga suavemente para preto nos últimos
+  // segundos do vídeo, ao mesmo tempo que a música esmaece — nenhum dos dois é
+  // cortado a seco.
+  const aplicarFecho = (agora) => {
+    if (fechoEm <= 0 || agora <= fechoEm) return;
+    const a = Math.min(1, Math.max(0, (agora - fechoEm) / FECHO_SEGUNDOS));
+    ctx.save();
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = `rgba(0,0,0,${a.toFixed(3)})`;
+    ctx.fillRect(0, 0, w, h);
+    ctx.restore();
+  };
 
   return (k, agora) => {
     const inicio = inicios[k];
     const dur = duracoes[k];
     const tLocal = agora - inicio;
+
+    // EPILOGO: a imagem final, com o movimento da orientação — não passa
+    // pelas passagens de transição nem repete nada.
+    if (k === epilogoEm && orientacaoEpilogo) {
+      desenharEpilogo(ctx, w, h, k > 0 ? imagens[k - 1] : null, imagens[k], tLocal, dur, orientacaoEpilogo, T);
+      if (querLegenda) {
+        const bloco = blocoAtivo(legendas, agora);
+        if (bloco) desenharLegenda(ctx, bloco.texto, w, h);
+      }
+      aplicarFecho(agora);
+      return;
+    }
 
     // Passagem de ENTRADA (ainda a acabar a da cena anterior).
     if (k > 0 && !corte && tLocal < T) {
@@ -338,6 +400,8 @@ function criarDesenhador({ ctx, w, h, imagens, inicios, duracoes, T, transicao, 
       const bloco = blocoAtivo(legendas, agora);
       if (bloco) desenharLegenda(ctx, bloco.texto, w, h);
     }
+
+    aplicarFecho(agora);
   };
 }
 
@@ -398,6 +462,10 @@ export async function gerarVideo({
   // Legendas já prontas (a letra da música, distribuída pelo tempo). Quando vêm,
   // substituem as legendas tiradas da narração: as duas juntas enchiam o ecrã.
   legendasExternas = null,
+  // Os tempos acima vêm do RASCUNHO da página (não confirmados)? Então o motor
+  // re-temporiza os versos ao canto REAL da faixa que vai gravar. Tempos
+  // conferidos ou alinhados palavra a palavra NUNCA são alterados.
+  legendasRascunho = false,
   // 'natural' (duração das cenas) ou 'trilha' (repete as cenas até a música acabar).
   modoDuracao = 'natural',
   // Codec de gravação: 'vp8' (compatível, por omissão) ou 'vp9' (mais pequeno).
@@ -405,10 +473,33 @@ export async function gerarVideo({
   // Duração da música, para saber quantas passagens dar. Vem da página, que a
   // mede ao escolher o ficheiro (medir aqui obrigava a descodificar antes).
   musicaSegundos = 0,
+  // Orientação do encerramento ('' | 'natureza' | 'narrativa' | 'clipe') e a
+  // cena que fecha o vídeo (índice): sai no fim como epílogo, sem repetir.
+  orientacao = '',
+  cenaFinal = -1,
+  // VÁRIAS cenas de epílogo (índices, pela ordem do projeto). Quando vêm,
+  // substituem a cena única: todas saem do ciclo e voltam no fim, e a duração
+  // total do epílogo divide-se entre elas.
+  cenasFinais = [],
+  // A cena que ABRE o vídeo (índice): pelo mesmo raciocínio do epílogo, sai da
+  // sequência/ciclo e volta no COMEÇO, parada, como introdução.
+  cenaInicial = -1,
+  // VÁRIAS cenas de introdução (índices, pela ordem do projeto). Quando vêm,
+  // substituem a cena única: todas saem do ciclo e voltam no começo, e a
+  // duração total da introdução divide-se entre elas.
+  cenasIniciais = [],
+  // Tempos da introdução e do epílogo escolhidos na página (em segundos;
+  // 0 = automático: cerca de 5s na introdução, epílogo acompanha o fim da música).
+  duracaoIntro = 0,
+  duracaoEpilogo = 0,
   aoProgredir = () => {},
   deveParar = () => false,
 }) {
   const querLegendas = Boolean(legendas);
+  if (querLegendas && Array.isArray(legendasExternas)) {
+    const erro = erroNosTempos(legendasExternas);
+    if (erro) return { ok: false, erro };
+  }
 
   if (!suporta()) {
     return { ok: false, erro: 'Este browser não consegue gravar vídeo. Use o Chrome ou o Edge.' };
@@ -427,7 +518,9 @@ export async function gerarVideo({
 
   // 1) carregar as imagens
   aoProgredir({ fase: 'a preparar as imagens', atual: 0, total: cenas.length });
+  // Cada fonte é uma Image (cena de imagem) ou um <video> (cena de vídeo).
   const imagens = [];
+  const elementosVideo = [];
   for (const [i, c] of cenas.entries()) {
     const img = await carregarImagem(c.imagem);
     imagens.push(img);
@@ -477,19 +570,26 @@ export async function gerarVideo({
 
   // 2b) a trilha sonora (opcional). Se falhar, o vídeo sai sem música e a
   // página é avisada — nunca se perde o trabalho por causa da trilha.
+  // Aqui ela só é CARREGADA (descodificada): entra a TOCAR no instante exato
+  // em que a gravação começa (junto a gravador.start, lá em baixo). Se
+  // entrasse já, ficava adiantada em relação ao vídeo — e a letra, que é
+  // temporizada a partir do segundo zero do vídeo, saía atrasada.
   let trilha = null;
   let musicaAviso = '';
   let musicaReal = 0;
+  let musicaBuffer = null;
+  let modTrilha = null;
+  let avisoTrilha = '';
   if (musica) {
     try {
-      const mod = await import('./musica.mjs');
-      const r = await mod.carregarTrilha(musica, seq.ctx);
+      modTrilha = await import('./musica.mjs');
+      const r = await modTrilha.carregarTrilha(musica, seq.ctx);
       if (r.ok) {
         // Este valor é a verdade sobre a duração: vem do áudio já descodificado,
         // não de um <audio> a ler metadados. Serve de segunda opinião à página.
         musicaReal = r.duracao;
-        trilha = mod.tocarTrilha({ ctx: seq.ctx, destino: seq.destino, musica: r.musica });
-        musicaAviso = r.aviso;
+        musicaBuffer = r.musica;
+        avisoTrilha = r.aviso;
       } else {
         musicaAviso = r.erro;
       }
@@ -504,7 +604,26 @@ export async function gerarVideo({
 
   // Duração natural de cada cena: a do seu áudio, nunca menos do que a passagem
   // precisa (senão as duas passagens sobrepunham-se). Sem voz, é a duração fixa.
-  const duracoes = duracoesDasCenas(marcaSemFala, clipes, T, duracaoCena);
+  const duracoes = duracoesDasCenas(marcaSemFala, clipes, T, duracaoCena, cenas);
+
+  // O SOM das cenas de vídeo vem do próprio ficheiro, tocado em tempo real e
+  // ligado ao mesmo destino da narração e da trilha (entra no vídeo gravado).
+  for (const [i, v] of elementosVideo.entries()) {
+    if (!v) continue;
+    try {
+      // O volume (ou o mudo) da cena passa por um ganho próprio, antes do
+      // ganho geral — é o "Ajustar áudio" da edição da cena.
+      const ganhoDaCena = seq.ctx.createGain();
+      ganhoDaCena.gain.value = cenas[i].videoMudo
+        ? 0
+        : Math.max(0, Math.min(1, Number(cenas[i].videoVolume ?? 1)));
+      seq.ctx.createMediaElementSource(v).connect(ganhoDaCena);
+      ganhoDaCena.connect(seq.ganho);
+    } catch (e) {
+      try { await seq.ctx.close(); } catch { /* já fechado */ }
+      return { ok: false, erro: `não consegui ligar o som de um vídeo da montagem: ${e.message}` };
+    }
+  }
   const natural = duracoes.reduce((a, d) => a + d, 0);
 
   // O vídeo é curto e a música é longa? Em vez de cortar a música, as imagens
@@ -516,14 +635,127 @@ export async function gerarVideo({
   // música cortada a meio, sem ninguém saber porquê.
   const duracaoMusica = musicaReal > 0 ? musicaReal : Number(musicaSegundos) || 0;
   const alvoMusica = modoDuracao === 'trilha' ? duracaoMusica : 0;
-  const repetido = repetirAte(cenas, duracoes, alvoMusica);
+
+  // Orientação do encerramento: as cenas finais são TIRADAS da sequência/ciclo
+  // e voltam no FIM, pela ordem do projeto — nunca repetem com as outras.
+  // Uma só cena (projetos antigos, `cenaFinal`) vale como lista de uma.
+  const idxFinalDado = Number(cenaFinal);
+  const idxFinal0 =
+    Number.isInteger(idxFinalDado) && idxFinalDado >= 0 && idxFinalDado < cenas.length ? idxFinalDado : -1;
+  const finaisDadas = (Array.isArray(cenasFinais) ? cenasFinais : [])
+    .map((i) => Number(i))
+    .filter((i) => Number.isInteger(i) && i >= 0 && i < cenas.length);
+  const finais = finaisDadas.length
+    ? [...new Set(finaisDadas)].sort((a, b) => a - b)
+    : idxFinal0 >= 0
+      ? [idxFinal0]
+      : [];
+  const comEpilogo = Boolean(orientacao) && finais.length >= 1 && cenas.length > finais.length;
+
+  // A mesma ideia no começo: a imagem inicial sai da sequência/ciclo e ABRE o
+  // vídeo, parada. Se for uma das imagens do epílogo, fica só com o epílogo.
+  const idxInicialDado = Number(cenaInicial);
+  const iniciaisDadas = (Array.isArray(cenasIniciais) ? cenasIniciais : [])
+    .map((i) => Number(i))
+    .filter((i) => Number.isInteger(i) && i >= 0 && i < cenas.length);
+  const iniciaisBrutas = iniciaisDadas.length
+    ? [...new Set(iniciaisDadas)].sort((a, b) => a - b)
+    : idxInicialDado >= 0 && idxInicialDado < cenas.length ? [idxInicialDado] : [];
+  // Uma cena não pode ser introdução E epílogo: se estiver nos dois, fica
+  // apenas no epílogo (como antes, quando a introdução era única).
+  const iniciais = iniciaisBrutas.filter((i) => !finais.includes(i));
+  // Só há introdução se sobrar pelo menos uma cena para o corpo do vídeo.
+  const comIntro = iniciais.length > 0 && cenas.length > finais.length + iniciais.length;
+
+  const fora = comEpilogo || comIntro ? (i) => finais.includes(i) || iniciais.includes(i) : () => false;
+  const base = cenas
+    .map((c, i) => ({ ...c, _fonte: i, _passagem: 0, _texto: c.texto || '' }))
+    .filter((_, i) => !fora(i));
+  const durBase = comEpilogo || comIntro ? duracoes.filter((_, i) => !fora(i)) : duracoes;
+
+  // Com música e epílogo, o epílogo fecha o vídeo EM CIMA DO FIM da música:
+  // o ciclo leva o número de passagens que chega mais perto do fim da música
+  // deixando o epílogo caber, e o epílogo leva EXATAMENTE o tempo que falta —
+  // assim a música acaba junto com o epílogo, sem recomeçar por baixo dele.
+  // Tempos FIXOS escolhidos na página (limitados a 1–60s por segurança).
+  const durIntroEscolhida = Math.min(60, Math.max(0, Number(duracaoIntro) || 0));
+  const durEpEscolhida = Math.min(60, Math.max(0, Number(duracaoEpilogo) || 0));
+
+  let alvoCiclo = alvoMusica;
+  let alvoEp = 0;
+  if (comEpilogo && alvoMusica > 0) {
+    if (durEpEscolhida > 0) {
+      // Com tempo FIXO no epílogo, o ciclo é contado para a música caber nele —
+      // e a música acaba JUNTO com o vídeo (o excesso é cortado no fim).
+      const durEp0 = durEpEscolhida;
+      const reservado = (comIntro ? durIntroEscolhida || Math.max(5, 2 * T + 0.4) : 0) + durEp0;
+      const naturalBase = durBase.reduce((a, d) => a + d, 0) || 1;
+      const nEp = Math.min(MAX_PASSAGENS, Math.max(0, Math.floor((alvoMusica - reservado) / naturalBase)));
+      // Um cabelo abaixo do alvo: o ciclo arredonda para cima e fica com nEp.
+      alvoCiclo = nEp > 0 ? nEp * naturalBase - 0.001 : 0;
+    } else {
+      const durEp0 = Math.max(5, 2 * T + 0.4);
+      const reservado = comIntro ? Math.max(5, 2 * T + 0.4) : 0;
+      const naturalBase = durBase.reduce((a, d) => a + d, 0) || 1;
+      const nEp = Math.min(MAX_PASSAGENS, Math.max(1, Math.floor((alvoMusica - durEp0 - reservado) / naturalBase)));
+      alvoCiclo = nEp * naturalBase - 0.001;
+      alvoEp = alvoMusica - reservado - nEp * naturalBase;
+    }
+  }
+
+  const repetido = repetirAte(base, durBase, alvoCiclo);
   const semCiclo = explicarSemCiclo(modoDuracao, alvoMusica, natural);
 
   const passagens = repetido.passagens;
-  const ciclos = repetido.itens.length ? repetido.itens : cenas.map((c) => ({ ...c, _passagem: 0, _texto: c.texto || '' }));
-  const durFinal = repetido.itens.length ? repetido.duracoes : duracoes;
-  const clipesFinal = ciclos.map((c, i) => clipes[i % cenas.length]);
-  const marcaFinal = ciclos.map((c, i) => marcaSemFala[i % cenas.length]);
+  const ciclos = repetido.itens.length ? repetido.itens : base;
+  const durFinal = repetido.itens.length ? repetido.duracoes : durBase;
+
+  // A introdução entra ANTES do ciclo: 5s parados (ou 2 passagens de transição
+  // + margem), com a narração dela a tocar por baixo — como o epílogo no fim.
+  // VÁRIAS cenas: a duração TOTAL é a mesma e divide-se por igual entre elas,
+  // pela ordem do projeto.
+  let durIntro = 0;
+  if (comIntro) {
+    durIntro = durIntroEscolhida > 0 ? durIntroEscolhida : Math.max(5, 2 * T + 0.4);
+    const durCada = durIntro / iniciais.length;
+    const novasIniciais = iniciais.map((ii) => ({
+      ...cenas[ii],
+      _fonte: ii,
+      _passagem: 0,
+      _texto: cenas[ii].texto || '',
+      _intro: true,
+    }));
+    // Todas entram no COMEÇO, pela ordem do projeto (unshift preserva a ordem).
+    ciclos.unshift(...novasIniciais);
+    durFinal.unshift(...iniciais.map(() => durCada));
+  }
+
+  // O epílogo entra DEPOIS do ciclo: cabe no tempo que sobra da música
+  // (entre 2,5s e 12s) ou, sem música, é um epílogo de 5s. VÁRIAS cenas: a
+  // duração TOTAL é a mesma e divide-se por igual entre elas, pela ordem do
+  // projeto; só a ÚLTIMA recebe o movimento da orientação.
+  if (comEpilogo) {
+    let durEp = durEpEscolhida > 0 ? durEpEscolhida : Math.max(5, 2 * T + 0.4);
+    // Com música e tempo AUTOMÁTICO: o epílogo leva EXATAMENTE o que falta até
+    // o vídeo acabar no segundo em que a música (em ciclo) acaba.
+    if (durEpEscolhida <= 0 && alvoEp > 0) durEp = Math.max(2.5, Math.min(12, alvoEp));
+    const durCada = durEp / finais.length;
+    for (const fi of finais) {
+      ciclos.push({
+        ...cenas[fi],
+        _fonte: fi,
+        _passagem: 0,
+        _texto: cenas[fi].texto || '',
+        _epilogo: true,
+      });
+      durFinal.push(durCada);
+    }
+  }
+
+  // Os clipes e marcas seguem a lista FINAL (com introdução e epílogo): assim
+  // a narração deles também toca, no seu lugar exato da linha do tempo.
+  const clipesFinal = ciclos.map((c) => clipes[c._fonte]);
+  const marcaFinal = ciclos.map((c) => marcaSemFala[c._fonte]);
 
   const inicios = [];
   let soma = 0;
@@ -531,8 +763,9 @@ export async function gerarVideo({
     inicios.push(soma);
     soma += d;
   }
-  const total = soma;
-  const cortado = Boolean(repetido.itens.length) && total > alvoMusica;
+  let total = soma;
+  // A música nunca corta o vídeo: ele acaba sempre no fim da última cena.
+  const cortado = false;
 
   // 2c) legendas: ou a LETRA da música (já temporizada pela página), ou o corte
   // da narração em blocos curtos, temporizados dentro da cena. O que for
@@ -541,9 +774,20 @@ export async function gerarVideo({
   let desenharLegenda = null;
   const externas = Array.isArray(legendasExternas) ? legendasExternas.filter((c) => c && c.texto) : [];
   if (querLegendas && externas.length) {
-    // A letra repete com as imagens? Não: a letra acompanha a MÚSICA, que toca
-    // uma vez. Se o vídeo tem passagens, a letra fica só na primeira.
-    listaCues = externas.map((c) => ({ texto: c.texto, inicio: c.inicio, fim: c.fim }));
+    // Tempos da letra. Quando vêm do RASCUNHO, re-temporizam-se ao canto REAL
+    // da faixa que vai gravar (a análise da página pode ter faltado ou ficado
+    // desatualizada — o canto é a única verdade). Confirmados, ficam como vêm:
+    // a prévia, o vídeo e o SRT usam a MESMA lista.
+    let lista = externas;
+    if (legendasRascunho && musicaBuffer && modTrilha) {
+      try {
+        const corrigidas = ressincronizarPelaVoz(externas, modTrilha.analisarVozDeBuffer(musicaBuffer)?.secoes);
+        if (corrigidas?.length) lista = corrigidas;
+      } catch {
+        /* sem análise do motor, ficam os tempos da página */
+      }
+    }
+    listaCues = lista.map((c) => ({ texto: c.texto, inicio: c.inicio, fim: c.fim }));
   } else if (querLegendas) {
     listaCues = legendasDasCenas(ciclos.map((c) => c._texto || ''), durFinal, inicios);
   }
@@ -559,6 +803,29 @@ export async function gerarVideo({
     }
   }
 
+  // FECHO COM A MÚSICA: se ela ainda não acabou quando a última cena termina,
+  // a última cena fica MAIS TEMPO no ecrã — o tempo exato que falta para a
+  // música chegar ao fim. Só então o vídeo acaba. As legendas foram calculadas
+  // ANTES deste acréscimo, de propósito: os blocos da narração ficam no tempo
+  // da fala real, sem se esticarem pelo tempo extra de silêncio.
+  // Tempo FIXO no epílogo manda: não se estica a última cena para a música
+  // acabar junto — a trilha, em ciclo, é parada exatamente no fim do vídeo.
+  const epilogoFixo = comEpilogo && durEpEscolhida > 0;
+  let acrescentoFim = 0;
+  if (duracaoMusica > 0 && total < duracaoMusica && !epilogoFixo) {
+    acrescentoFim = duracaoMusica - total;
+    durFinal[durFinal.length - 1] += acrescentoFim;
+    inicios.length = 0;
+    let somaFecho = 0;
+    for (const d of durFinal) {
+      inicios.push(somaFecho);
+      somaFecho += d;
+    }
+    total = somaFecho;
+  }
+  // Com trilha, o vídeo acaba NO INSTANTE em que a música acaba — nunca antes.
+  const terminouComMusica = duracaoMusica > 0 && Math.abs(total - duracaoMusica) < 0.5;
+
   // 3) começar a gravar
   const fluxoVideo = canvas.captureStream(fps);
   const fluxo = new MediaStream([...fluxoVideo.getVideoTracks(), ...seq.destino.stream.getAudioTracks()]);
@@ -567,45 +834,52 @@ export async function gerarVideo({
   gravador.ondataavailable = (e) => { if (e.data && e.data.size) pedacos.push(e.data); };
   const parado = new Promise((r) => { gravador.onstop = r; });
 
-  // O FIM DA MÚSICA MANDA NO FIM DO VÍDEO. A trilha começa com a gravação; o
-  // instante em que ela acaba, convertido para o relógio do vídeo, é o segundo
-  // exato em que a gravação para — a meio de uma cena, se precisar. Sem trilha
-  // (ou sem duração conhecida) não há corte: vale o comportamento de sempre.
-  const ctxNoComeco = seq.ctx.currentTime;
-  const fimDaMusica =
-    trilha && trilha.comecou && duracaoMusica > 0
-      ? trilha.comecouEm + duracaoMusica - ctxNoComeco
-      : 0;
-  const totalEfetivo = fimDaMusica > 0 ? Math.min(total, fimDaMusica) : total;
-
-  // A legenda não passa do fim: o bloco que atravessasse o fim da música é
-  // aparado, e o que começaria depois dele é deitado fora. O .srt sai igual
-  // ao que foi desenhado.
-  if (fimDaMusica > 0 && listaCues.length) {
-    const dentro = [];
-    for (const c of listaCues) {
-      if (c.inicio >= fimDaMusica) break;
-      dentro.push({ ...c, fim: Math.min(c.fim, fimDaMusica) });
-    }
-    listaCues = dentro;
-  }
+  // A MÚSICA NUNCA CORTA O VÍDEO. O vídeo acaba com a ÚLTIMA CENA (ou com o
+  // epílogo); a trilha, que toca em ciclo, continua por baixo e é parada
+  // exatamente nesse instante — a música termina junto com a última cena.
+  const totalEfetivo = total;
 
   // Repete as imagens na mesma ordem da primeira passagem (a imagem de cada
   // cena vem do ficheiro original; `ciclos` só diz qual toca em cada momento).
-  const imagensFinal = ciclos.map((c, i) => imagens[i % imagens.length]);
+  const imagensFinal = ciclos.map((c) => imagens[c._fonte]);
 
   // O primeiro fotograma tem de existir antes de gravar, senão o vídeo começa preto.
   const desenhar = criarDesenhador({
     ctx, w: alvo.w, h: alvo.h, imagens: imagensFinal, inicios, duracoes: durFinal, T, transicao,
     legendas: listaCues, desenharLegenda,
+    epilogoEm: comEpilogo ? ciclos.length - 1 : -1,
+    orientacaoEpilogo: comEpilogo ? orientacao : '',
+    // Com trilha, a imagem apaga para preto nos últimos segundos do vídeo.
+    fechoEm: duracaoMusica > 0 ? total - Math.min(FECHO_SEGUNDOS, total / 2) : -1,
   });
   desenhar(0, 0);
 
   gravador.start(250);
+  const inicioAudio = seq.ctx.currentTime;
+
+  // A MÚSICA ENTRA AGORA, no primeiro instante gravado — e não antes. Era
+  // ligada durante a preparação, quando o relógio do vídeo ainda não tinha
+  // começado: ficava ADIANTADA e a letra, temporizada a partir do segundo
+  // zero do vídeo, saía ATRASADA em relação a ela. Começando aqui, letra e
+  // música partem do MESMO instante.
+  if (musicaBuffer && modTrilha) {
+    try {
+      trilha = modTrilha.tocarTrilha({ ctx: seq.ctx, destino: seq.destino, musica: musicaBuffer, quando: inicioAudio });
+      musicaAviso = avisoTrilha;
+      // E acaba SUAVE: nos últimos segundos a trilha esmaece até ao silêncio,
+      // terminando exatamente no fim do vídeo — junto com o apagar da imagem.
+      if (trilha.comecou && trilha.esmaecerAte) {
+        trilha.esmaecerAte(trilha.comecouEm + totalEfetivo, Math.min(FECHO_SEGUNDOS, Math.max(0.3, totalEfetivo)));
+      }
+    } catch (e) {
+      musicaAviso = `não consegui usar a trilha: ${e.message}`;
+    }
+  }
 
   // 4) desenhar e tocar, cena a cena, em tempo real
-  const inicio = performance.now();
-  const relogio = () => (performance.now() - inicio) / 1000;
+  // Imagens e legendas seguem o relógio do áudio gravado, não outro relógio
+  // que possa derivar ou avançar durante uma suspensão do AudioContext.
+  const relogio = () => Math.max(0, seq.ctx.currentTime - inicioAudio);
   const agoraCtx = () => seq.ctx.currentTime;
   let acumulado = 0;
   const totalCenas = ciclos.length;
@@ -625,26 +899,35 @@ export async function gerarVideo({
         try { fonte.start(agoraCtx() + Math.max(0, inicios[i] - relogio())); } catch { /* já tocou */ }
       }
 
+      // Cena de vídeo: recomeça o ficheiro e toca — o fotograma atual é o que
+      // o desenho apanha (também nas passagens com a cena em ciclo).
+      const fonteAtual = imagensFinal[i];
+      const cenaDeVideo = fonteAtual && fonteAtual.tagName === 'VIDEO';
+      if (cenaDeVideo) {
+        try {
+          // Começa no INÍCIO do corte escolhido (não no começo do ficheiro).
+          fonteAtual.currentTime = Math.max(0, Number(cenas[ciclos[i]._fonte].videoInicio) || 0);
+          await fonteAtual.play();
+        } catch {
+          /* segue com o fotograma parado; a cena continua */
+        }
+      }
+
       let interrompido = false;
-      let acabouMusica = false;
       await new Promise((resolve) => {
         const quadro = () => {
           const agora = relogio();
           // O "Parar" é ouvido a cada fotograma, não só entre cenas.
           const pedido = deveParar();
-          // A MÚSICA ACABOU: encerra no mesmo instante, a meio da cena se
-          // precisar. É o vídeo que segue a trilha, e não o contrário.
-          const fimMusicaAgora = fimDaMusica > 0 && agora >= fimDaMusica;
-          if (agora >= inicios[i] + durFinal[i] || pedido || fimMusicaAgora) {
+          if (agora >= inicios[i] + durFinal[i] || pedido) {
             interrompido = pedido;
-            acabouMusica = fimMusicaAgora;
             resolve();
             return;
           }
           desenhar(i, agora);
           aoProgredir({
             fase: 'a gravar',
-            atual: (i % cenas.length) + 1,
+            atual: (Number.isInteger(ciclos[i]._fonte) ? ciclos[i]._fonte : i % cenas.length) + 1,
             total: cenas.length,
             passagem: (ciclos[i]._passagem || 0) + 1,
             passagens,
@@ -656,15 +939,18 @@ export async function gerarVideo({
         requestAnimationFrame(quadro);
       });
 
+      if (cenaDeVideo) {
+        try { fonteAtual.pause(); } catch { /* já parou */ }
+      }
+
       // Só conta o tempo que chegou a ser gravado.
       acumulado = Math.min(totalEfetivo, Math.max(acumulado, relogio()));
-      if (interrompido || acabouMusica) break;
+      if (interrompido) break;
     }
   } finally {
     // Deixa o último fotograma entrar e fecha — mesmo que algo falhe a meio.
-    // Quando o corte foi da MÚSICA, o fecho é quase imediato: não se grava
-    // música a tocar DEPOIS de ela já ter acabado.
-    await new Promise((r) => setTimeout(r, fimDaMusica > 0 ? 80 : 250));
+    // A música para JUNTO: o vídeo acaba na última cena e a trilha é cortada aí.
+    await new Promise((r) => setTimeout(r, 250));
     if (trilha) trilha.parar();
     if (gravador.state !== 'inactive') gravador.stop();
     await parado;
@@ -697,13 +983,23 @@ export async function gerarVideo({
     cenasPorPassagem: cenas.length,
     repetido: Boolean(repetido.itens.length),
     cortado,
-    // A gravação acabou NO SEGUNDO EM QUE A MÚSICA ACABOU, em vez de seguir
-    // até ao fim de uma imagem ou de um ciclo.
-    terminouComMusica: fimDaMusica > 0 && total > fimDaMusica,
+    // Com trilha, o vídeo acaba NO INSTANTE em que a música acaba: se faltava
+    // tempo, a última cena fica mais tempo no ecrã (tempoExtra), com som e
+    // imagem a esmaecer juntos no fecho.
+    terminouComMusica,
+    tempoExtra: acrescentoFim,
     duracaoNatural: natural,
     versao: VERSAO_VIDEO,
     semCiclo,
     // A duração da música que o motor realmente usou (do áudio descodificado).
     musicaSegundos: duracaoMusica,
+    // Orientação aplicada e duração do epílogo (0 = sem epílogo).
+    orientacao: comEpilogo ? orientacao : '',
+    // Duração TOTAL do epílogo (somadas as cenas finais) e quantas foram.
+    epilogo: comEpilogo ? durFinal.slice(-finais.length).reduce((a, d) => a + d, 0) : 0,
+    cenasEpilogo: comEpilogo ? finais.length : 0,
+    // Duração da introdução (0 = sem introdução) e quantas cenas a abriram.
+    intro: comIntro ? durIntro : 0,
+    cenasIntro: comIntro ? iniciais.length : 0,
   };
 }

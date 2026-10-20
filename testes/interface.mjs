@@ -1,7 +1,8 @@
 // Testa a aba de vídeo: controlos, deteção de suporte e o caminho de erro.
 import { readFileSync } from 'node:fs';
 
-const BASE = 'E:\\youtube rebeca2\\rebeca-hub-3.0-base44\\public\\';
+import { fileURLToPath } from 'node:url';
+const BASE = fileURLToPath(new URL('../public/', import.meta.url));
 const html = readFileSync(BASE + 'index.html', 'utf8');
 const falhas = [];
 const ok = (m) => console.log('  ok:', m);
@@ -188,12 +189,15 @@ function ambiente(reg, suportaVideo, duracaoMusica = 65) {
   return store;
 }
 
-const VIDEO_URL = 'file:///E:/youtube%20rebeca2/rebeca-hub-3.0-base44/public/video.mjs';
+const VIDEO_URL = new URL('../public/video.mjs', import.meta.url).href;
 const src = readFileSync(BASE + 'app.js', 'utf8')
   .replace(/await import\('@\/base44Client\.js'\)/g, '({ base44: globalThis.__base44Falso })')
   .replace(/await import\('\.\/video\.mjs'\)/g, `await import('${VIDEO_URL}')`)
-  .replace(/await import\('\.\/audio-info\.mjs'\)/g, `await import('file:///E:/youtube%20rebeca2/rebeca-hub-3.0-base44/public/audio-info.mjs')`)
-  .replace(/await import\('\.\/legendas-core\.mjs'\)/g, `await import('file:///E:/youtube%20rebeca2/rebeca-hub-3.0-base44/public/legendas-core.mjs')`)
+  .replace(/await import\('\.\/audio-info\.mjs'\)/g, `await import('${new URL('../public/audio-info.mjs', import.meta.url).href}')`)
+  .replace(/await import\('\.\/legendas-core\.mjs'\)/g, `await import('${new URL('../public/legendas-core.mjs', import.meta.url).href}')`)
+  .replace(/await import\('\.\/estudio-letra-trilha\.mjs'\)/g, `await import('${new URL('../public/estudio-letra-trilha.mjs', import.meta.url).href}')`)
+  .replace(/await import\('\.\/estudio-projetos\.mjs'\)/g, `await import('${new URL('../public/estudio-projetos.mjs', import.meta.url).href}')`)
+  .replace(/await import\('\.\/estudio-utilizador\.mjs'\)/g, `await import('${new URL('../public/estudio-utilizador.mjs', import.meta.url).href}')`)
   // Expõe as funções de guardar para se poderem testar sem gravar vídeo nenhum.
   .replace('// ---------------------------------------------------------------- trilha sonora',
     'globalThis.__guardarParaTeste = { guardarComo, descarregarBlob, podeEscolherOnde, rotularBotoesGuardar };\n// ---------------------------------------------------------------- trilha sonora');;;

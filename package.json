@@ -12,10 +12,10 @@
     "test": "node testes/ligacoes.mjs && node testes/legendas.mjs && node testes/enquadramento.mjs && node testes/projetos.mjs && node testes/fluxo.mjs"
   },
   "dependencies": {
-    "@base44/sdk": "^0.8.53"
+    "@base44/sdk": "^0.8.54"
   },
   "devDependencies": {
-    "@base44/vite-plugin": "^1.0.45",
+    "@base44/vite-plugin": "^1.0.47",
     "vite": "^8.2.0"
   }
 }

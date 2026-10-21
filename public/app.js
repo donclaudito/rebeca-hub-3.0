@@ -1841,12 +1841,47 @@ async function iniciarVideo() {
   const ta = $('letra-texto');
   if (ta) {
     ta.value = state.letra || '';
+    // Se colarem aqui um .srt inteiro (o caso do "00:00:00,500 --> …"), os
+    // tempos são aproveitados como legendas e a letra fica só com os versos.
+    // Assim o vídeo deixa de desenhar a marcação de tempo como se fosse letra.
+    let srtColado = 0;
+    const separarSrtColado = () => {
+      clearTimeout(srtColado);
+      srtColado = setTimeout(async () => {
+        const bruto = state.letra || '';
+        if (!/-->/.test(bruto)) return;
+        try {
+          const modSrt = await import('./srt.mjs');
+          const { cues } = modSrt.lerSrt(bruto);
+          if (!cues.length) return;
+          const limpa = cues.map((c) => c.texto).join('\n');
+          state.letra = limpa;
+          ta.value = limpa;
+          state.srtImportado = { nome: 'colado no campo da letra', cues, total: cues[cues.length - 1].fim };
+          state.srtAjuste = null;
+          state.fonteLegendas = 'srt';
+          guardar();
+          try { estadoSrt(); } catch { /* ainda não inicializado */ }
+          atualizarLetra();
+          resumoVideo();
+          toast(
+            `Reconheci ${cues.length} bloco(s) com tempos no texto colado. As legendas do vídeo passam a usar ` +
+              'esses tempos, e a letra ficou só com os versos.',
+            'ok',
+          );
+        } catch { /* texto no meio de colar: ignora */ }
+      }, 350);
+    };
     ta.oninput = () => {
       state.letra = ta.value;
       guardar();
       atualizarLetra();
       resumoVideo();
+      separarSrtColado();
     };
+    // Estado já guardado de antes (letra com marcação de tempo lá dentro):
+    // arruma uma vez ao abrir, para o vídeo não voltar a desenhar os tempos.
+    if (/-->/.test(state.letra || '')) separarSrtColado();
   }
   $('btn-letra-usar').onclick = alternarLetra;
   $('btn-letra-previa').onclick = preverLetra;

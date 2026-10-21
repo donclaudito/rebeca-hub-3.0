@@ -156,12 +156,18 @@ export function versosDaLetra(texto) {
   // Palavras de seção: é o que distingue "(Refrão)" (marcação) de "(ah, ah)"
   // (versos de verdade, que ficam).
   const SECAO = /pre[- ]?chorus|pré[- ]?refrão|pré[- ]?refrao|interlúdio|interlude|instrumental|refrão|refrao|chorus|verse|verso|bridge|ponte|outro|intro|solo|drop/i;
+  // Estrutura de .srt colada por engano no campo da letra: número do bloco e a
+  // linha "00:00:00,500 --> 00:00:05,000" NUNCA são versos. Sem este filtro, o
+  // vídeo desenhava a própria marcação de tempo como legenda.
+  const TEMPO_SRT = /^\d{1,2}:\d{2}(?::\d{2})?[,.]\d{1,3}\s*-->\s*\d{1,2}:\d{2}(?::\d{2})?[,.]\d{1,3}/;
   return String(texto || '')
     .split(/\r?\n/)
     .map((l) => l.replace(/\*\*|__|`/g, '').replace(/\s+/g, ' ').trim()) // negrito e espaços
     // Linha que é SÓ marcação de seção sai da letra: [Verso 2], (Refrão),
     // [Chorus]… com ou sem negrito/código em volta.
     .filter((l) => !(/^\[[^\]]*\]$/.test(l) || (/^\([^\)]*\)$/.test(l) && SECAO.test(l))))
+    .filter((l) => !TEMPO_SRT.test(l)) // "00:00:05,500 --> 00:00:10,200" fora
+    .filter((l) => !/^\d{1,4}$/.test(l)) // "1", "2"… (índice do bloco) fora
     .filter(Boolean);
 }
 

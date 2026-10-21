@@ -38,7 +38,11 @@ export default function iniciarEditorLegendas(ctx) {
   lista.oninput = () => { sujo = true; avisar('Alterações pendentes. Clique em Aplicar tempos antes de gerar o vídeo.', true); };
   const validar = (paraGerar = false) => {
     if (state.sincronizandoLetra) { avisar('Aguarde o alinhamento terminar antes de continuar.', true); return false; }
-    if (paraGerar && state.letraLigada && (!temposManuais(state) || state.legendasLetra.confirmado === false)) {
+    // Um .srt importado (ou colado no campo da letra) TEM tempos finais: não há
+    // nada para conferir na lista de versos, por isso não se bloqueia a geração.
+    const temposFinais = state.fonteLegendas === 'srt'
+      && Array.isArray(state.srtImportado?.cues) && state.srtImportado.cues.length > 0;
+    if (paraGerar && !temposFinais && state.letraLigada && (!temposManuais(state) || state.legendasLetra.confirmado === false)) {
       avisar('Confira o canto e aplique os tempos. Rascunhos ou alinhamentos não conferidos não serão usados no vídeo.', true);
       document.querySelector('[data-tab="tab-legendas"]').click(); status.scrollIntoView({ block: 'center' }); return false;
     }

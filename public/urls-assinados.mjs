@@ -49,16 +49,54 @@ let fila = Promise.resolve();
 let ultimoPedidoEm = 0;
 let avisouDoLimite = false;
 
-// Falha de sessão: o pedido de URL assinado EXIGE autenticação. Sem token válido
-// a Base44 devolve 422 (Unprocessable) — status enganoso para um problema de
+// ---------------------------------------------------------------- sessão
+//
+// O pedido de URL assinado EXIGE autenticação. Sem Bearer válido a Base44
+// devolve 422 (Unprocessable) — status enganoso para um problema de
 // autenticação, mas é o comportamento dela, confirmado com o mesmo pedido e o
 // mesmo corpo: 422 sem Bearer, 200 com Bearer.
 //
-// Sem este estado, cada cartão do Painel tentava a sua assinatura e falhava:
-// 15 cartões davam 15 erros iguais no console e nenhuma explicação na tela.
-const FALHA_DE_SESSAO = /40[13]|422|unauthorized|forbidden|unprocessable/i;
-let sessaoFalhou = false;
+// A plataforma Base44 injeta um shim no <head> de cada página que serve, e é ele
+// que lê o token de `localStorage['base44_access_token']` e o põe em
+// `Authorization`. É a MESMA chave lida aqui. Consequência prática: sem conta
+// não há cabeçalho, o pedido falha de certeza, e fazê-lo só produz um erro 422
+// vermelho no console de quem apenas abriu a app. Não se pede.
+//
+// O token é relido a cada pedido (é barato) e o que se guarda é o VALOR que a
+// Base44 recusou. Assim, depois de entrar na conta o token muda e as miniaturas
+// voltam sozinhas, sem recarregar a página.
+const CHAVE_TOKEN = 'base44_access_token';
+
+/** Token de sessão actual; '' se não há, null se não se consegue saber. */
+export function tokenAtual() {
+  try {
+    const t = localStorage.getItem(CHAVE_TOKEN);
+    return t == null ? '' : String(t);
+  } catch {
+    // Sem localStorage (testes sem browser, modo privado restrito) ou a
+    // plataforma mudou de sítio o token: não se decide nada, deixa-se tentar.
+    return null;
+  }
+}
+
+// Valor do token que a Base44 já recusou. Vazio = nenhum.
+let tokenRecusado = '';
+// Token ilegível e a assinatura falhou: não há como comparar, desiste-se.
+let desistiuCego = false;
 let avisouDaSessao = false;
+let avisouDeFaltaDeSessao = false;
+
+const FALHA_DE_SESSAO = /40[13]|422|unauthorized|forbidden|unprocessable/i;
+
+/** 'ok' | 'sem-token' | 'recusado' | 'desconhecido' */
+function estadoDaSessao() {
+  if (desistiuCego) return 'recusado';
+  const t = tokenAtual();
+  if (t === null) return 'desconhecido';
+  if (!t) return 'sem-token';
+  if (tokenRecusado && t === tokenRecusado) return 'recusado';
+  return 'ok';
+}
 
 // Rede de segurança independente do texto do erro: ao fim de N falhas seguidas
 // (fora o 429) desiste-se de pedir. Existe porque o erro do SDK pode não trazer
@@ -67,9 +105,38 @@ let avisouDaSessao = false;
 const FALHAS_ATE_DESISTIR = 3;
 let falhasSeguidas = 0;
 
-/** Verdadeiro depois de uma falha de sessão: pára de pedir até recarregar. */
+/** Verdadeiro quando não há sessão utilizável: pára de pedir até entrar. */
 export function sessaoInvalida() {
-  return sessaoFalhou;
+  const e = estadoDaSessao();
+  return e === 'sem-token' || e === 'recusado';
+}
+
+// Decide se vale a pena pedir, e explica à página porquê quando não vale.
+function pararPorSessao() {
+  const e = estadoDaSessao();
+  if (e === 'sem-token') {
+    avisarSemSessao();
+    return true;
+  }
+  if (e === 'recusado') {
+    avisarSessao();
+    return true;
+  }
+  return false;
+}
+
+// Sem conta não é o mesmo que sessão expirada: quem nunca entrou não tem nada
+// a expirar. O Painel diz isto em vez de falar em expiração.
+function avisarSemSessao() {
+  if (avisouDeFaltaDeSessao) return;
+  avisouDeFaltaDeSessao = true;
+  try {
+    if (typeof window !== 'undefined' && window.dispatchEvent) {
+      window.dispatchEvent(new Event('rh-sem-sessao'));
+    }
+  } catch {
+    /* sem janela (testes) */
+  }
 }
 
 function avisarSessao() {
@@ -125,10 +192,10 @@ export async function assinar(uri, expira = 24 * 60 * 60, opts = {}) {
     return guardado && guardado.url ? guardado.url : '';
   }
 
-  // Sessão já falhou: não vale a pena insistir. Devolver vazio é o que os
-  // chamadores já tratam (ficam com o ícone em vez da miniatura) e evita
-  // multiplicar pedidos condenados.
-  if (sessaoFalhou) return '';
+  // Sem sessão não há pedido que possa correr bem. Devolver vazio é o que os
+  // chamadores já tratam (ficam com o ícone em vez da miniatura) e evita o erro
+  // 422 no console de quem só abriu a app.
+  if (pararPorSessao()) return '';
 
   const meu = fila.then(() => pedirComRecuo(pedir, uri, expira, chave));
   // A fila segue mesmo que este pedido falhe (senão ficava tudo parado).
@@ -148,9 +215,9 @@ async function pedirComRecuo(pedir, uri, expira, chave) {
   // a primeira falha marcar o estado, e todos passam pela checagem feita lá
   // fora. Enfileirados, continuavam a sair um a um — 15 pedidos condenados.
   // Aqui, cada um que chega à vez vê o estado já marcado e desiste sem pedir.
-  if (sessaoFalhou) return '';
+  if (pararPorSessao()) return '';
   for (let tentativa = 0; tentativa < TENTATIVAS; tentativa += 1) {
-    if (sessaoFalhou) return '';
+    if (pararPorSessao()) return '';
     const pausa = Math.max(0, PAUSA_ENTRE_PEDIDOS - (Date.now() - ultimoPedidoEm));
     if (pausa) await new Promise((r) => setTimeout(r, pausa));
     ultimoPedidoEm = Date.now();
@@ -186,7 +253,12 @@ async function pedirComRecuo(pedir, uri, expira, chave) {
           FALHA_DE_SESSAO.test(msg) ||
           falhasSeguidas >= FALHAS_ATE_DESISTIR;
         if (deSessao) {
-          sessaoFalhou = true;
+          // Guarda-se o VALOR do token recusado (e não um simples "falhou"):
+          // depois de entrar na conta o token muda, a comparação deixa de bater
+          // e os pedidos voltam sozinhos.
+          const t = tokenAtual();
+          if (t === null) desistiuCego = true;
+          else if (t) tokenRecusado = t;
           avisarSessao();
           throw new Error(
             'não consegui abrir os ficheiros privados: a sessão parece ter expirado. ' +

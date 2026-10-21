@@ -169,6 +169,19 @@ async function pedirRecuperacao(ev) {
   }
 }
 
+// Depois de entrar há sessão: avisa-se o Painel, que pode ter desistido de abrir
+// as miniaturas por falta dela. Sem isto, entrar na conta não bastava — era
+// preciso recarregar a página para as miniaturas aparecerem.
+function avisarQueEntrou() {
+  try {
+    if (typeof window !== 'undefined' && window.dispatchEvent) {
+      window.dispatchEvent(new Event('rh-entrou'));
+    }
+  } catch {
+    /* sem janela (testes) */
+  }
+}
+
 async function submeterUser(ev) {
   if (ev && ev.preventDefault) ev.preventDefault();
   const modo = $('dlg-user').dataset.modo || 'entrar';
@@ -209,6 +222,7 @@ async function submeterUser(ev) {
       if (u) {
         if (typeof $('dlg-user').close === 'function') $('dlg-user').close();
         toast(`Bem-vindo, ${nomeDoUtilizador(u)}!`, 'ok');
+        avisarQueEntrou();
       } else {
         erroUser('A conta foi confirmada, mas não consegui abrir a sessão. Tente entrar.');
         modoFormUser('entrar');
@@ -224,6 +238,7 @@ async function submeterUser(ev) {
     if (u) {
       if (typeof $('dlg-user').close === 'function') $('dlg-user').close();
       toast(`Bem-vindo, ${nomeDoUtilizador(u)}!`, 'ok');
+      avisarQueEntrou();
     } else {
       erroUser('Entrei, mas não consegui confirmar a sessão. Tente outra vez.');
     }

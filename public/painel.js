@@ -99,10 +99,27 @@ function avisarSessao() {
   }
 }
 
+// Quem nunca entrou não tem sessão a expirar. Dizer "expirou" a quem só abriu a
+// app assusta sem explicar nada; o que falta é simplesmente entrar.
+function avisarSemSessao() {
+  const av = $('aviso-painel');
+  if (av) {
+    av.hidden = false;
+    av.textContent =
+      'Entre na sua conta para ver as miniaturas e os vídeos: os ficheiros são privados e só são entregues a quem tem sessão. O resto da app funciona sem conta.';
+  }
+}
+
 try {
   if (typeof window !== 'undefined' && window.addEventListener) {
     window.addEventListener('rh-limite-pedidos', avisarLimite);
     window.addEventListener('rh-sessao-invalida', avisarSessao);
+    window.addEventListener('rh-sem-sessao', avisarSemSessao);
+    // Entrou na conta: o Painel pode ter ficado sem miniaturas por falta de
+    // sessão. Pede-se tudo de novo — com o token novo a assinatura passa.
+    window.addEventListener('rh-entrou', () => {
+      carregar({ jaAssinadas: false });
+    });
   }
 } catch {
   /* sem janela (testes) */

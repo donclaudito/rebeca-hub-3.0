@@ -15,7 +15,7 @@
     "test:all": "npm test && npm run test:2 && npm run test:3 && npm run test:4"
   },
   "dependencies": {
-    "@base44/sdk": "^0.8.54"
+    "@base44/sdk": "^0.8.55"
   },
   "devDependencies": {
     "@base44/vite-plugin": "^1.0.47",

@@ -32,6 +32,9 @@ const state = {
   videoDuracaoCena: 3.5,
   // Legendas incrustadas no vídeo + ficheiro .srt (mesmos blocos).
   legendas: true,
+  // Quem manda na legenda: a letra sincronizada na página ('letra') ou um .srt
+  // importado ('srt'). A última coisa que o utilizador fez é que decide.
+  fonteLegendas: null,
   // 'natural' (duração das cenas) ou 'trilha' (repete as imagens até a música acabar).
   modoDuracao: 'natural',
   // Codec do ficheiro: 'vp8' (compatível) ou 'vp9' (mais pequeno).
@@ -1978,11 +1981,20 @@ async function iniciarVideo() {
             (Math.abs(Number(aj.fator) - 1) > 0.001 ? ` × ${Number(aj.fator).toFixed(3)}` : '') +
             '.'
           : '';
-        linha.textContent = `Legendas importadas de ${imp.nome}: ${imp.cues.length} bloco(s), ${mm}:${String(ss).padStart(2, '0')}.${extra}`;
+        linha.textContent =
+          `Legendas importadas de ${imp.nome}: ${imp.cues.length} bloco(s), ${mm}:${String(ss).padStart(2, '0')}.${extra} ` +
+          (state.fonteLegendas === 'letra'
+            ? '⚠️ O vídeo está a usar a LETRA sincronizada, não este ficheiro — carregue em "Usar este .srt no vídeo" para trocar.'
+            : 'O vídeo usa este ficheiro.');
       }
     }
     if (limpar) limpar.hidden = !imp;
     if (caixa) caixa.hidden = !imp;
+    const trocar = $('btn-srt-usar');
+    if (trocar) {
+      trocar.hidden = !imp;
+      trocar.textContent = state.fonteLegendas === 'srt' ? '🔀 Usar a letra sincronizada' : '🔀 Usar este .srt no vídeo';
+    }
     const desvio = $('srt-desvio');
     const fator = $('srt-fator');
     if (imp && desvio) desvio.value = String(Number(state.srtAjuste?.desvio) || 0);
@@ -2004,6 +2016,7 @@ async function iniciarVideo() {
         }
         state.srtImportado = { nome: f.name, cues, total };
         state.srtAjuste = null; // sem ajuste: os tempos ficam como vieram
+        state.fonteLegendas = 'srt'; // o ficheiro acabado de importar manda no vídeo
         guardar();
         estadoSrt();
         toast(
@@ -2025,9 +2038,26 @@ async function iniciarVideo() {
     btnLimparSrt.onclick = () => {
       state.srtImportado = null;
       state.srtAjuste = null;
+      state.fonteLegendas = 'letra';
       guardar();
       estadoSrt();
       toast('Legendas importadas removidas — volta a valer o texto das cenas.', 'ok');
+    };
+  }
+  // Trocar de fonte sem apagar nada: o .srt guardado continua disponível.
+  const btnUsarSrt = $('btn-srt-usar');
+  if (btnUsarSrt) {
+    btnUsarSrt.onclick = () => {
+      if (!state.srtImportado) return;
+      state.fonteLegendas = state.fonteLegendas === 'srt' ? 'letra' : 'srt';
+      guardar();
+      estadoSrt();
+      toast(
+        state.fonteLegendas === 'srt'
+          ? 'O vídeo vai usar os tempos do ficheiro .srt.'
+          : 'O vídeo volta a usar a letra sincronizada na página.',
+        'ok',
+      );
     };
   }
 

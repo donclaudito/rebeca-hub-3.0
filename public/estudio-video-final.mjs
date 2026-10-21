@@ -31,11 +31,21 @@ export async function gerarVideoFinal() {
   const semFala = comTexto.filter((s) => !s.audioUrl && !s.previaUrl);
   const musica = state.musicaFicheiro && querMusica() && state.musicaLigada ? state.musicaFicheiro : null;
 
-  // Um .srt importado manda sobre a letra: são tempos finais, feitos fora.
-  const srtImportado =
+  // Um .srt importado e a letra sincronizada aqui são duas fontes com tempos
+  // finais. Quem manda é a última que o utilizador mexeu (`fonteLegendas`),
+  // não uma precedência fixa: antes o .srt ganhava sempre e uma sincronia
+  // feita depois nunca aparecia no vídeo.
+  const srtGuardado =
     Array.isArray(state.srtImportado?.cues) && state.srtImportado.cues.length ? state.srtImportado : null;
+  const letraDaPagina = state.letraLigada ? cuesDaLetra() : [];
+  let fonte = state.fonteLegendas;
+  if (!fonte) {
+    // Sem escolha registada (projetos antigos): a letra confirmada ganha ao .srt.
+    fonte = letraDaPagina.length && state.legendasLetra?.confirmado !== false ? 'letra' : srtGuardado ? 'srt' : 'letra';
+  }
+  const srtImportado = fonte === 'srt' ? srtGuardado : null;
   // A letra, se estiver em uso, é calculada uma vez e reutilizada.
-  const cuesLetra = srtImportado ? srtImportado.cues : state.letraLigada ? cuesDaLetra() : [];
+  const cuesLetra = srtImportado ? srtImportado.cues : letraDaPagina;
 
   // Com a letra em uso e SEM narração gerada, o vídeo é de letra: vale o mesmo
   // que o modo "só música" — uma imagem por vez, ao ritmo escolhido.

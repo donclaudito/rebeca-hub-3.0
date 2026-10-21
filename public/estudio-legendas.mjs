@@ -48,6 +48,10 @@ export default function iniciarEditorLegendas(ctx) {
     const erro = erroNosTempos(cues, state.musicaSegundos);
     if (erro) return avisar(erro, true);
     state.legendasLetra = { chave: chaveDaLetra(state), cues, origem: sujo ? 'manual' : state.legendasLetra?.origem || 'manual', confirmado: true };
+    // Passa a ser a letra a mandar na legenda do vídeo. Sem isto, um .srt
+    // importado antes continuava a ganhar em silêncio e a sincronia feita aqui
+    // nunca chegava ao vídeo.
+    state.fonteLegendas = 'letra';
     state.letraLigada = true; sujo = false; guardar(); atualizarLetra(); resumoVideo();
     avisar('Tempos manuais aplicados. Serão usados sem recalcular no vídeo e no .srt.');
   };

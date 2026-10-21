@@ -69,6 +69,8 @@ export default function iniciarSincronia({ state, clienteBase44, guardar, atuali
       const erro = erroNosTempos(dados.cues, state.musicaSegundos);
       if (erro) throw new Error(erro);
       state.legendasLetra = { chave, cues: dados.cues, origem: 'alinhamento', confirmado: false };
+      // O alinhamento acabado de fazer é o que o utilizador quer no vídeo.
+      state.fonteLegendas = 'letra';
       guardar();
       atualizarLetra();
       resumoVideo();

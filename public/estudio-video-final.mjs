@@ -155,6 +155,8 @@ export async function gerarVideoFinal() {
       cenas,
       formato: state.videoFormato,
       transicao: state.videoTransicao,
+      // Ondulação na zona da água: 'desligado' mantém tudo como era.
+      agua: state.videoAgua || 'desligado',
       duracaoTransicao: state.videoDuracao,
       musica,
       duracaoCena: state.videoDuracaoCena,

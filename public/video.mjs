@@ -16,6 +16,7 @@
 import { blocoAtivo, legendasDasCenas, legendasParaSrt, ressincronizarPelaVoz } from './legendas-core.mjs';
 import { erroNosTempos } from './legendas-tempos.mjs';
 import { calcularRecorte, caixaUtil, janelaVisivel } from './enquadramento.mjs';
+import { criarGestorAgua } from './efeito-agua.mjs';
 
 // Versão do motor. Aparece no resumo da página: serve para saber, sem dúvidas,
 // qual build está a correr no browser (um build antigo em cache foi uma das
@@ -420,10 +421,23 @@ function desenharTransicao(ctx, w, h, de, para, t, tipo) {
 // A legenda é desenhada por cima, já depois de a imagem estar no sítio. Liga-se
 // e desliga-se por instante (nada de guardar estado), para que um bloco que
 // atravesse uma transição continue a aparecer.
-function criarDesenhador({ ctx, w, h, imagens, inicios, duracoes, T, transicao, legendas = [], desenharLegenda = null, epilogoEm = -1, orientacaoEpilogo = '', fechoEm = -1 }) {
+function criarDesenhador({ ctx, w, h, imagens, inicios, duracoes, T, transicao, legendas = [], desenharLegenda = null, epilogoEm = -1, orientacaoEpilogo = '', fechoEm = -1, aguaGestor = null }) {
   const corte = transicao === 'corte';
   const n = imagens.length;
   const querLegenda = Boolean(desenharLegenda && legendas.length);
+
+  // O que desenhar para a cena `indice` no instante `tempo`: a imagem original,
+  // ou o canvas com a água já ondulada. O efeito é atualizado AQUI, um instante
+  // antes de ser desenhado — se fosse atualizado para todas as cenas, seriam 25
+  // desenhos por fotograma.
+  const quadro = (indice, tempo) => {
+    const original = imagens[indice];
+    if (!aguaGestor || !original) return original;
+    const efeito = aguaGestor.pedir(indice, original);
+    if (!efeito) return original;
+    efeito.atualizar(tempo);
+    return efeito.canvas;
+  };
 
   // FECHO: com trilha sonora, a imagem apaga suavemente para preto nos últimos
   // segundos do vídeo, ao mesmo tempo que a música esmaece — nenhum dos dois é
@@ -446,7 +460,7 @@ function criarDesenhador({ ctx, w, h, imagens, inicios, duracoes, T, transicao, 
     // EPILOGO: a imagem final, com o movimento da orientação — não passa
     // pelas passagens de transição nem repete nada.
     if (k === epilogoEm && orientacaoEpilogo) {
-      desenharEpilogo(ctx, w, h, k > 0 ? imagens[k - 1] : null, imagens[k], tLocal, dur, orientacaoEpilogo, T);
+      desenharEpilogo(ctx, w, h, k > 0 ? quadro(k - 1, agora) : null, quadro(k, agora), tLocal, dur, orientacaoEpilogo, T);
       if (querLegenda) {
         const bloco = blocoAtivo(legendas, agora);
         if (bloco) desenharLegenda(ctx, bloco.texto, w, h);
@@ -458,18 +472,18 @@ function criarDesenhador({ ctx, w, h, imagens, inicios, duracoes, T, transicao, 
     // Passagem de ENTRADA (ainda a acabar a da cena anterior).
     if (k > 0 && !corte && tLocal < T) {
       const t = 0.5 + (Math.max(0, tLocal) / T) * 0.5;
-      desenharTransicao(ctx, w, h, imagens[k - 1], imagens[k], Math.min(1, t), transicao);
+      desenharTransicao(ctx, w, h, quadro(k - 1, agora), quadro(k, agora), Math.min(1, t), transicao);
     } else if (k < n - 1 && !corte && tLocal > dur - T) {
       // Passagem de SAÍDA (começa o fim desta cena).
       const t = Math.min(1, Math.max(0, (tLocal - (dur - T)) / T)) * 0.5;
-      desenharTransicao(ctx, w, h, imagens[k], imagens[k + 1], t, transicao);
+      desenharTransicao(ctx, w, h, quadro(k, agora), quadro(k + 1, agora), t, transicao);
     } else {
       // Sem passagem: a imagem da cena, quieta. O enquadramento é aplicado
       // pelo próprio desenharCobrindo (imagem parada, transições e epílogo).
       ctx.save();
       ctx.globalAlpha = 1;
       if ('filter' in ctx) ctx.filter = 'none';
-      desenharCobrindo(ctx, imagens[k], w, h);
+      desenharCobrindo(ctx, quadro(k, agora), w, h);
       ctx.restore();
     }
 
@@ -527,6 +541,10 @@ export async function gerarVideo({
   formato = '1280x720',
   transicao = 'fade',
   duracaoTransicao = 0.6,
+  // 'desligado' | 'suave' | 'medio' | 'forte' — ondulação na zona da água.
+  agua = 'desligado',
+  // Onde começa a água, em fração da altura (0 = topo, 1 = fundo).
+  linhaAgua = 0.55,
   fps = 30,
   canvas: canvasDado = null,
   musica = null,
@@ -1032,6 +1050,11 @@ export async function gerarVideo({
   // cena vem do ficheiro original; `ciclos` só diz qual toca em cada momento).
   const imagensFinal = ciclos.map((c) => imagens[c._fonte]);
 
+  // Água em movimento (opcional): um gestor só para este export, que cria e
+  // recicla os efeitos à medida das cenas. Fica nulo quando o nível é
+  // 'desligado' ou quando o browser não tem WebGL2 — e aí nada muda.
+  const aguaGestor = agua && agua !== 'desligado' ? criarGestorAgua({ nivel: agua, linhaAgua }) : null;
+
   // O primeiro fotograma tem de existir antes de gravar, senão o vídeo começa preto.
   const desenhar = criarDesenhador({
     ctx, w: alvo.w, h: alvo.h, imagens: imagensFinal, inicios, duracoes: durFinal, T, transicao,
@@ -1040,6 +1063,7 @@ export async function gerarVideo({
     orientacaoEpilogo: comEpilogo ? orientacao : '',
     // Com trilha, a imagem apaga para preto nos últimos segundos do vídeo.
     fechoEm: duracaoMusica > 0 ? total - Math.min(FECHO_SEGUNDOS, total / 2) : -1,
+    aguaGestor,
   });
   desenhar(0, 0);
 
@@ -1145,6 +1169,10 @@ export async function gerarVideo({
       acumulado = Math.min(totalEfetivo, Math.max(acumulado, relogio()));
       if (interrompido) break;
     }
+
+    // Os contextos WebGL do efeito são recursos escassos (~16 por aba): fecham-se
+    // aqui, senão três exports seguidos esgotavam-nos.
+    aguaGestor?.limpar();
   } finally {
     // Deixa o último fotograma entrar e fecha — mesmo que algo falhe a meio.
     // A música para JUNTO: o vídeo acaba na última cena e a trilha é cortada aí.

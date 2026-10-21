@@ -24,6 +24,8 @@ const state = {
   vozesEleven: [],
   videoFormato: '1920x1080',
   videoTransicao: 'fade',
+  // 'desligado' | 'suave' | 'medio' | 'forte' — ondulação na zona da água.
+  videoAgua: 'desligado',
   videoDuracao: 0.6,
   // O que entra no vídeo: 'narracao' | 'ambos' | 'musica'.
   videoModo: 'ambos',
@@ -1705,6 +1707,37 @@ async function iniciarVideo() {
   state.videoTransicao = escolhida.id;
   state.videoTransicaoRotulo = escolhida.rotulo;
   [...ct.children].forEach((x) => x.classList.toggle('on', x.dataset.id === escolhida.id));
+
+  // Água em movimento: ondulação só na zona da água, feita na GPU do próprio
+  // browser. Não é IA e não custa nada por vídeo — o mesmo export dá sempre o
+  // mesmo resultado.
+  const AGUA = [
+    { id: 'desligado', rotulo: 'Desligada', nota: 'as imagens ficam paradas, como até agora' },
+    { id: 'suave', rotulo: 'Suave', nota: 'ondulação discreta — para planos calmos' },
+    { id: 'medio', rotulo: 'Média', nota: 'ondulação visível — o equilíbrio normal' },
+    { id: 'forte', rotulo: 'Forte', nota: 'ondulação marcada — para água agitada' },
+  ];
+  const ca = $('vid-agua');
+  if (ca) {
+    ca.innerHTML = '';
+    AGUA.forEach((n) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'chip';
+      b.dataset.id = n.id;
+      b.textContent = n.rotulo;
+      b.title = n.nota;
+      b.onclick = () => {
+        state.videoAgua = n.id;
+        [...ca.children].forEach((x) => x.classList.toggle('on', x === b));
+        guardar();
+        resumoVideo();
+      };
+      ca.append(b);
+    });
+    if (!AGUA.some((n) => n.id === state.videoAgua)) state.videoAgua = 'desligado';
+    [...ca.children].forEach((x) => x.classList.toggle('on', x.dataset.id === state.videoAgua));
+  }
 
   // Durações
   const cd = $('vid-duracoes');

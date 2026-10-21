@@ -48,6 +48,112 @@ export function iniciarAnalise(c) {
   }
 }
 
+// ============================================================
+//  PROMPTS POR CENA
+//
+//  Consistência de série não vem de repetir adjectivos: vem de a MESMA base
+//  (personagem + estilo + enquadramento) ir em todas as cenas, mudando só a
+//  acção. A base fica guardada; cada cena recebe o prompt pronto a colar.
+//
+//  A ordem do texto é de propósito: personagem primeiro, cenário e composição
+//  a seguir, estilo no fim — se o gerador truncar, trunca as proibições e não
+//  o enquadramento.
+// ============================================================
+const CHAVE_BASE = 'rh3promptbase';
+
+const BASE_PADRAO = `Soft 3D-rendered children's-book character: a chubby fluffy panda cub doctor in a white medical coat and stethoscope, big friendly eyes, warm beige, mint and blush palette, gentle diffused morning light from the right.
+
+Cosy pastel pediatric clinic: mint and cream walls, wooden toy shelves, plain unadorned posters, a soft window on the right.
+
+Composition: 16:9, character centred, whole body inside the frame with head, paws and feet fully visible, generous empty margins, occupying about half of the frame height.
+
+Style: clean soft 3D render, smooth fur, soft shadows, shallow depth of field.
+
+Keep the character identical to the reference image: same fur colours, same face design, same proportions.
+
+Avoid: any text or logos, watermarks, extra or duplicated limbs.`;
+
+function baseGuardada() {
+  try {
+    return localStorage.getItem(CHAVE_BASE) || BASE_PADRAO;
+  } catch {
+    return BASE_PADRAO;
+  }
+}
+
+function comporPrompt(base, acao) {
+  const b = String(base || '').trim();
+  const a = String(acao || '').trim();
+  return a ? `${b}\n\nThis scene: ${a}` : b;
+}
+
+function construirPrompts() {
+  const lista = $('prompts-lista');
+  if (!lista || !ctx) return;
+  const base = $('prompts-base')?.value || baseGuardada();
+  const cenas = ctx.state?.images || [];
+  lista.replaceChildren();
+  cenas.forEach((c, i) => {
+    const acao = String(c.texto || c.name || '').replace(/\s+/g, ' ').trim();
+    const label = document.createElement('label');
+    label.className = 'field';
+    const span = document.createElement('span');
+    span.textContent = `Cena ${i + 1}${c.video ? ' · vídeo' : ''}${acao ? '' : ' · sem texto'}`;
+    const ta = document.createElement('textarea');
+    ta.rows = 3;
+    ta.value = comporPrompt(base, acao);
+    label.append(span, ta);
+    lista.append(label);
+  });
+  const estado = $('prompts-estado');
+  if (estado) {
+    estado.textContent = cenas.length
+      ? `${cenas.length} prompt(s). A acção de cada cena vem do texto dela — ajuste onde precisar.`
+      : 'Ainda não há cenas: importe imagens no Estúdio.';
+  }
+}
+
+function abrirPrompts() {
+  const ta = $('prompts-base');
+  if (ta) ta.value = baseGuardada();
+  construirPrompts();
+  const dlg = $('dlg-prompts');
+  if (dlg && !dlg.open) dlg.showModal();
+}
+
+// A ligação é feita uma vez, quando o módulo carrega: o <script type="module">
+// só corre depois de a página estar toda lida, por isso o botão já existe.
+try {
+  $('btn-video-prompts')?.addEventListener('click', abrirPrompts);
+  $('btn-prompts-fechar')?.addEventListener('click', () => $('dlg-prompts')?.close());
+  $('prompts-base')?.addEventListener('input', () => {
+    try {
+      localStorage.setItem(CHAVE_BASE, $('prompts-base').value);
+    } catch {
+      /* sem armazenamento: fica só nesta sessão */
+    }
+    construirPrompts();
+  });
+  $('btn-prompts-copiar')?.addEventListener('click', async () => {
+    const caixas = [...document.querySelectorAll('#prompts-lista textarea')];
+    if (!caixas.length) return;
+    const texto = caixas.map((t, i) => `--- cena ${i + 1} ---\n${t.value}`).join('\n\n');
+    const btn = $('btn-prompts-copiar');
+    try {
+      await navigator.clipboard.writeText(texto);
+      if (btn) {
+        btn.textContent = `📋 Copiados ${caixas.length} ✓`;
+        setTimeout(() => (btn.textContent = '📋 Copiar todas'), 2200);
+      }
+    } catch {
+      caixas[0]?.select?.();
+      if (btn) btn.textContent = '📋 Selecione e copie (Ctrl+C)';
+    }
+  });
+} catch {
+  /* sem interface (testes) */
+}
+
 function estadoAnalise(msg, tipo = '') {
   const el = $('analise-estado');
   if (!el) return;

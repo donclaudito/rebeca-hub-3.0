@@ -413,11 +413,33 @@
                 <div class="trilha-linha">
                   <button id="btn-video-ver" class="ghost small" type="button">▶️ Ver o vídeo aqui</button>
                   <button id="btn-video-analise" class="ghost small" type="button" hidden>🎥 Análise do Diretor</button>
+                  <button id="btn-video-prompts" class="ghost small" type="button">🧩 Prompts por cena</button>
                   <button id="btn-video-nuvem" class="primary small" type="button" hidden>☁️ Guardar na nuvem</button>
                   <button id="btn-video-painel" class="ghost small" type="button" hidden>📺 Ver no painel</button>
                   <button id="btn-video-guardar" class="ghost small" type="button">⬇️ Descarregar outra vez</button>
                   <button id="btn-video-guardar-srt" class="ghost small" type="button">⬇️ Guardar o .srt</button>
                 </div>
+
+                <!-- Prompts por cena: a base é igual em todas, muda só a acção. -->
+                <dialog class="dlg" id="dlg-prompts">
+                  <form class="dlg-form" method="dialog">
+                    <h2>Prompts das cenas</h2>
+                    <p class="hint" style="margin:0 0 10px">
+                      A base é igual para todas as cenas — personagem, estilo e enquadramento.
+                      Só muda a acção de cada uma. Copie e cole no gerador, uma cena de cada vez.
+                    </p>
+                    <label class="field">
+                      <span>Base (igual em todas)</span>
+                      <textarea id="prompts-base" rows="7"></textarea>
+                    </label>
+                    <p class="hint" id="prompts-estado" style="margin:6px 0 0"></p>
+                    <div id="prompts-lista"></div>
+                    <div class="dlg-acoes">
+                      <button class="primary" type="button" id="btn-prompts-copiar">📋 Copiar todas</button>
+                      <button class="ghost" type="button" id="btn-prompts-fechar">Fechar</button>
+                    </div>
+                  </form>
+                </dialog>
                 <video id="vid-teste" class="vid-preview" controls playsinline hidden></video>
                 <div class="trilha-linha">
                   <span class="hint">

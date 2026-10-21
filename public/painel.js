@@ -332,8 +332,27 @@ function miniatura(p) {
       img.style.display = 'none';
       ic.hidden = false;
     };
+    const registar = (etapa, extra) => {
+      // Uma <img> que falha não diz porquê. Estes avisos distinguem as três
+      // causas possíveis, para não se andar a adivinhar:
+      //   "sem URL assinado" -> a assinatura falhou (sessão, prazo, rede);
+      //   "imagem falhou" com src -> o URL veio mas o ficheiro não abriu
+      //     (bloqueador de anúncios, URL expirado, host bloqueado);
+      //   nada no console -> o pedido nunca chegou a sair (falta de sessão).
+      try {
+        console.warn(`[rebeca] miniatura: ${etapa}`, extra);
+      } catch {
+        /* consola indisponível */
+      }
+    };
+
     img.onload = mostrar;
     img.onerror = () => {
+      registar('imagem falhou', {
+        ficheiro: String(p.thumb_uri).slice(-32),
+        src: String(img.src || '').slice(0, 64),
+        renovado: img.dataset.renovado === '1',
+      });
       // O URL pode ter expirado (fica guardado 24 h). Pede um NOVO uma vez —
       // pelo caminho da fila, para não voltar a fazer rajada.
       if (img.dataset.renovado === '1') {
@@ -344,12 +363,15 @@ function miniatura(p) {
       p.thumbUrl = '';
       assinar(p.thumb_uri, VALIDADE_MINIATURA, { renovar: true })
         .then((url) => {
-          if (!url) return;
+          if (!url) {
+            registar('sem URL assinado (renovação)', { ficheiro: String(p.thumb_uri).slice(-32) });
+            return;
+          }
           p.thumbUrl = url;
           img.src = url;
         })
-        .catch(() => {
-          /* sem miniatura renovada, fica o ícone */
+        .catch((e) => {
+          registar('assinatura recusada (renovação)', { erro: String(e && e.message).slice(0, 80) });
         });
     };
     m.append(img);
@@ -366,12 +388,15 @@ function miniatura(p) {
         }
         assinar(p.thumb_uri)
           .then((url) => {
-            if (!url) return;
+            if (!url) {
+              registar('sem URL assinado', { ficheiro: String(p.thumb_uri).slice(-32) });
+              return;
+            }
             p.thumbUrl = url;
             img.src = url;
           })
-          .catch(() => {
-            /* o ícone continua */
+          .catch((e) => {
+            registar('assinatura recusada', { erro: String(e && e.message).slice(0, 80) });
           });
       });
     }

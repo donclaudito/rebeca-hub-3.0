@@ -60,6 +60,13 @@ const FALHA_DE_SESSAO = /40[13]|422|unauthorized|forbidden|unprocessable/i;
 let sessaoFalhou = false;
 let avisouDaSessao = false;
 
+// Rede de segurança independente do texto do erro: ao fim de N falhas seguidas
+// (fora o 429) desiste-se de pedir. Existe porque o erro do SDK pode não trazer
+// status em `message` nem em `e.status`, e nesse caso nenhuma classificação
+// funciona — mas insistir também não.
+const FALHAS_ATE_DESISTIR = 3;
+let falhasSeguidas = 0;
+
 /** Verdadeiro depois de uma falha de sessão: pára de pedir até recarregar. */
 export function sessaoInvalida() {
   return sessaoFalhou;
@@ -154,14 +161,31 @@ async function pedirComRecuo(pedir, uri, expira, chave) {
         cache[chave] = { url, exp: Date.now() + expira * 1000 };
         gravarCache(cache);
       }
+      falhasSeguidas = 0;
       return url || '';
     } catch (e) {
       const msg = String((e && e.message) || e);
       const limitado = /429|too many requests|rate limit/i.test(msg);
       if (!limitado) {
-        // Falha de sessão é terminal: marca e avisa uma única vez. Qualquer
-        // outro erro segue o caminho de sempre.
-        if (FALHA_DE_SESSAO.test(msg)) {
+        // Falha de sessão é terminal: marca e avisa uma única vez.
+        //
+        // A detecção NÃO pode depender só do texto. O erro do SDK não traz
+        // necessariamente o status em `message` — e foi exactamente isso que
+        // deixou passar ~20 pedidos depois da primeira correção: a mensagem não
+        // casava com o padrão, o estado nunca era marcado e todos os cartões
+        // insistiam. Por isso: status do erro (em várias formas conhecidas) OU
+        // mensagem, e ainda o limite de falhas seguidas como último recurso.
+        const estado = Number(
+          (e && (e.status ?? e.statusCode ?? (e.response && e.response.status))) ?? NaN,
+        );
+        falhasSeguidas += 1;
+        const deSessao =
+          estado === 401 ||
+          estado === 403 ||
+          estado === 422 ||
+          FALHA_DE_SESSAO.test(msg) ||
+          falhasSeguidas >= FALHAS_ATE_DESISTIR;
+        if (deSessao) {
           sessaoFalhou = true;
           avisarSessao();
           throw new Error(

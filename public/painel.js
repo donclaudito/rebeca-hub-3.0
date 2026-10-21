@@ -49,12 +49,16 @@ async function cliente() {
 
 // Quanto tempo vale um URL assinado de MINIATURA.
 //
-// Era 10 minutos (600 s) — e o Painel pode ficar aberto horas. As miniaturas
-// usam `loading="lazy"`: o browser só pede o ficheiro quando o cartão entra no
-// ecrã, por isso bastava rolar a página meia hora depois de a abrir para o
-// pedido chegar com o token expirado e a imagem dar 401. Um dia inteiro cobre o
-// uso normal; e mesmo depois disso há a renovação automática (ver `miniatura`).
-const VALIDADE_MINIATURA = 24 * 60 * 60; // 24 horas
+// A Base44 recusa `expires_in` acima de 3600 s: responde 422 com
+// "Validation Error — Input should be less than or equal to 3600". Confirmado
+// contra o servidor: 86400 falha, 3600 devolve o URL assinado.
+//
+// Era 24 h aqui, e por isso TODA a miniatura pedia um prazo inválido e falhava
+// com 422 — um erro que parecia de sessão e chegou a ser tratado como tal. O
+// prazo longo também não servia de nada: `loading="lazy"` só pede o ficheiro
+// quando o cartão entra no ecrã, e a renovação automática (ver `miniatura`)
+// trata dos URLs que expiram com a página aberta.
+const VALIDADE_MINIATURA = 3600; // 1 hora — o máximo que a Base44 aceita
 
 // ---------------------------------------------------------------- URLs assinados
 //
@@ -131,8 +135,9 @@ function semSessao() {
 }
 
 function ehFaltaDeSessao(e) {
+  // 422 fica de fora: neste endpoint é erro de validação do corpo, não sessão.
   const estado = Number(e?.status ?? e?.statusCode ?? e?.response?.status ?? NaN);
-  return estado === 401 || estado === 403 || estado === 422;
+  return estado === 401 || estado === 403;
 }
 
 try {

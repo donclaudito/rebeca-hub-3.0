@@ -25,6 +25,12 @@ export const PAUSA_ENTRE_PEDIDOS = 350; // ms entre pedidos
 export const VALIDADE_COMODA = 5 * 60 * 1000; // só vale a pena reutilizar se faltar mais do que isto
 export const TENTATIVAS = 3;
 
+// A Base44 recusa `expires_in` acima de 3600 s com 422 "Validation Error —
+// Input should be less than or equal to 3600". O travão vive aqui, no sítio
+// único por onde passam todos os pedidos (Painel e projetos da nuvem): foi um
+// prazo de 24 h num chamador que manteve o console cheio de 422.
+export const EXPIRA_MAXIMA = 3600;
+
 function lerCache() {
   try {
     const cru = sessionStorage.getItem(CACHE);
@@ -86,7 +92,7 @@ let desistiuCego = false;
 let avisouDaSessao = false;
 let avisouDeFaltaDeSessao = false;
 
-const FALHA_DE_SESSAO = /40[13]|422|unauthorized|forbidden|unprocessable/i;
+const FALHA_DE_SESSAO = /40[13]|unauthorized|forbidden/i;
 
 /** 'ok' | 'sem-token' | 'recusado' | 'desconhecido' */
 function estadoDaSessao() {
@@ -177,8 +183,11 @@ export function esquecer(uri, expira = 24 * 60 * 60) {
 // `opts.pedir(uri, expira)` → Promise<string> com o URL (obrigatório na 1.ª vez
 // que se pede este URI; nas seguintes pode vir de cache).
 // `opts.renovar` → ignora o URL em cache e pede um novo.
-export async function assinar(uri, expira = 24 * 60 * 60, opts = {}) {
+export async function assinar(uri, expira = EXPIRA_MAXIMA, opts = {}) {
   if (!uri) return '';
+  // Nunca pedir acima do que a Base44 aceita. Sem isto, um chamador com 24 h
+  // (era o caso das miniaturas) recebia 422 em vez de uma imagem.
+  expira = Math.min(Math.max(1, Number(expira) || EXPIRA_MAXIMA), EXPIRA_MAXIMA);
   const pedir = opts.pedir;
   const chave = chaveDe(uri, expira);
 
@@ -246,10 +255,14 @@ async function pedirComRecuo(pedir, uri, expira, chave) {
           (e && (e.status ?? e.statusCode ?? (e.response && e.response.status))) ?? NaN,
         );
         falhasSeguidas += 1;
+        // 422 NÃO entra aqui: neste endpoint um 422 é erro de validação do
+        // corpo (por exemplo `expires_in` acima de 3600), não sessão inválida.
+        // Tratá-lo como sessão fazia a app parar de pedir e mostrar "a sessão
+        // expirou" por causa de um campo mal preenchido — foi o que aconteceu
+        // com o prazo de 24 horas das miniaturas.
         const deSessao =
           estado === 401 ||
           estado === 403 ||
-          estado === 422 ||
           FALHA_DE_SESSAO.test(msg) ||
           falhasSeguidas >= FALHAS_ATE_DESISTIR;
         if (deSessao) {

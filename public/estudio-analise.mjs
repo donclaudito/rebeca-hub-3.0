@@ -60,62 +60,187 @@ export function iniciarAnalise(c) {
 //  o enquadramento.
 // ============================================================
 const CHAVE_BASE = 'rh3promptbase';
+const CHAVE_IDIOMA = 'rh3promptidioma';
 
-const BASE_PADRAO = `Soft 3D-rendered children's-book character: a chubby fluffy panda cub doctor in a white medical coat and stethoscope, big friendly eyes, warm beige, mint and blush palette, gentle diffused morning light from the right.
+// PLANO de cada cena: a exigência de enquadramento muda com ele. Antes havia
+// uma regra só ("corpo inteiro") e por isso TODA a cena virava plano aberto —
+// inclusive as que pediam emoção. Um plano próximo com a cabeça a rasar a
+// borda não é um erro: é uma escolha.
+const PLANOS = {
+  geral: {
+    rotulo: 'Geral',
+    exigencia:
+      'Enquadramento: plano geral — personagem inteiro, com o cenário à volta e margem folgada por todos os lados.',
+  },
+  medio: {
+    rotulo: 'Médio',
+    exigencia:
+      'Enquadramento: plano médio — da cintura para cima, rosto bem visível, com espaço à volta.',
+  },
+  proximo: {
+    rotulo: 'Próximo',
+    exigencia:
+      'Enquadramento: plano próximo — o rosto ocupa a maior parte do quadro, expressão em foco; pode cortar o corpo abaixo do peito.',
+  },
+};
 
-Cosy pastel pediatric clinic: mint and cream walls, wooden toy shelves, plain unadorned posters, a soft window on the right.
+// A base é a mesma para todas as cenas: personagem, cenário, estilo.
+// Corrigida depois do teste em que o Director afastou demais o personagem:
+// dois terços em vez de metade, margens modestas em vez de generosas, e os
+// cartazes voltam a ter ilustração (o "sem texto" tinha esvaziado a parede e o
+// inglês continuou a aparecer).
+const BASE_PADRAO = `Personagem de livro infantil em 3D suave: um filhote de panda dentista, fofo e redondo, de bata branca e estetoscópio, olhos grandes e simpáticos, paleta de bege quente, verde-menta e rosa claro, luz de manhã suave vinda da direita.
 
-Composition: 16:9, character centred, whole body inside the frame with head, paws and feet fully visible, generous empty margins, occupying about half of the frame height.
+Clínica dentária infantil acolhedora: paredes em menta e creme, prateleiras de madeira com brinquedos, cartazes com ilustrações simples e coloridas (sem letras), uma janela suave à direita.
+
+O personagem ocupa cerca de dois terços da altura do quadro e fica centrado, com margens modestas — sem cortar a cabeça, as mãos nem os pés.
+
+Estilo: render 3D limpo e suave, pelagem macia, sombras suaves, pouca profundidade de campo.
+
+Manter o personagem idêntico à imagem de referência: mesmas cores, mesma cara, mesmas proporções.
+
+Evitar: qualquer texto escrito nas paredes ou nos objectos, logótipos, marcas de água, membros a mais ou repetidos.`;
+
+const BASE_INGLES = `Soft 3D-rendered children's-book character: a chubby fluffy panda cub dentist in a white medical coat and stethoscope, big friendly eyes, warm beige, mint and blush palette, gentle diffused morning light from the right.
+
+Cosy children's dental clinic: mint and cream walls, wooden shelves with toys, colourful posters with simple illustrations and no lettering, a soft window on the right.
+
+The character occupies about two thirds of the frame height, centred, with modest margins — head, hands and feet fully visible.
 
 Style: clean soft 3D render, smooth fur, soft shadows, shallow depth of field.
 
 Keep the character identical to the reference image: same fur colours, same face design, same proportions.
 
-Avoid: any text or logos, watermarks, extra or duplicated limbs.`;
+Avoid: any lettering on walls or objects, logos, watermarks, extra or duplicated limbs.`;
 
 function baseGuardada() {
   try {
-    return localStorage.getItem(CHAVE_BASE) || BASE_PADRAO;
+    const idioma = localStorage.getItem(CHAVE_IDIOMA) === 'en' ? 'en' : 'pt';
+    const guardada = localStorage.getItem(CHAVE_BASE);
+    if (guardada) return guardada;
+    return idioma === 'en' ? BASE_INGLES : BASE_PADRAO;
   } catch {
     return BASE_PADRAO;
   }
 }
 
-function comporPrompt(base, acao) {
+function comporPrompt(base, acao, planoId) {
   const b = String(base || '').trim();
   const a = String(acao || '').trim();
-  return a ? `${b}\n\nThis scene: ${a}` : b;
+  const p = PLANOS[planoId] || PLANOS.medio;
+  const partes = [b];
+  if (a) partes.push(`Nesta cena: ${a}`);
+  partes.push(p.exigencia);
+  return partes.filter(Boolean).join('\n\n');
+}
+
+// Avisos que se vêem antes de gerar: texto repetido e cenas sem texto.
+// O mesmo texto em cenas seguidas foi o defeito mais visível do último vídeo.
+function avisosDasCenas(cenas) {
+  const avisos = [];
+  const contagem = new Map();
+  cenas.forEach((c) => {
+    const t = String(c.texto || '').replace(/\s+/g, ' ').trim().toLowerCase();
+    if (!t) return;
+    contagem.set(t, (contagem.get(t) || 0) + 1);
+  });
+  const repetidos = [...contagem.entries()].filter(([, n]) => n > 1);
+  if (repetidos.length) {
+    const exemplo = repetidos[0][0].slice(0, 48);
+    avisos.push(
+      `⛔ ${repetidos.length} texto(s) repetido(s) em cenas diferentes` +
+        ` (ex.: "${exemplo}…", ${repetidos[0][1]}×). Cada cena devia ter a sua frase —` +
+        ' uma legenda igual durante segundos faz o vídeo parecer parado.',
+    );
+  }
+  const semTexto = cenas.filter((c) => !String(c.texto || '').trim() && !c.video).length;
+  if (semTexto) avisos.push(`⚠️ ${semTexto} cena(s) sem texto: a legenda fica vazia.`);
+  return avisos;
+}
+
+let acoesPrompts = [];
+let planosPrompts = [];
+const editadosPrompts = new Map();
+
+// O TEXTO e o ÁUDIO da narração vivem em `state.scenes` (um por imagem).
+// `state.images` é a lista de ficheiros e não tem texto nenhum — foi esse
+// engano que deu o aviso falso de "13 cenas sem texto" e prompts com a acção
+// vazia. Aqui fica a única porta para as cenas.
+function cenasNarradas() {
+  const s = ctx?.state;
+  const cenas = Array.isArray(s?.scenes) ? s.scenes : [];
+  if (cenas.length) return cenas;
+  return Array.isArray(s?.images) ? s.images : [];
+}
+
+// A acção de uma cena, para o prompt: o texto da narração e, se não houver,
+// o nome do ficheiro.
+function acaoDaCena(c) {
+  return String(c?.texto || c?.filename || c?.name || '').replace(/\s+/g, ' ').trim();
 }
 
 function construirPrompts() {
   const lista = $('prompts-lista');
   if (!lista || !ctx) return;
   const base = $('prompts-base')?.value || baseGuardada();
-  const cenas = ctx.state?.images || [];
+  const cenas = cenasNarradas();
   lista.replaceChildren();
+  acoesPrompts = cenas.map((c) => acaoDaCena(c));
+  planosPrompts = cenas.map((c, i) => planosPrompts[i] || 'medio');
+
   cenas.forEach((c, i) => {
-    const acao = String(c.texto || c.name || '').replace(/\s+/g, ' ').trim();
     const label = document.createElement('label');
     label.className = 'field';
-    const span = document.createElement('span');
-    span.textContent = `Cena ${i + 1}${c.video ? ' · vídeo' : ''}${acao ? '' : ' · sem texto'}`;
+
+    const topo = document.createElement('span');
+    topo.textContent = `Cena ${i + 1}${c.video ? ' · vídeo' : ''}`;
+
+    const escolha = document.createElement('select');
+    escolha.className = 'select-simples';
+    escolha.style.margin = '4px 0';
+    Object.entries(PLANOS).forEach(([id, p]) => {
+      const o = document.createElement('option');
+      o.value = id;
+      o.textContent = `Plano ${p.rotulo.toLowerCase()}`;
+      if (planosPrompts[i] === id) o.selected = true;
+      escolha.append(o);
+    });
+
     const ta = document.createElement('textarea');
     ta.rows = 3;
-    ta.value = comporPrompt(base, acao);
-    label.append(span, ta);
+    ta.value = editadosPrompts.get(i) || comporPrompt(base, acoesPrompts[i], planosPrompts[i]);
+    ta.addEventListener('input', () => editadosPrompts.set(i, ta.value));
+
+    escolha.addEventListener('change', () => {
+      planosPrompts[i] = escolha.value;
+      editadosPrompts.delete(i); // muda o plano, recompõe-se
+      ta.value = comporPrompt(base, acoesPrompts[i], planosPrompts[i]);
+    });
+
+    label.append(topo, escolha, ta);
     lista.append(label);
   });
+
   const estado = $('prompts-estado');
   if (estado) {
-    estado.textContent = cenas.length
-      ? `${cenas.length} prompt(s). A acção de cada cena vem do texto dela — ajuste onde precisar.`
-      : 'Ainda não há cenas: importe imagens no Estúdio.';
+    if (!cenas.length) {
+      estado.textContent = 'Ainda não há cenas: importe imagens no Estúdio.';
+      estado.className = 'hint';
+    } else {
+      const avisos = avisosDasCenas(cenas);
+      estado.textContent = avisos.length
+        ? avisos.join(' ')
+        : `${cenas.length} prompt(s). A acção vem do texto de cada cena — ajuste onde precisar.`;
+      estado.className = avisos.length ? 'cfg-result err' : 'hint';
+    }
   }
 }
 
 function abrirPrompts() {
   const ta = $('prompts-base');
   if (ta) ta.value = baseGuardada();
+  planosPrompts = [];
+  editadosPrompts.clear();
   construirPrompts();
   const dlg = $('dlg-prompts');
   if (dlg && !dlg.open) dlg.showModal();
@@ -132,7 +257,24 @@ try {
     } catch {
       /* sem armazenamento: fica só nesta sessão */
     }
+    editadosPrompts.clear();
     construirPrompts();
+  });
+  $('btn-prompts-idioma')?.addEventListener('click', () => {
+    let idioma = 'pt';
+    try {
+      idioma = localStorage.getItem(CHAVE_IDIOMA) === 'en' ? 'pt' : 'en';
+      localStorage.setItem(CHAVE_IDIOMA, idioma);
+      localStorage.removeItem(CHAVE_BASE);
+    } catch {
+      /* sem armazenamento */
+    }
+    const ta = $('prompts-base');
+    if (ta) ta.value = idioma === 'en' ? BASE_INGLES : BASE_PADRAO;
+    editadosPrompts.clear();
+    construirPrompts();
+    const btn = $('btn-prompts-idioma');
+    if (btn) btn.textContent = idioma === 'en' ? '🇧🇷 Português' : '🇬🇧 English';
   });
   $('btn-prompts-copiar')?.addEventListener('click', async () => {
     const caixas = [...document.querySelectorAll('#prompts-lista textarea')];
@@ -229,7 +371,7 @@ function duracaoDoAudio(url) {
 // medido.
 async function medirSincronia() {
   const { state } = ctx;
-  const cenas = state.images || [];
+  const cenas = cenasNarradas();
   if (!cenas.length) return null;
 
   const T = Number(state.videoDuracao) || 0.6;
@@ -247,7 +389,7 @@ async function medirSincronia() {
     const durCena = video ? Math.max(piso, total) : audio > 0 ? Math.max(piso, audio) : semVoz;
     return {
       n: i + 1,
-      nome: String(c.name || '').slice(0, 60),
+      nome: String(c.filename || c.name || '').slice(0, 60),
       texto: String(c.texto || '').trim(),
       video,
       audio,
@@ -328,9 +470,9 @@ function metaDaMontagem(r, sinc = null) {
   const resultado = r?.r || {};
   // O texto de cada cena vai junto: sem ele o Director não pode dizer se a
   // imagem ilustra a frase — a pergunta que interessa numa história.
-  const cenasTexto = state.images.slice(0, 24).map((c, i) => ({
+  const cenasTexto = cenasNarradas().slice(0, 24).map((c, i) => ({
     n: i + 1,
-    texto: String(c.texto || '').replace(/\s+/g, ' ').trim().slice(0, 240) || '(sem texto)',
+    texto: acaoDaCena(c).slice(0, 240) || '(sem texto)',
   }));
   return {
     duracao: Math.round(resultado.duracao || 0),
@@ -362,7 +504,7 @@ function metaDaMontagem(r, sinc = null) {
     legendas: resultado.legendas || 0,
     letraDaMusica: Boolean(resultado.legendasDaLetra),
     codec: resultado.codec || state.codec,
-    cenas: state.images.length,
+    cenas: cenasNarradas().length,
   };
 }
 

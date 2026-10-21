@@ -40,8 +40,11 @@ if errorlevel 1 (
 
 echo.
 echo ============================================================
-echo   PUBLICADO. Abra: https://rebeca-hub-30-0aecdc9b.base44.app
+echo   PUBLICADO. Abra: https://rebecahub3.base44.app
 echo ============================================================
 echo.
-echo  Confirme que o canto superior direito diz "video v3.4.0".
+echo  Confirme a versao do video no canto superior direito
+echo  (o valor de VERSAO_VIDEO em public\video.mjs).
+echo  A versao nao esta fixa aqui de proposito: numero escrito
+echo  num script envelhece a cada build e ja mentiu uma vez.
 pause

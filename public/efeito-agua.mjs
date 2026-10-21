@@ -15,12 +15,12 @@
 // ============================================================
 
 export const NIVEIS_AGUA = {
-  // A primeira versão era demasiado discreta: a 1080p, o deslocamento típico
-  // ficava abaixo de meio pixel por fotograma e não se via nada. Estes valores
-  // são o dobro da amplitude e o triplo da velocidade.
-  suave: { forca: 0.006, velocidade: 0.8, brilho: 0.12 },
-  medio: { forca: 0.012, velocidade: 1.3, brilho: 0.16 },
-  forte: { forca: 0.02, velocidade: 1.9, brilho: 0.22 },
+  // O nível "Suave" é o que mais gente escolhe — e na primeira versão era
+  // imperceptível (0,0045 @ 0,45 dava 0,6 níveis de mudança: nada à vista).
+  // Agora o mais fraco já se vê, e a escala vai até "Forte" sem saltos.
+  suave: { forca: 0.01, velocidade: 1.0, brilho: 0.14 },
+  medio: { forca: 0.016, velocidade: 1.4, brilho: 0.18 },
+  forte: { forca: 0.026, velocidade: 2.0, brilho: 0.24 },
 };
 
 export const MAX_VIVOS = 3;

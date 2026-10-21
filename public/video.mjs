@@ -594,6 +594,50 @@ export async function gerarVideo({
   canvas.height = alvo.h;
   const ctx = canvas.getContext('2d', { alpha: false });
 
+  // 1) PRÉ-VOO DE ENTRADA
+  //
+  // A montagem acontece no próprio browser, sem servidor: não há limite de corpo
+  // de pedido a proteger. O que mata este pipeline é outro: memória. Cada imagem
+  // é descodificada para desenhar no canvas, e o custo é proporcional aos PIXEIS
+  // (4 bytes por pixel em RGBA), não aos bytes do ficheiro comprimido.
+  //
+  // Sem esta guarda, o utilizador descobre o problema do pior modo possível: a
+  // aba fecha a meio da gravação, ou grava durante minutos e o resultado sai
+  // truncado. Recusar ANTES é mais barato e a mensagem pode ser acionável.
+  //
+  // Os limites são folgados de propósito: servem para travar o absurdo, não para
+  // incomodar quem trabalha. Ajustáveis aqui, num sítio só.
+  const LIMITE_PIXEIS = 180_000_000; // ~180 MP no total (~720 MB de RGBA no pior caso)
+  const LIMITE_BYTES = 200 * 1024 * 1024; // 200 MB, quando a página souber os bytes
+  const AVISO_PIXEIS = Math.floor(LIMITE_PIXEIS * 0.6);
+  const avisos = [];
+
+  const pixeisDe = (fonte) => {
+    const w = Number(fonte && (fonte.naturalWidth || fonte.videoWidth)) || 0;
+    const h = Number(fonte && (fonte.naturalHeight || fonte.videoHeight)) || 0;
+    return w > 0 && h > 0 ? w * h : 0;
+  };
+
+  // Bytes só existem se a página os declarar em cena.bytes: aqui chegam URLs, não
+  // File. Medir por fetch seria uma segunda leitura inteira de cada imagem.
+  let bytesDeclarados = 0;
+  let algumaCenaDeclaraBytes = false;
+  for (const c of cenas) {
+    const b = Number(c && c.bytes);
+    if (Number.isFinite(b) && b > 0) {
+      algumaCenaDeclaraBytes = true;
+      bytesDeclarados += b;
+    }
+  }
+  if (algumaCenaDeclaraBytes && bytesDeclarados > LIMITE_BYTES) {
+    return {
+      ok: false,
+      erro:
+        `As imagens somam ${(bytesDeclarados / 1048576).toFixed(0)} MB e o limite desta montagem é ` +
+        `${Math.round(LIMITE_BYTES / 1048576)} MB. Reduza o número de cenas ou exporte as imagens em JPEG mais leve.`,
+    };
+  }
+
   // 1) carregar as imagens
   aoProgredir({ fase: 'a preparar as imagens', atual: 0, total: cenas.length });
   // Cada fonte é uma Image (cena de imagem) ou um <video> (cena de vídeo).
@@ -607,6 +651,37 @@ export async function gerarVideo({
     if (!c.video) analisarEnquadramento(fonte, alvo.w, alvo.h, enquadramento);
     elementosVideo.push(c.video ? fonte : null);
     aoProgredir({ fase: 'a preparar as imagens', atual: i + 1, total: cenas.length });
+  }
+
+  // Agora que as dimensões são conhecidas, o orçamento de pixels pode ser medido.
+  // A mensagem diz o valor medido e o limite: sem números, o utilizador não sabe
+  // se está perto nem o que cortar.
+  {
+    let pixeisTotais = 0;
+    let maior = 0;
+    let maiorIndice = 0;
+    for (const [i, fonte] of imagens.entries()) {
+      const p = pixeisDe(fonte);
+      pixeisTotais += p;
+      if (p > maior) { maior = p; maiorIndice = i; }
+    }
+    if (pixeisTotais > LIMITE_PIXEIS) {
+      return {
+        ok: false,
+        erro:
+          `As ${cenas.length} cenas somam ${(pixeisTotais / 1e6).toFixed(0)} MP de imagem e o limite desta ` +
+          `montagem é ${Math.round(LIMITE_PIXEIS / 1e6)} MP. A maior é a cena ${maiorIndice + 1} ` +
+          `(${(maior / 1e6).toFixed(1)} MP). Reduza o número de cenas ou exporte-as em JPEG a ` +
+          `${alvo.w}×${alvo.h}, que é o tamanho usado no vídeo.`,
+      };
+    }
+    if (pixeisTotais > AVISO_PIXEIS) {
+      avisos.push(
+        `A montagem usa ${(pixeisTotais / 1e6).toFixed(0)} MP de imagem (limite ` +
+        `${Math.round(LIMITE_PIXEIS / 1e6)} MP). Se a aba fechar ou a gravação falhar, ` +
+        'reduza o número de cenas ou o tamanho das imagens.',
+      );
+    }
   }
 
   // 2) preparar o áudio
@@ -913,6 +988,41 @@ export async function gerarVideo({
   gravador.ondataavailable = (e) => { if (e.data && e.data.size) pedacos.push(e.data); };
   const parado = new Promise((r) => { gravador.onstop = r; });
 
+  // 2) VIGIA DE TEMPO
+  //
+  // O laço de desenho termina quando o RELÓGIO DO ÁUDIO chega ao fim. Se o
+  // AudioContext suspender a meio (trocar de aba, economia de energia, vídeo de
+  // outra origem), `relogio()` deixa de avançar: o laço nunca atinge o fim, o
+  // gravador nunca para e o ecrã fica em "a montar" indefinidamente, sem erro.
+  //
+  // Por isso o prazo é medido em TEMPO DE PAREDE (performance.now), que não
+  // depende do áudio. Em paralelo há um setTimeout como rede de segurança: em aba
+  // oculta o requestAnimationFrame pode nem ser chamado, e só o temporizador
+  // garante que algo acontece.
+  //
+  // O prazo é folgado — 1,5x a duração esperada + 30 s — para não abortar uma
+  // gravação saudável e lenta.
+  let estourou = false;
+  const inicioParede = performance.now();
+  // Usa `total` e NÃO `totalEfetivo`: este último só é declarado mais abaixo, e
+  // referenciá-lo aqui daria ReferenceError por zona morta do const.
+  const prazoMs = Math.max(
+    60_000,
+    Math.round(total * 1000 * 1.5) + 30_000,
+  );
+  const jaEstourou = () => performance.now() - inicioParede > prazoMs;
+  // Em aba oculta o requestAnimationFrame pode deixar de ser chamado: o laço
+  // fica preso à espera do fotograma seguinte. Parar o gravador não basta — é
+  // preciso resolver a promessa pendente para o `finally` da limpeza correr.
+  let resolverQuadro = null;
+  const pararPorPrazo = () => {
+    if (estourou) return;
+    estourou = true;
+    try { if (gravador.state !== 'inactive') gravador.stop(); } catch { /* já parado */ }
+    try { if (resolverQuadro) resolverQuadro(); } catch { /* já resolvido */ }
+  };
+  const vigia = setTimeout(pararPorPrazo, prazoMs);
+
   // A MÚSICA NUNCA CORTA O VÍDEO. O vídeo acaba com a ÚLTIMA CENA (ou com o
   // epílogo); a trilha, que toca em ciclo, continua por baixo e é parada
   // exatamente nesse instante — a música termina junto com a última cena.
@@ -966,6 +1076,7 @@ export async function gerarVideo({
   try {
     for (let i = 0; i < totalCenas; i++) {
       if (deveParar()) break;
+      if (estourou) break;
 
       // Sem voz nenhuma não há clipe de narração para tocar — quem enche o
       // áudio é a trilha, em ciclo. Também não se toca o silêncio das cenas
@@ -994,10 +1105,18 @@ export async function gerarVideo({
 
       let interrompido = false;
       await new Promise((resolve) => {
+        resolverQuadro = resolve;
         const quadro = () => {
           const agora = relogio();
           // O "Parar" é ouvido a cada fotograma, não só entre cenas.
           const pedido = deveParar();
+          // O prazo de parede é ouvido a cada fotograma: cobre o caso em que o
+          // relógio do áudio congelou e `agora` nunca mais avança.
+          if (jaEstourou()) {
+            pararPorPrazo();
+            resolve();
+            return;
+          }
           if (agora >= inicios[i] + durFinal[i] || pedido) {
             interrompido = pedido;
             resolve();
@@ -1033,11 +1152,42 @@ export async function gerarVideo({
     if (trilha) trilha.parar();
     if (gravador.state !== 'inactive') gravador.stop();
     await parado;
+
+    // 3) LIMPEZA DETERMINÍSTICA
+    //
+    // Cada render deixava recursos presos: as faixas do canvas.captureStream e do
+    // destino de áudio nunca eram paradas, e os <video> das cenas ficavam com o
+    // ficheiro aberto. Uma renderização vazava; várias seguidas acumulavam até a
+    // aba ficar lenta ou o browser cortar a captura.
+    //
+    // A limpeza fica no finally para correr também nos caminhos de erro e de
+    // cancelamento — é exatamente aí que ninguém se lembra dela.
+    clearTimeout(vigia);
+    for (const f of [fluxo, fluxoVideo, seq.destino.stream]) {
+      try { for (const t of f.getTracks()) t.stop(); } catch { /* já parado */ }
+    }
+    for (const v of elementosVideo) {
+      if (!v) continue;
+      try { v.pause(); } catch { /* já parado */ }
+      try { v.removeAttribute('src'); v.load(); } catch { /* já limpo */ }
+    }
     try { await seq.ctx.close(); } catch { /* já fechado */ }
+  }
+
+  if (estourou) {
+    return {
+      ok: false,
+      erro:
+        `A gravação passou do prazo de ${Math.round(prazoMs / 1000)} s para um vídeo de ` +
+        `${totalEfetivo.toFixed(0)} s e foi interrompida. O mais provável é o browser ter ` +
+        'suspenso o áudio — deixe esta aba visível e em primeiro plano durante a gravação. ' +
+        'O que já tinha sido gravado não foi aproveitado.',
+    };
   }
 
   const blob = new Blob(pedacos, { type: mime });
   if (blob.size < 5000) {
+    pedacos.length = 0;
     return { ok: false, erro: 'a gravação ficou vazia — tente outra vez, sem mudar de janela durante a gravação' };
   }
 
@@ -1080,5 +1230,7 @@ export async function gerarVideo({
     // Duração da introdução (0 = sem introdução) e quantas cenas a abriram.
     intro: comIntro ? durIntro : 0,
     cenasIntro: comIntro ? iniciais.length : 0,
+    // Avisos do pré-voo (campo aditivo: a página pode ignorar).
+    avisos,
   };
 }

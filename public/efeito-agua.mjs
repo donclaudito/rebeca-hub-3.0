@@ -15,9 +15,12 @@
 // ============================================================
 
 export const NIVEIS_AGUA = {
-  suave: { forca: 0.0045, velocidade: 0.45, brilho: 0.1 },
-  medio: { forca: 0.0075, velocidade: 0.6, brilho: 0.13 },
-  forte: { forca: 0.012, velocidade: 0.85, brilho: 0.17 },
+  // A primeira versão era demasiado discreta: a 1080p, o deslocamento típico
+  // ficava abaixo de meio pixel por fotograma e não se via nada. Estes valores
+  // são o dobro da amplitude e o triplo da velocidade.
+  suave: { forca: 0.006, velocidade: 0.8, brilho: 0.12 },
+  medio: { forca: 0.012, velocidade: 1.3, brilho: 0.16 },
+  forte: { forca: 0.02, velocidade: 1.9, brilho: 0.22 },
 };
 
 export const MAX_VIVOS = 3;
@@ -66,11 +69,14 @@ void main() {
   float prof = clamp((yTopo - uLinha) / max(0.0001, 1.0 - uLinha), 0.0, 1.0);
   prof = smoothstep(0.0, 1.0, prof);
 
-  float n1 = ruidoSuave(vec2(uv.x * 6.0, yTopo * 16.0 + uTime * uVel));
-  float n2 = ruidoSuave(vec2(uv.x * 15.0 + 4.0, yTopo * 34.0 + uTime * uVel * 1.8));
+  // Duas escalas: uma ondulação larga (a que se vê) e uma fina (o cintilar).
+  // Ambas viajam na horizontal E na vertical — só a derivar na vertical, o
+  // padrão mexia-se demasiado devagar para se notar.
+  float n1 = ruidoSuave(vec2(uv.x * 5.0 + uTime * uVel * 0.7, yTopo * 12.0 + uTime * uVel));
+  float n2 = ruidoSuave(vec2(uv.x * 13.0 + 4.0 + uTime * uVel * 1.6, yTopo * 26.0 + uTime * uVel * 2.0));
 
-  float deslocX = (n1 - 0.5) + (n2 - 0.5) * 0.45;
-  float deslocY = (n2 - 0.5) * 0.35;
+  float deslocX = (n1 - 0.5) * 1.4 + (n2 - 0.5) * 0.6;
+  float deslocY = (n2 - 0.5) * 0.4;
 
   uv.x = clamp(uv.x + deslocX * uAmp * prof, 0.0, 1.0);
   uv.y = clamp(uv.y + deslocY * uAmp * prof, 0.0, 1.0);
@@ -172,7 +178,7 @@ function criarUm(fonte, cfg, linhaAgua) {
 //
 // `pedir(indice, fonte)` devolve o efeito daquela cena (a criar se preciso) ou
 // null quando não é possível. Nunca há mais de MAX_VIVOS abertos.
-export function criarGestorAgua({ nivel = 'medio', linhaAgua = 0.55 } = {}) {
+export function criarGestorAgua({ nivel = 'medio', linhaAgua = 0.62 } = {}) {
   const cfg = NIVEIS_AGUA[nivel];
   if (!cfg || typeof document === 'undefined') return null;
 

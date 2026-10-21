@@ -543,8 +543,10 @@ export async function gerarVideo({
   duracaoTransicao = 0.6,
   // 'desligado' | 'suave' | 'medio' | 'forte' — ondulação na zona da água.
   agua = 'desligado',
-  // Onde começa a água, em fração da altura (0 = topo, 1 = fundo).
-  linhaAgua = 0.55,
+  // Onde começa a água, em fração da altura (0 = topo, 1 = fundo). 0,62 deixava
+  // a ondulação a apanhar o corpo do patinho nas imagens horizontais: a água
+  // começa mais em baixo.
+  linhaAgua = 0.62,
   fps = 30,
   canvas: canvasDado = null,
   musica = null,

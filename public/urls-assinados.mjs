@@ -135,7 +135,15 @@ export async function assinar(uri, expira = 24 * 60 * 60, opts = {}) {
 }
 
 async function pedirComRecuo(pedir, uri, expira, chave) {
+  // A verificação TEM de estar aqui dentro, não só em `assinar`.
+  //
+  // A fila serializa os pedidos: com 15 cartões, os 15 chamam `assinar` antes de
+  // a primeira falha marcar o estado, e todos passam pela checagem feita lá
+  // fora. Enfileirados, continuavam a sair um a um — 15 pedidos condenados.
+  // Aqui, cada um que chega à vez vê o estado já marcado e desiste sem pedir.
+  if (sessaoFalhou) return '';
   for (let tentativa = 0; tentativa < TENTATIVAS; tentativa += 1) {
+    if (sessaoFalhou) return '';
     const pausa = Math.max(0, PAUSA_ENTRE_PEDIDOS - (Date.now() - ultimoPedidoEm));
     if (pausa) await new Promise((r) => setTimeout(r, pausa));
     ultimoPedidoEm = Date.now();

@@ -8,7 +8,11 @@ export default function iniciarPreviaLegendas({ state, cuesDaLetra }) {
   let ficheiro = null;
   let url = '';
   const mostrar = () => {
-    const cue = blocoAtivo(cuesDaLetra(), audio.currentTime);
+    // O atraso escolhido no vídeo também vale aqui: com +A segundos, o bloco que
+    // se vê ao segundo t do áudio é o que o vídeo desenharia em t − A. Sem isto
+    // a prévia mentia e parecia que os tempos estavam certos.
+    const atraso = Number(state.legendasAtraso) || 0;
+    const cue = blocoAtivo(cuesDaLetra(), audio.currentTime - atraso);
     texto.textContent = `${formatarTempo(audio.currentTime)} · ${cue?.texto || 'Sem legenda neste trecho'}`;
   };
   let quadro = 0;

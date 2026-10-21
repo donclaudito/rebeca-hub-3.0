@@ -35,6 +35,10 @@ const state = {
   // Quem manda na legenda: a letra sincronizada na página ('letra') ou um .srt
   // importado ('srt'). A última coisa que o utilizador fez é que decide.
   fonteLegendas: null,
+  // Atraso (+) ou avanço (−) de TODAS as legendas, em segundos. É o ajuste à
+  // mão: funciona com letra sincronizada, com .srt ou com a narração, sem
+  // depender de nenhum alinhamento automático.
+  legendasAtraso: 0,
   // 'natural' (duração das cenas) ou 'trilha' (repete as imagens até a música acabar).
   modoDuracao: 'natural',
   // Codec do ficheiro: 'vp8' (compatível) ou 'vp9' (mais pequeno).
@@ -2074,6 +2078,34 @@ async function iniciarVideo() {
   };
   $('srt-desvio')?.addEventListener('input', aoMudarAjusteSrt);
   $('srt-fator')?.addEventListener('input', aoMudarAjusteSrt);
+
+  // Atraso / avanço das legendas, em segundos. Vale para o que for desenhado no
+  // vídeo e para o .srt que sai com ele (é a mesma lista de blocos).
+  const mostrarAtraso = () => {
+    const campo = $('legendas-atraso');
+    const valor = Number(state.legendasAtraso) || 0;
+    if (campo && document.activeElement !== campo) campo.value = String(valor);
+    const estado = $('legendas-atraso-estado');
+    if (estado) {
+      estado.textContent = Math.abs(valor) < 0.01
+        ? '+ atrasa (a legenda aparece depois da voz); − adianta. Vale para o vídeo gravado e para o .srt.'
+        : valor > 0
+          ? `As legendas vão aparecer ${valor.toFixed(1)} s MAIS TARDE. Vale para o vídeo gravado e para o .srt.`
+          : `As legendas vão aparecer ${Math.abs(valor).toFixed(1)} s MAIS CEDO. Vale para o vídeo gravado e para o .srt.`;
+    }
+  };
+  const definirAtraso = (valor) => {
+    const n = Math.round((Number(valor) || 0) * 10) / 10;
+    // Limites largos mas finitos: mais de 30 s para um lado ou outro é engano.
+    state.legendasAtraso = Math.max(-30, Math.min(30, n));
+    guardar();
+    mostrarAtraso();
+  };
+  $('legendas-atraso')?.addEventListener('input', (e) => definirAtraso(e.target.value));
+  $('btn-legendas-atraso-mais')?.addEventListener('click', () => definirAtraso((Number(state.legendasAtraso) || 0) + 0.2));
+  $('btn-legendas-atraso-menos')?.addEventListener('click', () => definirAtraso((Number(state.legendasAtraso) || 0) - 0.2));
+  $('btn-legendas-atraso-zero')?.addEventListener('click', () => definirAtraso(0));
+  mostrarAtraso();
 
   $('btn-video').onclick = gerarVideoFinal;
   $('btn-video-parar').onclick = () => {

@@ -182,6 +182,8 @@ export async function gerarVideoFinal() {
       legendasAjustar: Boolean(srtImportado) && Boolean(state.srtAjuste),
       legendasFator: Number(state.srtAjuste?.fator) || 1,
       legendasDesvio: Number(state.srtAjuste?.desvio) || 0,
+    // Atraso à mão: entra sempre, venha a legenda da letra, de um .srt ou da narração.
+    legendasAtraso: Number(state.legendasAtraso) || 0,
       // Rascunho (sem tempos confirmados nem alinhados)? O motor re-temporiza
       // os versos ao canto real da faixa, no momento exato da voz.
       legendasRascunho: !srtImportado && cuesLetra.length > 0 && !state.legendasLetra,

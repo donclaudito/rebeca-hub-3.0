@@ -439,6 +439,19 @@
                   </label>
                   <span class="hint">+ atrasa a legenda; − adianta. Esticar corrige a deriva.</span>
                 </div>
+                <!-- Atraso das legendas: vale para QUALQUER legenda (letra
+                     sincronizada, .srt ou narração). Não depende do alinhamento
+                     automático — é o ajuste à mão, de ouvido. -->
+                <div class="trilha-linha" id="legendas-atraso-linha">
+                  <label class="field tiny">
+                    <span>⏱️ Atraso das legendas (s)</span>
+                    <input id="legendas-atraso" type="number" step="0.1" value="0" style="width:84px" />
+                  </label>
+                  <button id="btn-legendas-atraso-menos" class="ghost small" type="button">− 0,2 s</button>
+                  <button id="btn-legendas-atraso-mais" class="ghost small" type="button">+ 0,2 s</button>
+                  <button id="btn-legendas-atraso-zero" class="ghost small" type="button">↺ 0</button>
+                  <span class="hint" id="legendas-atraso-estado">+ atrasa (a legenda aparece depois da voz); − adianta. Vale para o vídeo gravado e para o .srt.</span>
+                </div>
 
                 <!-- Prompts por cena: a base é igual em todas, muda só a acção. -->
                 <dialog class="dlg" id="dlg-prompts">

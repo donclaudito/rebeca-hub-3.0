@@ -572,6 +572,9 @@ export async function gerarVideo({
   // re-temporiza os versos ao canto REAL da faixa que vai gravar. Tempos
   // conferidos ou alinhados palavra a palavra NUNCA são alterados.
   legendasRascunho = false,
+  // Atraso (+ s) ou avanço (− s) de TODAS as legendas. Ajuste à mão, aplicado
+  // por cima de tudo: letra, .srt ou narração.
+  legendasAtraso = 0,
   // 'natural' (duração das cenas) ou 'trilha' (repete as cenas até a música acabar).
   modoDuracao = 'natural',
   // Codec de gravação: 'vp8' (compatível, por omissão) ou 'vp9' (mais pequeno).
@@ -1013,6 +1016,18 @@ export async function gerarVideo({
   // saiu do próprio projeto.
   if (legendasAjustar && listaCues.length) {
     listaCues = ajustarCues(listaCues, { factor: legendasFator, desvio: legendasDesvio });
+  }
+
+  // ATRASO À MÃO: vale para QUALQUER legenda (letra, .srt ou narração) e é
+  // aplicado DEPOIS de todos os cálculos de tempo, para não ser desfeito por
+  // nenhum deles. Positivo atrasa, negativo adianta. Os blocos que caem fora do
+  // vídeo (fim antes do zero) desaparecem em vez de ficarem presos no início.
+  const atrasoCues = Number(legendasAtraso) || 0;
+  if (Math.abs(atrasoCues) > 0.001 && listaCues.length) {
+    listaCues = listaCues
+      .map((c) => ({ ...c, inicio: c.inicio + atrasoCues, fim: c.fim + atrasoCues }))
+      .filter((c) => c.fim > 0)
+      .map((c) => ({ ...c, inicio: Math.max(0, c.inicio) }));
   }
 
   // 3) começar a gravar

@@ -24,7 +24,16 @@ export default function iniciarEditorLegendas(ctx) {
     $('legendas-vazio').hidden = cues.length > 0;
     status.hidden = !cues.length;
     $('legendas-campos').disabled = state.busy || state.sincronizandoLetra || !cues.length;
-    $('legendas-resumo').textContent = `${cues.length} legenda(s) da música`;
+    $('legendas-resumo').textContent = cues.length
+      ? `${cues.length} legenda(s) da música`
+      // Zero blocos não diz nada a quem está a usar: dizer o que falta.
+      : !String(state.letra || '').trim()
+        ? '0 legendas — cole a letra da música na aba Voz (uma linha por verso).'
+        : !state.musicaFicheiro
+          ? '0 legendas — escolha a música na aba Voz (é ela que dá a duração).'
+          : !(Number(state.musicaSegundos) > 0)
+            ? '0 legendas — a duração da música ainda não foi lida; volte a escolher o ficheiro.'
+            : '0 legendas — a letra ficou sem versos utilizáveis; apague as linhas que são só marcação, como (Refrão) ou [Verso 2].';
   };
   lista.oninput = () => { sujo = true; avisar('Alterações pendentes. Clique em Aplicar tempos antes de gerar o vídeo.', true); };
   const validar = (paraGerar = false) => {

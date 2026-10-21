@@ -55,9 +55,9 @@ async function cliente() {
 //
 // Era 24 h aqui, e por isso TODA a miniatura pedia um prazo inválido e falhava
 // com 422 — um erro que parecia de sessão e chegou a ser tratado como tal. O
-// prazo longo também não servia de nada: `loading="lazy"` só pede o ficheiro
-// quando o cartão entra no ecrã, e a renovação automática (ver `miniatura`)
-// trata dos URLs que expiram com a página aberta.
+// prazo longo também não servia de nada: o URL só é pedido quando o cartão
+// aparece no ecrã (`quandoVisivel`), e a renovação automática (ver `miniatura`)
+// trata dos que expiram com a página aberta.
 const VALIDADE_MINIATURA = 3600; // 1 hora — o máximo que a Base44 aceita
 
 // ---------------------------------------------------------------- URLs assinados
@@ -319,10 +319,15 @@ function miniatura(p) {
   if (p.thumb_uri) {
     const img = document.createElement('img');
     img.alt = '';
-    img.loading = 'lazy';
-    // `display` em linha e não o atributo `hidden`: o CSS da miniatura tem
-    // `.miniatura img { display: block }`, que ganha ao `hidden` do browser — a
-    // imagem apareceria partida enquanto o URL não chega.
+    // NADA de `loading="lazy"` aqui, e a razão é medida: uma imagem com
+    // carregamento diferido E `display:none` NUNCA é pedida pelo browser —
+    // fica sem `onload` e sem `onerror`, para sempre, sem uma linha no console.
+    // Provado em Chromium 155: `lazy + display:none` -> sem resposta;
+    // `sem lazy + display:none` -> carrega.
+    //
+    // O que se quer poupar (não pedir 12 miniaturas de uma vez) já está
+    // garantido por `quandoVisivel`, que só vai buscar o URL assinado quando o
+    // cartão aparece no ecrã. A partir daí a imagem pode carregar à vontade.
     img.style.display = 'none';
     const mostrar = () => {
       img.style.display = '';

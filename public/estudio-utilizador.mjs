@@ -123,6 +123,9 @@ function modoFormUser(modo) {
   $('campo-nome').hidden = !criar;
   $('campo-senha').hidden = false;
   $('campo-otp').hidden = true;
+  // "Esqueci a palavra-passe" só faz sentido quando se está a entrar.
+  const linhaEsqueci = $('linha-esqueci');
+  if (linhaEsqueci) linhaEsqueci.hidden = modo !== 'entrar';
   $('link-user-trocar').textContent = criar ? 'Já tem conta? Entrar' : 'Ainda não tem conta? Criar uma';
   $('btn-user-confirmar').textContent = criar ? 'Criar conta' : 'Entrar';
   $('dlg-user').dataset.modo = criar ? 'criar' : 'entrar';
@@ -133,6 +136,37 @@ function abrirDlgUser(modo = 'entrar') {
   modoFormUser(modo);
   const d = $('dlg-user');
   if (d && typeof d.showModal === 'function') d.showModal();
+}
+
+// Pede o email de redefinição. O SDK tem este método desde sempre; o modal do
+// app simplesmente nunca o ofereceu, e quem esquecia a senha ficava sem saída.
+async function pedirRecuperacao(ev) {
+  if (ev && ev.preventDefault) ev.preventDefault();
+  const email = $('user-email').value.trim();
+  if (!email) {
+    erroUser('Escreva o seu email em cima e volte a clicar em "Esqueci a palavra-passe".');
+    return;
+  }
+  const btn = $('btn-user-confirmar');
+  btn.disabled = true;
+  erroUser('');
+  try {
+    const base44 = await clienteBase44();
+    await base44.auth.resetPasswordRequest(email);
+    // A resposta é sempre a mesma, exista ou não a conta: não se revela quem tem
+    // conta na app a quem escreve um email à sorte.
+    toast('Se existir conta com esse email, enviámos um link para redefinir a palavra-passe. Confira também o spam.', 'ok');
+  } catch (e) {
+    const corpo = e && e.response ? e.response.data : null;
+    const msg = String((corpo && (corpo.message || corpo.error)) || (e && e.message) || '');
+    erroUser(
+      msg
+        ? `não consegui pedir a redefinição: ${msg}`
+        : 'não consegui pedir a redefinição — tente outra vez',
+    );
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 async function submeterUser(ev) {
@@ -160,6 +194,8 @@ async function submeterUser(ev) {
       $('campo-senha').hidden = true;
       $('campo-nome').hidden = true;
       $('campo-otp').hidden = false;
+      const linhaEsqueci2 = $('linha-esqueci');
+      if (linhaEsqueci2) linhaEsqueci2.hidden = true;
       $('user-titulo').textContent = 'Confirmar o email';
       $('dlg-user').dataset.modo = 'otp';
       erroUser('');
@@ -232,6 +268,8 @@ function arrancar() {
     if (typeof $('dlg-user').close === 'function') $('dlg-user').close();
   };
   $('form-user').addEventListener('submit', submeterUser);
+  const linkEsqueci = $('link-user-esqueci');
+  if (linkEsqueci) linkEsqueci.onclick = pedirRecuperacao;
   $('link-user-trocar').onclick = (e) => {
     if (e && e.preventDefault) e.preventDefault();
     modoFormUser($('dlg-user').dataset.modo === 'criar' ? 'entrar' : 'criar');

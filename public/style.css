@@ -438,3 +438,11 @@ main { padding: 18px 22px 60px; }
 .analise-titulo { margin: 14px 0 4px; font-size: 13.5px; color: var(--accent-2); }
 .analise-texto { margin: 0; font-size: 13.5px; line-height: 1.55; white-space: pre-wrap; }
 .analise-lista { margin: 4px 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; font-size: 13.5px; line-height: 1.5; }
+
+/* O atributo hidden do HTML tem prioridade baixa: qualquer classe com display
+   vence-o. Dentro do diálogo de conta isso fazia aparecer o campo NOME e o campo
+   CÓDIGO RECEBIDO POR EMAIL no modo "Entrar". Esta regra devolve ao hidden a
+   autoridade que ele deve ter, sem tocar no resto da app. */
+#dlg-user [hidden] {
+  display: none !important;
+}

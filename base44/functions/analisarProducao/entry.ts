@@ -88,6 +88,30 @@ export default async function (req) {
     adicionar('Codec', meta.codec);
     adicionar('Número de cenas', meta.cenas);
 
+    // O TEXTO de cada cena: sem ele o Director não pode dizer se a imagem
+    // ilustra a frase — a pergunta que interessa numa história.
+    if (Array.isArray(meta.cenasTexto) && meta.cenasTexto.length) {
+      linhas.push('- Texto de cada cena (a imagem deve ilustrar este texto):');
+      meta.cenasTexto.forEach((c) => linhas.push(`  ${c.n}. ${c.texto || '(sem texto)'}`));
+      linhas.push('  → Refira em "composicao" as cenas em que a imagem NÃO ilustra o seu texto.');
+    }
+
+    // SINCRONIA MEDIDA (voz de cada cena contra a duração da imagem): facto
+    // calculado na app, não estimativa. O Director parte daqui.
+    const sinc = meta.sincroniaMedida;
+    if (sinc && typeof sinc === 'object') {
+      linhas.push(`- Duração montada (medida): ${sinc.duracaoMontada}s`);
+      if (Array.isArray(sinc.cortadas) && sinc.cortadas.length) {
+        linhas.push('- Narração MAIS LONGA do que a imagem (o áudio fica cortado no fim):');
+        sinc.cortadas.forEach((c) => linhas.push(`  cena ${c.cena}: voz ${c.voz}s / imagem ${c.imagem}s`));
+        linhas.push('  → Em "sincronia", trate primeiro destas cenas: quanto texto cortar ou quanto esticar o clipe.');
+      } else {
+        linhas.push('- Nenhuma narração excede a imagem (medido).');
+      }
+      if (sinc.semTexto) linhas.push(`- ${sinc.semTexto} cena(s) sem texto de narração (legenda vazia).`);
+      if (sinc.silenciosas) linhas.push(`- ${sinc.silenciosas} cena(s) sem narração nem vídeo.`);
+    }
+
     // ---- auditoria de ENQUADRAMENTO (números medidos na app, não opinião) ----
     // A app mede, cena a cena, a caixa do personagem e a janela que o vídeo
     // mostra. Isto chega aqui medido para o Diretor não ter de adivinhar se a

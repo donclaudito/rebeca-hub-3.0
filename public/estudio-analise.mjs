@@ -22,6 +22,8 @@ let ctx = null;
 let ultimaAnalise = null;
 // A auditoria de enquadramento da última análise (números, não opiniões).
 let ultimaAuditoria = null;
+// A sincronia medida na última análise (voz de cada cena vs duração da imagem).
+let ultimaSincronia = null;
 
 export function iniciarAnalise(c) {
   ctx = c;
@@ -81,8 +83,7 @@ function alvoDoFormato() {
 }
 
 // Mede o enquadramento de cada cena (sem IA: são as contas do próprio motor).
-async function auditar() {
-  const { state } = ctx;
+async function auditar() {  const { state } = ctx;
   if (!state.images.length) return null;
   try {
     const mod = await import('./auditoria-enquadramento.mjs');
@@ -91,6 +92,96 @@ async function auditar() {
   } catch {
     return null; // a análise do Diretor segue sem os números
   }
+}
+
+// Duração da narração de uma cena, lida do próprio ficheiro de áudio.
+function duracaoDoAudio(url) {
+  return new Promise((resolve) => {
+    if (!url) return resolve(0);
+    const a = new Audio();
+    let feito = false;
+    const fim = (v) => {
+      if (feito) return;
+      feito = true;
+      resolve(Number.isFinite(v) && v > 0 ? v : 0);
+    };
+    a.addEventListener('loadedmetadata', () => fim(a.duration), { once: true });
+    a.addEventListener('error', () => fim(0), { once: true });
+    setTimeout(() => fim(0), 6000);
+    a.preload = 'metadata';
+    a.src = url;
+  });
+}
+
+// SINCRONIA MEDIDA — sem perguntar a ninguém.
+//
+// A conta é a MESMA do motor (`duracoesDasCenas`, em video.mjs): cada cena dura
+// o que dura a sua narração, com um piso de 2*transição + 0,2 s. Uma cena de
+// VÍDEO dura o clipe (depois do corte) — e é aí que a narração pode ficar maior
+// do que a imagem: nesse caso o áudio é cortado quando o clipe acaba. Era isto
+// que o Diretor tinha de adivinhar a partir de uma lista de números; agora vem
+// medido.
+async function medirSincronia() {
+  const { state } = ctx;
+  const cenas = state.images || [];
+  if (!cenas.length) return null;
+
+  const T = Number(state.videoDuracao) || 0.6;
+  const piso = 2 * T + 0.2;
+  const semVoz = Math.max(piso, Number(state.videoDuracaoCena) || 3.5);
+
+  const duracoes = await Promise.all(
+    cenas.map((c) => duracaoDoAudio(c.audioUrl || c.previaUrl || '')),
+  );
+
+  const itens = cenas.map((c, i) => {
+    const audio = duracoes[i];
+    const total = Number(c.duracaoVideo ?? c.duracao) || 0;
+    const video = Boolean(c.video);
+    const durCena = video ? Math.max(piso, total) : audio > 0 ? Math.max(piso, audio) : semVoz;
+    return {
+      n: i + 1,
+      nome: String(c.name || '').slice(0, 60),
+      texto: String(c.texto || '').trim(),
+      video,
+      audio,
+      durCena,
+      falta: video && audio > durCena + 0.15 ? audio - durCena : 0,
+    };
+  });
+
+  return {
+    total: itens.reduce((s, c) => s + c.durCena, 0),
+    piso: Number(piso.toFixed(2)),
+    cortadas: itens.filter((c) => c.falta > 0),
+    silenciosas: itens.filter((c) => !c.video && c.audio === 0),
+    semTexto: itens.filter((c) => !c.texto && !c.video),
+    itens,
+  };
+}
+
+// O resumo em português, para o diálogo. Números primeiro, opinião depois.
+function resumoSincronia(s) {
+  if (!s) return '';
+  const partes = [`Duração montada: ${s.total.toFixed(1)}s em ${s.itens.length} cenas.`];
+  if (s.cortadas.length) {
+    const pior = s.cortadas
+      .slice(0, 4)
+      .map((c) => `cena ${c.n} (${c.audio.toFixed(1)}s de voz para ${c.durCena.toFixed(1)}s de imagem)`);
+    partes.push(
+      `⛔ ${s.cortadas.length} cena(s) com a narração mais longa do que o clipe — o áudio fica cortado: ${pior.join('; ')}.`,
+    );
+  }
+  if (s.silenciosas.length) {
+    partes.push(`⚠️ ${s.silenciosas.length} cena(s) sem narração nem vídeo (ficam ${s.piso}s paradas).`);
+  }
+  if (s.semTexto.length) {
+    partes.push(`⚠️ ${s.semTexto.length} cena(s) sem texto de narração — a legenda fica vazia.`);
+  }
+  if (!s.cortadas.length && !s.silenciosas.length && !s.semTexto.length) {
+    partes.push('Sincronia certa: nenhuma narração excede a imagem.');
+  }
+  return partes.join(' ');
 }
 
 // Mostra a auditoria no diálogo: uma linha por cena com problema + o resumo.
@@ -126,11 +217,31 @@ function mostrarAuditoria(aud) {
 }
 
 // Os dados da montagem que a análise usa como contexto.
-function metaDaMontagem(r) {
+function metaDaMontagem(r, sinc = null) {
   const { state } = ctx;
   const resultado = r?.r || {};
+  // O texto de cada cena vai junto: sem ele o Director não pode dizer se a
+  // imagem ilustra a frase — a pergunta que interessa numa história.
+  const cenasTexto = state.images.slice(0, 24).map((c, i) => ({
+    n: i + 1,
+    texto: String(c.texto || '').replace(/\s+/g, ' ').trim().slice(0, 240) || '(sem texto)',
+  }));
   return {
     duracao: Math.round(resultado.duracao || 0),
+    cenasTexto,
+    // A sincronia vai MEDIDA: voz de cada cena contra a duração da imagem.
+    sincroniaMedida: sinc
+      ? {
+          duracaoMontada: Number(sinc.total.toFixed(1)),
+          cortadas: sinc.cortadas.map((c) => ({
+            cena: c.n,
+            voz: Number(c.audio.toFixed(1)),
+            imagem: Number(c.durCena.toFixed(1)),
+          })),
+          semTexto: sinc.semTexto.length,
+          silenciosas: sinc.silenciosas.length,
+        }
+      : null,
     formato: resultado.formato || state.videoFormato,
     transicao: state.videoTransicaoRotulo || state.videoTransicao,
     duracaoTransicao: state.videoDuracao,
@@ -166,6 +277,12 @@ export async function analisarDiretor() {
     const aud = await auditar();
     ultimaAuditoria = aud;
 
+    // 2) MEDIR a sincronia (voz vs imagem). O Director recebia uma lista de
+    //    números e tinha de adivinhar; agora recebe a conta feita.
+    estadoAnalise('A medir a sincronia da narração com as imagens…', 'wait');
+    const sincMedida = await medirSincronia();
+    ultimaSincronia = sincMedida;
+
     const b = await clienteBase44();
 
     // As imagens vão ao armazenamento privado (só esta app as abre) e o
@@ -194,7 +311,7 @@ export async function analisarDiretor() {
 
     const resposta = await b.functions.invoke('analisarProducao', {
       arquivos,
-      meta: metaDaMontagem(resultado),
+      meta: metaDaMontagem(resultado, sincMedida),
       // Os números do enquadramento vão como contexto: o Diretor tem de os
       // respeitar nas melhorias e no prompt refinado.
       enquadramento: aud
@@ -223,6 +340,21 @@ export async function analisarDiretor() {
       });
     }
 
+    // 3) A narração cortada também entra como melhoria: é um facto medido, não
+    //    uma sugestão. Vai depois do enquadramento, que é a prioridade.
+    if (sincMedida && sincMedida.cortadas.length) {
+      const exemplos = sincMedida.cortadas
+        .slice(0, 4)
+        .map((c) => `cena ${c.n}: ${c.audio.toFixed(1)}s de voz para ${c.durCena.toFixed(1)}s de imagem`);
+      melhorias.push({
+        titulo: '⛔ Narração cortada (medido)',
+        detalhe:
+          `${sincMedida.cortadas.length} cena(s) têm voz mais longa do que a imagem e o áudio fica ` +
+          `cortado no fim (${exemplos.join('; ')}). Encurte o texto dessas cenas ou aumente o corte ` +
+          'do clipe; se forem clipes do Gemini, cada um tem um limite de segundos que não se estica.',
+      });
+    }
+
     // 3) Garantir que o prompt refinado leva as exigências de enquadramento,
     //    mesmo quando o modelo se esquece delas.
     let promptRefinado = String(dados.promptRefinado || '');
@@ -244,8 +376,9 @@ export async function analisarDiretor() {
     if (enqIa) enqIa.textContent = dados.enquadramento || '';
     const comp = $('analise-composicao');
     if (comp) comp.textContent = dados.composicao || '';
-    const sinc = $('analise-sincronia');
-    if (sinc) sinc.textContent = dados.sincronia || '';
+    const sincEl = $('analise-sincronia');
+    // Os números medidos vêm PRIMEIRO; a leitura do modelo fica por baixo.
+    if (sincEl) sincEl.textContent = [resumoSincronia(sincMedida), dados.sincronia || ''].filter(Boolean).join('\n\n');
     const lista = $('analise-melhorias');
     if (lista) {
       lista.innerHTML = '';

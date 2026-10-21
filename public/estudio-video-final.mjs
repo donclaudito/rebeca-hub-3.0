@@ -166,9 +166,12 @@ export async function gerarVideoFinal() {
       // Com a letra em uso, as legendas ficam ligadas (ela substitui a narração).
       legendas: comLegendas,
       legendasExternas: cuesLetra.length ? cuesLetra : null,
-      // Um .srt importado tem tempos finais e é esticado à duração do vídeo;
-      // a letra da música é que pode vir de rascunho e ser ressincronizada.
-      legendasAjustar: Boolean(srtImportado),
+      // Um .srt importado tem tempos finais. O ajuste é ESCOLHIDO na página
+      // (desvio em segundos e factor de escala); sem ajuste, os tempos ficam
+      // como vieram no ficheiro.
+      legendasAjustar: Boolean(srtImportado) && Boolean(state.srtAjuste),
+      legendasFator: Number(state.srtAjuste?.fator) || 1,
+      legendasDesvio: Number(state.srtAjuste?.desvio) || 0,
       // Rascunho (sem tempos confirmados nem alinhados)? O motor re-temporiza
       // os versos ao canto real da faixa, no momento exato da voz.
       legendasRascunho: !srtImportado && cuesLetra.length > 0 && !state.legendasLetra,

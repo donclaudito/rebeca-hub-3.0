@@ -1965,16 +1965,28 @@ async function iniciarVideo() {
   const estadoSrt = () => {
     const linha = $('srt-estado');
     const limpar = $('btn-srt-limpar');
+    const caixa = $('srt-ajuste');
     const imp = state.srtImportado;
     if (linha) {
       linha.hidden = !imp;
       if (imp) {
         const mm = Math.floor(imp.total / 60);
         const ss = Math.round(imp.total % 60);
-        linha.textContent = `Legendas importadas de ${imp.nome}: ${imp.cues.length} bloco(s), ${mm}:${String(ss).padStart(2, '0')}. São esticadas à duração do vídeo.`;
+        const aj = state.srtAjuste;
+        const extra = aj
+          ? ` Ajuste: ${aj.desvio >= 0 ? '+' : ''}${Number(aj.desvio).toFixed(1)}s` +
+            (Math.abs(Number(aj.fator) - 1) > 0.001 ? ` × ${Number(aj.fator).toFixed(3)}` : '') +
+            '.'
+          : '';
+        linha.textContent = `Legendas importadas de ${imp.nome}: ${imp.cues.length} bloco(s), ${mm}:${String(ss).padStart(2, '0')}.${extra}`;
       }
     }
     if (limpar) limpar.hidden = !imp;
+    if (caixa) caixa.hidden = !imp;
+    const desvio = $('srt-desvio');
+    const fator = $('srt-fator');
+    if (imp && desvio) desvio.value = String(Number(state.srtAjuste?.desvio) || 0);
+    if (imp && fator) fator.value = String(Number(state.srtAjuste?.fator) || 1);
   };
   estadoSrt();
 
@@ -1991,6 +2003,7 @@ async function iniciarVideo() {
           return;
         }
         state.srtImportado = { nome: f.name, cues, total };
+        state.srtAjuste = null; // sem ajuste: os tempos ficam como vieram
         guardar();
         estadoSrt();
         toast(
@@ -2011,11 +2024,26 @@ async function iniciarVideo() {
   if (btnLimparSrt) {
     btnLimparSrt.onclick = () => {
       state.srtImportado = null;
+      state.srtAjuste = null;
       guardar();
       estadoSrt();
       toast('Legendas importadas removidas — volta a valer o texto das cenas.', 'ok');
     };
   }
+
+  // Ajuste fino das legendas importadas: desvio (atrasa/adianta) e factor
+  // (corrige a deriva). Sem ajuste, os tempos do ficheiro ficam intactos.
+  const aoMudarAjusteSrt = () => {
+    if (!state.srtImportado) return;
+    const desvio = Number($('srt-desvio')?.value) || 0;
+    const fator = Number($('srt-fator')?.value) || 1;
+    state.srtAjuste =
+      Math.abs(desvio) < 0.01 && Math.abs(fator - 1) < 0.002 ? null : { desvio, fator };
+    guardar();
+    estadoSrt();
+  };
+  $('srt-desvio')?.addEventListener('input', aoMudarAjusteSrt);
+  $('srt-fator')?.addEventListener('input', aoMudarAjusteSrt);
 
   $('btn-video').onclick = gerarVideoFinal;
   $('btn-video-parar').onclick = () => {

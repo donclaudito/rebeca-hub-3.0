@@ -17,7 +17,7 @@ import { blocoAtivo, legendasDasCenas, legendasParaSrt, ressincronizarPelaVoz } 
 import { erroNosTempos } from './legendas-tempos.mjs';
 import { calcularRecorte, caixaUtil, janelaVisivel } from './enquadramento.mjs';
 import { criarGestorAgua } from './efeito-agua.mjs';
-import { escalarCues } from './srt.mjs';
+import { ajustarCues } from './srt.mjs';
 
 // Versão do motor. Aparece no resumo da página: serve para saber, sem dúvidas,
 // qual build está a correr no browser (um build antigo em cache foi uma das
@@ -561,9 +561,13 @@ export async function gerarVideo({
   // Legendas já prontas (a letra da música, distribuída pelo tempo). Quando vêm,
   // substituem as legendas tiradas da narração: as duas juntas enchiam o ecrã.
   legendasExternas = null,
-  // As legendas externas foram importadas de um .srt? Então esticam-se para
-  // caber na duração REAL do vídeo — que só aqui se conhece.
+  // As legendas externas foram importadas de um .srt? Então os tempos levam um
+  // ajuste ESCOLHIDO na página: desvio (atraso/adiantamento constante) e factor
+  // (deriva). Antes esticava automaticamente pela duração do vídeo — e como a
+  // trilha pode prolongar o vídeo, isso acumulava atraso ao longo dos minutos.
   legendasAjustar = false,
+  legendasFator = 1,
+  legendasDesvio = 0,
   // Os tempos acima vêm do RASCUNHO da página (não confirmados)? Então o motor
   // re-temporiza os versos ao canto REAL da faixa que vai gravar. Tempos
   // conferidos ou alinhados palavra a palavra NUNCA são alterados.
@@ -1003,12 +1007,12 @@ export async function gerarVideo({
   // Com trilha, o vídeo acaba NO INSTANTE em que a música acaba — nunca antes.
   const terminouComMusica = duracaoMusica > 0 && Math.abs(total - duracaoMusica) < 0.5;
 
-  // Legendas vindas de um .srt importado: agora que a duração do vídeo está
-  // fechada, esticam-se para caber. É o "adaptar ao vídeo" — feito aqui porque
-  // só aqui se sabe quanto dura, e antes de desenhar e de gerar o .srt.
-  if (legendasAjustar && listaCues.length && total > 0) {
-    const fim = listaCues[listaCues.length - 1].fim;
-    if (fim > 0) listaCues = escalarCues(listaCues, total / fim);
+  // Legendas externas com tempos finais: aplica-se o ajuste ESCOLHIDO na
+  // página (desvio e factor), e só se o utilizador o pediu. Sem ajuste, os
+  // tempos do .srt ficam como estão — que é o que se quer quando o ficheiro
+  // saiu do próprio projeto.
+  if (legendasAjustar && listaCues.length) {
+    listaCues = ajustarCues(listaCues, { factor: legendasFator, desvio: legendasDesvio });
   }
 
   // 3) começar a gravar

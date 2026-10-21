@@ -423,6 +423,17 @@
                   <input id="input-srt" type="file" accept=".srt,text/plain" hidden />
                 </div>
                 <p class="hint" id="srt-estado" style="margin:4px 0 0" hidden></p>
+                <div class="trilha-linha" id="srt-ajuste" hidden>
+                  <label class="field tiny">
+                    <span>Desvio (s)</span>
+                    <input id="srt-desvio" type="number" step="0.1" value="0" style="width:84px" />
+                  </label>
+                  <label class="field tiny">
+                    <span>Esticar (×)</span>
+                    <input id="srt-fator" type="number" step="0.01" min="0.5" max="2" value="1" style="width:84px" />
+                  </label>
+                  <span class="hint">+ atrasa a legenda; − adianta. Esticar corrige a deriva.</span>
+                </div>
 
                 <!-- Prompts por cena: a base é igual em todas, muda só a acção. -->
                 <dialog class="dlg" id="dlg-prompts">

@@ -71,6 +71,28 @@ export function escalarCues(cues, factor) {
   return cues.map((c) => ({ inicio: c.inicio * f, fim: c.fim * f, texto: c.texto }));
 }
 
+/**
+ * Ajuste completo: primeiro estica (factor), depois desloca (desvio, em
+ * segundos). O desvio corrige um atraso/adiantamento constante — é o que
+ * resolve um .srt feito noutro programa. O factor corrige a deriva (quando o
+ * vídeo ficou mais longo ou mais curto do que a referência).
+ */
+export function ajustarCues(cues, { factor = 1, desvio = 0 } = {}) {
+  const f = Number(factor);
+  const d = Number(desvio);
+  const usaFactor = Number.isFinite(f) && f > 0 && Math.abs(f - 1) >= 0.002;
+  const usaDesvio = Number.isFinite(d) && Math.abs(d) >= 0.01;
+  if (!usaFactor && !usaDesvio) return cues.map((c) => ({ ...c }));
+  return cues
+    .map((c) => ({
+      inicio: c.inicio * (usaFactor ? f : 1) + (usaDesvio ? d : 0),
+      fim: c.fim * (usaFactor ? f : 1) + (usaDesvio ? d : 0),
+      texto: c.texto,
+    }))
+    .filter((c) => c.fim > 0.05)
+    .map((c) => ({ ...c, inicio: Math.max(0, c.inicio) }));
+}
+
 /** Resumo curto para a interface: "23 blocos · 1:58". */
 export function resumoDoSrt(total, blocos) {
   const mm = Math.floor(total / 60);

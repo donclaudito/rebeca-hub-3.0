@@ -110,6 +110,31 @@ function avisarSemSessao() {
   }
 }
 
+// Depois do RLS, ler as entidades exige sessão. Pedir sem ela devolve uma lista
+// vazia e a página fica sem conteúdo nem explicação, quando o que falta é entrar.
+//
+// A chave é a mesma que o shim da Base44 lê (ver urls-assinados.mjs), mas é lida
+// aqui directamente: o módulo dos URLs só é carregado no primeiro pedido de
+// assinatura, e nessa altura já era tarde para decidir se valia a pena pedir.
+// (Foi este o erro da primeira tentativa: `modUrls` ainda era null e a excepção
+// apanhada abaixo desligava o travão em silêncio.)
+const CHAVE_TOKEN = 'base44_access_token';
+
+function semSessao() {
+  try {
+    return !localStorage.getItem(CHAVE_TOKEN);
+  } catch {
+    // Sem acesso ao armazenamento não se decide nada: deixa-se tentar, para não
+    // esconder conteúdo por causa de uma leitura falhada.
+    return false;
+  }
+}
+
+function ehFaltaDeSessao(e) {
+  const estado = Number(e?.status ?? e?.statusCode ?? e?.response?.status ?? NaN);
+  return estado === 401 || estado === 403 || estado === 422;
+}
+
 try {
   if (typeof window !== 'undefined' && window.addEventListener) {
     window.addEventListener('rh-limite-pedidos', avisarLimite);
@@ -785,6 +810,14 @@ async function apagarVideo(p) {
 async function carregar({ jaAssinadas = true } = {}) {
   const btn = $('btn-recarregar');
   if (btn) btn.disabled = true;
+  // Sem sessão as entidades respondem 403 (RLS). Não se pede: explica-se.
+  if (semSessao()) {
+    lista = [];
+    avisarSemSessao();
+    if (btn) btn.disabled = false;
+    desenharLista();
+    return;
+  }
   try {
     const b = await cliente();
     const page = await b.entities.VideoProducao.filter({}, { sort: '-created_date', limit: 50 });
@@ -803,10 +836,15 @@ async function carregar({ jaAssinadas = true } = {}) {
     if (av) av.hidden = true;
   } catch (e) {
     lista = [];
-    const av = $('aviso-painel');
-    if (av) {
-      av.hidden = false;
-      av.textContent = `Não consegui carregar os vídeos: ${e.message}`;
+    if (ehFaltaDeSessao(e)) {
+      // Sessão inválida a meio: o mesmo aviso de "entre na sua conta".
+      avisarSemSessao();
+    } else {
+      const av = $('aviso-painel');
+      if (av) {
+        av.hidden = false;
+        av.textContent = `Não consegui carregar os vídeos: ${e.message}`;
+      }
     }
   } finally {
     if (btn) btn.disabled = false;
@@ -817,6 +855,8 @@ async function carregar({ jaAssinadas = true } = {}) {
 // ---------------------------------------------------------------- links
 // Links cadastrados pelo utilizador: assunto + endereço. Clicar abre a página.
 async function carregarLinks() {
+  // Os links são privados: sem sessão não há o que pedir (RLS responde 403).
+  if (semSessao()) return [];
   const b = await cliente();
   const page = await b.entities.Link.filter({}, { sort: '-created_date', limit: 100 });
   return page.items || [];

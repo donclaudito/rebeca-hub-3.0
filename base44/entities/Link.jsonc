@@ -3,6 +3,10 @@
   "type": "object",
   "description": "Link guardado pelo utilizador no painel: assunto + endere\u00e7o, para abrir r\u00e1pido",
   "properties": {
+    "dono": {
+      "type": "string",
+      "description": "Dono do registo. Os links guardados sem sessão não têm autor, e sem este campo deixariam de aparecer ao dono depois de fechar o acesso anónimo"
+    },
     "assunto": {
       "type": "string",
       "description": "Assunto do link (ex.: Canal do YouTube)"
@@ -15,5 +19,31 @@
   "required": [
     "assunto",
     "url"
-  ]
+  ],
+  "rls": {
+    "create": {
+      "$or": [
+        { "user_condition": { "role": "user" } },
+        { "user_condition": { "role": "admin" } }
+      ]
+    },
+    "read": {
+      "$or": [
+        { "created_by": "{{user.email}}" },
+        { "data.dono": "{{user.email}}" }
+      ]
+    },
+    "update": {
+      "$or": [
+        { "created_by": "{{user.email}}" },
+        { "data.dono": "{{user.email}}" }
+      ]
+    },
+    "delete": {
+      "$or": [
+        { "created_by": "{{user.email}}" },
+        { "data.dono": "{{user.email}}" }
+      ]
+    }
+  }
 }

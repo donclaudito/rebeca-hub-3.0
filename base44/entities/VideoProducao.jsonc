@@ -1,5 +1,9 @@
 {
   "properties": {
+    "dono": {
+      "type": "string",
+      "description": "Dono do registo. Os vídeos gravados sem sessão não têm autor, e sem este campo deixariam de aparecer ao dono depois de fechar o acesso anónimo"
+    },
     "nome": {
       "type": "string",
       "description": "Nome do projeto (ex.: A Borboleta)"
@@ -66,5 +70,31 @@
     "video_uri"
   ],
   "name": "VideoProducao",
-  "type": "object"
+  "type": "object",
+  "rls": {
+    "create": {
+      "$or": [
+        { "user_condition": { "role": "user" } },
+        { "user_condition": { "role": "admin" } }
+      ]
+    },
+    "read": {
+      "$or": [
+        { "created_by": "{{user.email}}" },
+        { "data.dono": "{{user.email}}" }
+      ]
+    },
+    "update": {
+      "$or": [
+        { "created_by": "{{user.email}}" },
+        { "data.dono": "{{user.email}}" }
+      ]
+    },
+    "delete": {
+      "$or": [
+        { "created_by": "{{user.email}}" },
+        { "data.dono": "{{user.email}}" }
+      ]
+    }
+  }
 }

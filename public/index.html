@@ -84,6 +84,29 @@
       </form>
     </dialog>
 
+    <!-- Definir palavra-passe nova (link do email de redefinição) -->
+    <dialog id="dlg-reset" class="dlg">
+      <form id="form-reset" method="dialog" class="dlg-form">
+        <h2>Nova palavra-passe</h2>
+        <p class="hint" style="margin:0 0 10px">
+          Escolha uma palavra-passe nova para a sua conta. Depois entre com ela normalmente.
+        </p>
+        <label class="field">
+          <span>Palavra-passe nova</span>
+          <input id="reset-senha" type="password" autocomplete="new-password" minlength="6" />
+        </label>
+        <label class="field">
+          <span>Repita a palavra-passe</span>
+          <input id="reset-senha2" type="password" autocomplete="new-password" minlength="6" />
+        </label>
+        <div id="reset-erro" class="cfg-result err" hidden></div>
+        <div class="dlg-acoes">
+          <button id="btn-reset-confirmar" class="primary" type="submit">Definir palavra-passe</button>
+          <button id="btn-reset-fechar" class="ghost" type="button">Fechar</button>
+        </div>
+      </form>
+    </dialog>
+
     <!-- Avisos -->
     <div id="aviso" class="aviso" hidden></div>
 

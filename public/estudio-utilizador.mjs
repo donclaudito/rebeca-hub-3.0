@@ -261,6 +261,78 @@ function sairUser() {
     });
 }
 
+// ---------------------------------------------------------- redefinir senha
+// O email de redefinição traz ?token=… (a página React do repositório também lê
+// "token"). Sem isto, o link abria o app sem nada para fazer.
+function tokenDeReset() {
+  try {
+    const p = new URLSearchParams(window.location.search);
+    return p.get('token') || p.get('reset_token') || '';
+  } catch {
+    return '';
+  }
+}
+
+let tokenReset = '';
+
+function erroReset(msg) {
+  const el = $('reset-erro');
+  if (!el) return;
+  el.hidden = !msg;
+  if (msg) el.textContent = msg;
+}
+
+function abrirResetSePedido() {
+  tokenReset = tokenDeReset();
+  if (!tokenReset) return;
+  const d = $('dlg-reset');
+  if (d && typeof d.showModal === 'function') d.showModal();
+}
+
+async function submeterReset(ev) {
+  if (ev && ev.preventDefault) ev.preventDefault();
+  const senha = $('reset-senha').value;
+  const senha2 = $('reset-senha2').value;
+  const btn = $('btn-reset-confirmar');
+
+  if (!senha || senha.length < 6) return erroReset('A palavra-passe precisa de pelo menos 6 caracteres.');
+  if (senha !== senha2) return erroReset('As duas palavras-passe não são iguais.');
+  if (!tokenReset) return erroReset('Este link já não tem o código de redefinição. Peça um novo.');
+
+  btn.disabled = true;
+  erroReset('');
+  btn.textContent = 'a guardar…';
+  try {
+    const base44 = await clienteBase44();
+    await base44.auth.resetPassword({ resetToken: tokenReset, newPassword: senha });
+    const d = $('dlg-reset');
+    if (d && typeof d.close === 'function') d.close();
+    // Tira o token da barra de endereço: já não serve, e não fica no histórico.
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('token');
+      url.searchParams.delete('reset_token');
+      window.history.replaceState({}, '', url.toString());
+    } catch {
+      /* segue */
+    }
+    tokenReset = '';
+    toast('Palavra-passe definida. Entre agora com a nova.', 'ok');
+    abrirDlgUser('entrar');
+  } catch (e) {
+    const corpo = e && e.response ? e.response.data : null;
+    const msg = String((corpo && (corpo.message || corpo.error)) || (e && e.message) || '');
+    if (/expir|invalid|invalid_token/i.test(msg)) {
+      erroReset('Este link expirou ou já foi usado. Peça outro na janela de entrada.');
+    } else {
+      erroReset(msg ? `não consegui guardar a palavra-passe: ${msg}` : 'não consegui guardar a palavra-passe — tente outra vez');
+    }
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Definir palavra-passe';
+  }
+}
+
 function arrancar() {
   $('btn-user-entrar').onclick = () => abrirDlgUser('entrar');
   $('btn-user-sair').onclick = sairUser;
@@ -268,6 +340,15 @@ function arrancar() {
     if (typeof $('dlg-user').close === 'function') $('dlg-user').close();
   };
   $('form-user').addEventListener('submit', submeterUser);
+  const formReset = $('form-reset');
+  if (formReset) formReset.addEventListener('submit', submeterReset);
+  const btnResetFechar = $('btn-reset-fechar');
+  if (btnResetFechar) {
+    btnResetFechar.onclick = () => {
+      const d = $('dlg-reset');
+      if (d && typeof d.close === 'function') d.close();
+    };
+  }
   const linkEsqueci = $('link-user-esqueci');
   if (linkEsqueci) linkEsqueci.onclick = pedirRecuperacao;
   $('link-user-trocar').onclick = (e) => {
@@ -279,4 +360,6 @@ function arrancar() {
   $('btn-user-entrar').hidden = false;
   // Pergunta quem está, mas sem segurar o arranque da app.
   verQuemEsta();
+  // Se o endereço traz o token do email de redefinição, abre já o formulário.
+  abrirResetSePedido();
 }

@@ -49,6 +49,34 @@ let fila = Promise.resolve();
 let ultimoPedidoEm = 0;
 let avisouDoLimite = false;
 
+// Falha de sessão: o pedido de URL assinado EXIGE autenticação. Sem token válido
+// a Base44 devolve 422 (Unprocessable) — status enganoso para um problema de
+// autenticação, mas é o comportamento dela, confirmado com o mesmo pedido e o
+// mesmo corpo: 422 sem Bearer, 200 com Bearer.
+//
+// Sem este estado, cada cartão do Painel tentava a sua assinatura e falhava:
+// 15 cartões davam 15 erros iguais no console e nenhuma explicação na tela.
+const FALHA_DE_SESSAO = /40[13]|422|unauthorized|forbidden|unprocessable/i;
+let sessaoFalhou = false;
+let avisouDaSessao = false;
+
+/** Verdadeiro depois de uma falha de sessão: pára de pedir até recarregar. */
+export function sessaoInvalida() {
+  return sessaoFalhou;
+}
+
+function avisarSessao() {
+  if (avisouDaSessao) return;
+  avisouDaSessao = true;
+  try {
+    if (typeof window !== 'undefined' && window.dispatchEvent) {
+      window.dispatchEvent(new Event('rh-sessao-invalida'));
+    }
+  } catch {
+    /* sem janela (testes) */
+  }
+}
+
 // Avisa a página de que a Base44 está a limitar pedidos (o Painel mostra o
 // aviso). Uma vez por carregamento.
 function avisarLimite() {
@@ -90,6 +118,11 @@ export async function assinar(uri, expira = 24 * 60 * 60, opts = {}) {
     return guardado && guardado.url ? guardado.url : '';
   }
 
+  // Sessão já falhou: não vale a pena insistir. Devolver vazio é o que os
+  // chamadores já tratam (ficam com o ícone em vez da miniatura) e evita
+  // multiplicar pedidos condenados.
+  if (sessaoFalhou) return '';
+
   const meu = fila.then(() => pedirComRecuo(pedir, uri, expira, chave));
   // A fila segue mesmo que este pedido falhe (senão ficava tudo parado).
   fila = meu.then(
@@ -117,7 +150,19 @@ async function pedirComRecuo(pedir, uri, expira, chave) {
     } catch (e) {
       const msg = String((e && e.message) || e);
       const limitado = /429|too many requests|rate limit/i.test(msg);
-      if (!limitado) throw e;
+      if (!limitado) {
+        // Falha de sessão é terminal: marca e avisa uma única vez. Qualquer
+        // outro erro segue o caminho de sempre.
+        if (FALHA_DE_SESSAO.test(msg)) {
+          sessaoFalhou = true;
+          avisarSessao();
+          throw new Error(
+            'não consegui abrir os ficheiros privados: a sessão parece ter expirado. ' +
+              'Entre novamente na sua conta e recarregue a página.',
+          );
+        }
+        throw e;
+      }
       if (tentativa === TENTATIVAS - 1) {
         avisarLimite();
         throw new Error('a Base44 está a limitar pedidos de ficheiros (429) — aguarde um minuto');

@@ -88,9 +88,21 @@ function avisarLimite() {
   }
 }
 
+// O módulo avisa quando a assinatura de ficheiros falha por sessão: sem token
+// válido a Base44 responde 422, e TODAS as miniaturas falhavam em silêncio.
+function avisarSessao() {
+  const av = $('aviso-painel');
+  if (av) {
+    av.hidden = false;
+    av.textContent =
+      'A sua sessão expirou: os vídeos e miniaturas são privados e não podem ser abertos sem entrar novamente. Entre na sua conta e recarregue a página — o conteúdo está guardado.';
+  }
+}
+
 try {
   if (typeof window !== 'undefined' && window.addEventListener) {
     window.addEventListener('rh-limite-pedidos', avisarLimite);
+    window.addEventListener('rh-sessao-invalida', avisarSessao);
   }
 } catch {
   /* sem janela (testes) */

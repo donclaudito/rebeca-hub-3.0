@@ -17,6 +17,7 @@ import { blocoAtivo, legendasDasCenas, legendasParaSrt, ressincronizarPelaVoz } 
 import { erroNosTempos } from './legendas-tempos.mjs';
 import { calcularRecorte, caixaUtil, janelaVisivel } from './enquadramento.mjs';
 import { criarGestorAgua } from './efeito-agua.mjs';
+import { escalarCues } from './srt.mjs';
 
 // Versão do motor. Aparece no resumo da página: serve para saber, sem dúvidas,
 // qual build está a correr no browser (um build antigo em cache foi uma das
@@ -560,6 +561,9 @@ export async function gerarVideo({
   // Legendas já prontas (a letra da música, distribuída pelo tempo). Quando vêm,
   // substituem as legendas tiradas da narração: as duas juntas enchiam o ecrã.
   legendasExternas = null,
+  // As legendas externas foram importadas de um .srt? Então esticam-se para
+  // caber na duração REAL do vídeo — que só aqui se conhece.
+  legendasAjustar = false,
   // Os tempos acima vêm do RASCUNHO da página (não confirmados)? Então o motor
   // re-temporiza os versos ao canto REAL da faixa que vai gravar. Tempos
   // conferidos ou alinhados palavra a palavra NUNCA são alterados.
@@ -966,8 +970,7 @@ export async function gerarVideo({
     listaCues = legendasDasCenas(ciclos.map((c) => c._texto || ''), durFinal, inicios);
   }
   if (listaCues.length) {
-    try {
-      const mod = await import('./legendas.mjs');
+    try {      const mod = await import('./legendas.mjs');
       await mod.carregarFontesLegenda();
       desenharLegenda = (ctxDestino, texto, largura, altura) =>
         mod.desenharLegenda(ctxDestino, texto, largura, altura, { cor: mod.CAPT_COR, contorno: mod.CAPT_CONTORNO });
@@ -999,6 +1002,14 @@ export async function gerarVideo({
   }
   // Com trilha, o vídeo acaba NO INSTANTE em que a música acaba — nunca antes.
   const terminouComMusica = duracaoMusica > 0 && Math.abs(total - duracaoMusica) < 0.5;
+
+  // Legendas vindas de um .srt importado: agora que a duração do vídeo está
+  // fechada, esticam-se para caber. É o "adaptar ao vídeo" — feito aqui porque
+  // só aqui se sabe quanto dura, e antes de desenhar e de gerar o .srt.
+  if (legendasAjustar && listaCues.length && total > 0) {
+    const fim = listaCues[listaCues.length - 1].fim;
+    if (fim > 0) listaCues = escalarCues(listaCues, total / fim);
+  }
 
   // 3) começar a gravar
   const fluxoVideo = canvas.captureStream(fps);

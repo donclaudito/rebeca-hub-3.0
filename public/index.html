@@ -418,7 +418,11 @@
                   <button id="btn-video-painel" class="ghost small" type="button" hidden>📺 Ver no painel</button>
                   <button id="btn-video-guardar" class="ghost small" type="button">⬇️ Descarregar outra vez</button>
                   <button id="btn-video-guardar-srt" class="ghost small" type="button">⬇️ Guardar o .srt</button>
+                  <button id="btn-srt-importar" class="ghost small" type="button" title="usa um .srt feito fora como legendas do vídeo, esticado à duração real">📥 Importar .srt</button>
+                  <button id="btn-srt-limpar" class="ghost small" type="button" hidden>✕ Remover .srt</button>
+                  <input id="input-srt" type="file" accept=".srt,text/plain" hidden />
                 </div>
+                <p class="hint" id="srt-estado" style="margin:4px 0 0" hidden></p>
 
                 <!-- Prompts por cena: a base é igual em todas, muda só a acção. -->
                 <dialog class="dlg" id="dlg-prompts">
@@ -436,6 +440,7 @@
                     <div id="prompts-lista"></div>
                     <div class="dlg-acoes">
                       <button class="primary" type="button" id="btn-prompts-copiar">📋 Copiar todas</button>
+                      <button class="ghost" type="button" id="btn-prompts-idioma">🇬🇧 English</button>
                       <button class="ghost" type="button" id="btn-prompts-fechar">Fechar</button>
                     </div>
                   </form>

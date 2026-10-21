@@ -31,8 +31,11 @@ export async function gerarVideoFinal() {
   const semFala = comTexto.filter((s) => !s.audioUrl && !s.previaUrl);
   const musica = state.musicaFicheiro && querMusica() && state.musicaLigada ? state.musicaFicheiro : null;
 
+  // Um .srt importado manda sobre a letra: são tempos finais, feitos fora.
+  const srtImportado =
+    Array.isArray(state.srtImportado?.cues) && state.srtImportado.cues.length ? state.srtImportado : null;
   // A letra, se estiver em uso, é calculada uma vez e reutilizada.
-  const cuesLetra = state.letraLigada ? cuesDaLetra() : [];
+  const cuesLetra = srtImportado ? srtImportado.cues : state.letraLigada ? cuesDaLetra() : [];
 
   // Com a letra em uso e SEM narração gerada, o vídeo é de letra: vale o mesmo
   // que o modo "só música" — uma imagem por vez, ao ritmo escolhido.
@@ -163,9 +166,12 @@ export async function gerarVideoFinal() {
       // Com a letra em uso, as legendas ficam ligadas (ela substitui a narração).
       legendas: comLegendas,
       legendasExternas: cuesLetra.length ? cuesLetra : null,
+      // Um .srt importado tem tempos finais e é esticado à duração do vídeo;
+      // a letra da música é que pode vir de rascunho e ser ressincronizada.
+      legendasAjustar: Boolean(srtImportado),
       // Rascunho (sem tempos confirmados nem alinhados)? O motor re-temporiza
       // os versos ao canto real da faixa, no momento exato da voz.
-      legendasRascunho: cuesLetra.length > 0 && !state.legendasLetra,
+      legendasRascunho: !srtImportado && cuesLetra.length > 0 && !state.legendasLetra,
       codec: state.codec,
       modoDuracao: state.modoDuracao,
       musicaSegundos: state.musicaSegundos,

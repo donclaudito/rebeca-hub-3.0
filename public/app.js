@@ -1959,6 +1959,64 @@ async function iniciarVideo() {
     resumoVideo();
   }
 
+  // Importar um .srt: as legendas do vídeo passam a ser as do ficheiro. Os
+  // tempos são esticados à duração REAL na hora de gravar (video.mjs), porque
+  // antes disso ainda não se sabe quanto dura o vídeo.
+  const estadoSrt = () => {
+    const linha = $('srt-estado');
+    const limpar = $('btn-srt-limpar');
+    const imp = state.srtImportado;
+    if (linha) {
+      linha.hidden = !imp;
+      if (imp) {
+        const mm = Math.floor(imp.total / 60);
+        const ss = Math.round(imp.total % 60);
+        linha.textContent = `Legendas importadas de ${imp.nome}: ${imp.cues.length} bloco(s), ${mm}:${String(ss).padStart(2, '0')}. São esticadas à duração do vídeo.`;
+      }
+    }
+    if (limpar) limpar.hidden = !imp;
+  };
+  estadoSrt();
+
+  const inputSrt = $('input-srt');
+  if (inputSrt) {
+    inputSrt.onchange = async () => {
+      const f = inputSrt.files && inputSrt.files[0];
+      if (!f) return;
+      try {
+        const modSrt = await import('./srt.mjs');
+        const { cues, total, problemas } = modSrt.lerSrt(await f.text());
+        if (!cues.length) {
+          toast('Não encontrei blocos de legenda nesse .srt.', 'err');
+          return;
+        }
+        state.srtImportado = { nome: f.name, cues, total };
+        guardar();
+        estadoSrt();
+        toast(
+          `Legendas importadas: ${cues.length} bloco(s), ${total.toFixed(1)}s` +
+            (problemas.length ? ` — ${problemas.length} bloco(s) ignorado(s)` : ''),
+          'ok',
+        );
+      } catch (e) {
+        toast(`Não consegui ler o .srt: ${e.message}`, 'err');
+      } finally {
+        inputSrt.value = '';
+      }
+    };
+  }
+  const btnImportar = $('btn-srt-importar');
+  if (btnImportar) btnImportar.onclick = () => inputSrt?.click();
+  const btnLimparSrt = $('btn-srt-limpar');
+  if (btnLimparSrt) {
+    btnLimparSrt.onclick = () => {
+      state.srtImportado = null;
+      guardar();
+      estadoSrt();
+      toast('Legendas importadas removidas — volta a valer o texto das cenas.', 'ok');
+    };
+  }
+
   $('btn-video').onclick = gerarVideoFinal;
   $('btn-video-parar').onclick = () => {
     state.pararVideo = true;

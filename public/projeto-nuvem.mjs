@@ -84,7 +84,7 @@ export async function guardarProjetoNuvem(dados, idNuvem) {
 }
 
 // Lê um projeto da nuvem e TRAZ os ficheiros: cada imagem e cada áudio volta
-// como Blob, na mesma forma que o histórico local usa — o estúdio não sabe
+// como Blob, na mesma forma que o histórico local usa; o estúdio não sabe
 // a diferença.
 export async function lerProjetoNuvem(id) {
   // IDs da nuvem têm 24 caracteres hexadecimais. UUIDs (projetos só-deste-

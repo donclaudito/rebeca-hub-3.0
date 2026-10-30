@@ -2303,6 +2303,13 @@ async function guardarNaNuvem() {
     btn.textContent = '☁️ Guardado ✓';
     estadoVideo('✅ Guardado na nuvem — está no 📺 Painel de vídeos prontos.', 'ok');
     toast('Vídeo guardado na nuvem. Está no 📺 Painel.', 'ok');
+    // O Painel recarrega JÁ (sem esperar os 30 s): senão o cartão novo não
+    // aparecia e parecia que o guardar não tinha funcionado.
+    try {
+      window.dispatchEvent(new Event('rh-video-guardado'));
+    } catch {
+      /* sem janela (testes) */
+    }
   } catch (e) {
     estadoVideo(`❌ Não consegui guardar na nuvem: ${e.message}`, 'err');
     toast(`Não consegui guardar na nuvem: ${e.message}`, 'err');

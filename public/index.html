@@ -636,6 +636,15 @@
           <p>Gere um vídeo no estúdio e clique em <b>☁️ Guardar na nuvem</b> — ele aparece aqui.</p>
           <p style="margin-top:14px"><button id="btn-ir-estudio-vazio" class="primary" type="button">🎙️ Abrir o estúdio</button></p>
         </section>
+
+        <!-- Projetos guardados na nuvem que ainda NÃO têm vídeo. Sem esta lista,
+             quem guardava o projeto com "☁️ Guardar na nuvem" ia ao Painel e não
+             encontrava nada (o Painel só mostrava vídeos). -->
+        <section id="painel-nuvem" class="painel-nuvem" hidden>
+          <h2>📁 Projetos guardados na nuvem</h2>
+          <p class="hint">Ainda não têm vídeo. Abra um no estúdio para continuar de onde ficou, ou gere o vídeo e guarde-o aqui.</p>
+          <ul id="painel-nuvem-lista" class="nuvem-lista"></ul>
+        </section>
       </div>
     </section>
 

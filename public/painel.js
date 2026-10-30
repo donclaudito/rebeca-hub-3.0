@@ -531,6 +531,73 @@ function desenharLista() {
   if (vazio) vazio.hidden = lista.length > 0;
   for (const p of lista) grade.append(cartao(p));
   desenharResumo();
+  desenharProjetosNuvem();
+}
+
+// ------------------------------------------------- projetos só na nuvem
+// O Painel mostra VÍDEOS. Um projeto guardado com "☁️ Guardar na nuvem" e sem
+// vídeo ainda não aparecia em lado nenhum: quem o guardava ia ao Painel e não
+// encontrava nada (foi um "guardei na nuvem e não apareceu"). Aqui os projetos
+// da nuvem que ainda não têm vídeo aparecem numa lista própria, com o botão de
+// abrir no estúdio. Os que já têm cartão de vídeo ficam de fora (não se
+// duplicam).
+let projetosNuvem = [];
+
+// Só os cabeçalhos dos projetos da nuvem (nada de descer ficheiros). O Painel
+// faz este pedido ele mesmo, com o cliente que já tem: assim não depende de
+// outro módulo só para listar.
+async function carregarProjetosNuvem() {
+  if (semSessao()) return [];
+  try {
+    const b = await cliente();
+    const page = await b.entities.Projeto.filter({}, { sort: '-updated_date', limit: 60 });
+    return (page?.items || []).map((p) => {
+      let cenas = 0;
+      try {
+        const valor = typeof p.cenas === 'string' ? JSON.parse(p.cenas || '[]') : p.cenas;
+        cenas = Array.isArray(valor) ? valor.length : 0;
+      } catch {
+        cenas = 0;
+      }
+      return {
+        id: String(p.id || ''),
+        nome: String(p.nome || '').trim() || 'Projeto sem nome',
+        quando: p.updated_date || p.created_date || '',
+        cenas,
+      };
+    });
+  } catch {
+    // Sem a lista, o Painel continua a funcionar só com os vídeos.
+    return [];
+  }
+}
+
+function desenharProjetosNuvem() {
+  const caixa = $('painel-nuvem');
+  const ul = $('painel-nuvem-lista');
+  if (!caixa || !ul) return;
+  const comVideo = new Set(lista.map((v) => String(v.projetoId || '')).filter(Boolean));
+  const semVideo = projetosNuvem.filter((p) => p.id && !comVideo.has(String(p.id)));
+  ul.innerHTML = '';
+  caixa.hidden = semVideo.length === 0;
+  if (!semVideo.length) return;
+  for (const p of semVideo) {
+    const li = document.createElement('li');
+    li.className = 'nuvem-item';
+    const nome = document.createElement('b');
+    nome.textContent = p.nome;
+    const meta = document.createElement('span');
+    const quantas = p.cenas ? ` · ${p.cenas} cena(s)` : '';
+    const quando = p.quando ? ` · guardado ${quandoFoi(p.quando)}` : '';
+    meta.textContent = `projeto na nuvem, ainda sem vídeo${quantas}${quando}`;
+    const abrir = document.createElement('button');
+    abrir.type = 'button';
+    abrir.className = 'ghost small';
+    abrir.textContent = '✏️ Abrir no estúdio';
+    abrir.onclick = () => reeditar({ nome: p.nome, projetoId: p.id });
+    li.append(nome, meta, abrir);
+    ul.append(li);
+  }
 }
 
 // ---------------------------------------------------------------- detalhes
@@ -848,6 +915,7 @@ async function carregar({ jaAssinadas = true } = {}) {
   // Sem sessão as entidades respondem 403 (RLS). Não se pede: explica-se.
   if (semSessao()) {
     lista = [];
+    projetosNuvem = [];
     avisarSemSessao();
     if (btn) btn.disabled = false;
     desenharLista();
@@ -884,6 +952,9 @@ async function carregar({ jaAssinadas = true } = {}) {
   } finally {
     if (btn) btn.disabled = false;
   }
+  // Os projetos guardados na nuvem também se leem (é uma só lista de
+  // cabeçalhos): assim um projeto guardado sem vídeo aparece no Painel.
+  projetosNuvem = await carregarProjetosNuvem();
   desenharLista();
 }
 
@@ -1106,6 +1177,15 @@ if (typeof window !== 'undefined') {
     carregar({ jaAssinadas: true });
   };
   window.addEventListener('rh-vista', renovarSePreciso);
+  // Guardar algo na nuvem (projeto ou vídeo) avisa o Painel: a lista é
+  // recarregada JÁ, sem esperar os 30 s. Era por causa dessa espera que um
+  // vídeo/projeto acabado de guardar "não aparecia".
+  const forcarAtualizacao = () => {
+    ultimaAtualizacao = Date.now();
+    carregar({ jaAssinadas: false });
+  };
+  window.addEventListener('rh-guardado-na-nuvem', forcarAtualizacao);
+  window.addEventListener('rh-video-guardado', forcarAtualizacao);
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') renovarSePreciso();
   });

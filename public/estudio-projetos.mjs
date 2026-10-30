@@ -250,6 +250,16 @@ export async function guardarProjetoAgora(opcoes = {}) {
   }
 }
 
+// Diz ao Painel que há um projeto novo na nuvem. Sem isto a lista do Painel só
+// se renovava de 30 em 30 s e o projeto que se acabou de guardar não aparecia.
+export function avisarPainel() {
+  try {
+    window.dispatchEvent(new Event('rh-guardado-na-nuvem'));
+  } catch {
+    /* sem janela (testes) */
+  }
+}
+
 // ☁️ Guardar o projeto NA NUVEM (na app): sobe as imagens e o áudio para o
 // armazenamento privado e cria/atualiza o registo. Um projeto na nuvem abre
 // em qualquer computador — é o que o botão "✏️ Reeditar projeto" do Painel
@@ -272,6 +282,8 @@ export async function guardarProjetoNaNuvem() {
   projetos.idAtual = dados.id;
   projetos.criadoEm = dados.criadoEm;
   projetos.nomeAtual = dados.nome;
+  // O Painel tem de saber AGORA que há um projeto novo na nuvem.
+  avisarPainel();
   return projetos.nuvemId;
 }
 
@@ -282,8 +294,12 @@ export async function guardarNuvemAgora() {
   estadoProjeto('a guardar na nuvem… (sobe as imagens e o áudio, pode demorar)');
   try {
     const id = await guardarProjetoNaNuvem();
-    estadoProjeto(`Projeto "${$('projeto-nome').value}" guardado na nuvem ✓ — abre em qualquer computador.`, 'ok');
-    toast('Projeto guardado na nuvem.', 'ok');
+    estadoProjeto(
+      `Projeto "${$('projeto-nome').value}" guardado na nuvem ✓ — abre em qualquer computador. ` +
+        'Aparece no 📺 Painel, em "📁 Projetos guardados na nuvem".',
+      'ok',
+    );
+    toast('Projeto guardado na nuvem. Está no 📺 Painel, em "Projetos guardados na nuvem".', 'ok');
     await desenharProjetos();
   } catch (e) {
     estadoProjeto(`❌ ${e.message}`, 'err');

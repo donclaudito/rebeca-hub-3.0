@@ -285,6 +285,9 @@ export async function gerarVideoFinal() {
             ? `ℹ️ Não repeti as imagens${r.semCiclo ? `: ${r.semCiclo}` : ''}.`
             : ''} ` +
         `${r.intro ? `🎬 Introdução de ${Math.round(r.intro)}s no começo. ` : ''}` +
+        `${r.tempoExtra > 0.2
+          ? `🎵 A música acabou junto com o vídeo: a última imagem ficou mais ${Math.round(r.tempoExtra)}s para a trilha não ser cortada. `
+          : ''}` +
         `${r.legendas ? `${r.legendas} bloco(s) de legenda${r.legendasDaLetra ? ' (da letra)' : ''}. ` : ''}` +
         `Descarregado como ${nome}${r.srt ? ' e rebeca-video.srt' : ''}.` +
         `${r.musicaAviso ? ` ⚠️ ${r.musicaAviso}` : ''} (motor v${r.versao})` +

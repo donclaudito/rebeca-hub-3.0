@@ -22,7 +22,7 @@ import { ajustarCues } from './srt.mjs';
 // Versão do motor. Aparece no resumo da página: serve para saber, sem dúvidas,
 // qual build está a correr no browser (um build antigo em cache foi uma das
 // causas de "não funcionou" que já apanhei).
-export const VERSAO_VIDEO = '3.9.11';
+export const VERSAO_VIDEO = '3.9.12';
 
 // Duração do FECHO: nos últimos segundos do vídeo (quando há trilha), a música
 // esmaece até ao silêncio e a imagem apaga suavemente para preto.
@@ -1070,11 +1070,15 @@ export async function gerarVideo({
   // música chegar ao fim. Só então o vídeo acaba. As legendas foram calculadas
   // ANTES deste acréscimo, de propósito: os blocos da narração ficam no tempo
   // da fala real, sem se esticarem pelo tempo extra de silêncio.
-  // Tempo FIXO no epílogo manda: não se estica a última cena para a música
-  // acabar junto — a trilha, em ciclo, é parada exatamente no fim do vídeo.
-  const epilogoFixo = comEpilogo && durEpEscolhida > 0;
+  //
+  // SEM EXCEÇÕES. Antes havia uma para o epílogo de tempo ESCOLHIDO ("com tempo
+  // fixo, a música é parada no fim do vídeo"), e era ela que fazia o vídeo
+  // acabar antes da música: a conta do ciclo arredondava para baixo e o resto
+  // da trilha ficava de fora — até uma passagem inteira de imagens (31s num
+  // caso de 100s, sem qualquer aviso). O chip "Até acabar a música" promete o
+  // contrário: o vídeo cobre a música toda e é a última imagem que se estica.
   let acrescentoFim = 0;
-  if (duracaoMusica > 0 && total < duracaoMusica && !epilogoFixo) {
+  if (duracaoMusica > 0 && total < duracaoMusica) {
     acrescentoFim = duracaoMusica - total;
     durFinal[durFinal.length - 1] += acrescentoFim;
     inicios.length = 0;

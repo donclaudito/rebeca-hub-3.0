@@ -1155,5 +1155,64 @@ console.log('\n[26] Por omissão a imagem aparece INTEIRA (sem corte nem zoom)')
   check(comFundo > 0, `há fundo desfocado por baixo (${daImagem.length} desenhos em ${comFundo} instantes)`, String(comFundo));
 }
 
+console.log('\n[27] "Até acabar a música": o vídeo NUNCA acaba antes da trilha');
+{
+  // O utilizador: "parece não funcionar, o vídeo acaba antes da música".
+  // Com epílogo de TEMPO FIXO a conta do ciclo era arredondada para baixo e o
+  // resto da música ficava de fora — até uma passagem inteira de imagens. O
+  // chip promete o contrário: o vídeo cobre a música toda.
+  const cinco = () =>
+    Array.from({ length: 5 }, (_, i) => ({ imagem: `c${i + 1}`, audio: null, semFala: true, texto: '' }));
+  const musica = { name: 'tema.mp3', arrayBuffer: () => Promise.resolve(new ArrayBuffer(64)) };
+
+  // (a) epílogo com tempo ESCOLHIDO (5s) e música de 100s.
+  // 5 imagens de 8s = 40s por passagem; a conta antiga dava 2 passagens (80s)
+  // + 5s de epílogo = 85s → 15s de música cortados sem qualquer aviso.
+  instalarAmbiente([], { musicaSegundos: 100 });
+  const a = await correrCom(
+    mod.gerarVideo({
+      cenas: cinco(), transicao: 'fade', duracaoTransicao: 0.4, duracaoCena: 8,
+      musica, modoDuracao: 'trilha', musicaSegundos: 100,
+      orientacao: 'narrativa', cenaFinal: 4, duracaoEpilogo: 5,
+    }),
+    200000,
+  );
+  check(a.ok === true, 'gera com epílogo de tempo fixo', JSON.stringify(a).slice(0, 120));
+  check(a.duracao >= 99.5, `o vídeo chega aos 100s da música (${a.duracao.toFixed(1)}s)`, `${a.duracao.toFixed(1)}s — ficou ${(100 - a.duracao).toFixed(1)}s de música de fora`);
+  check(a.terminouComMusica === true, 'a música acaba junto com o vídeo', `terminouComMusica=${a.terminouComMusica}`);
+  check(a.tempoExtra > 0, `diz quanto tempo a última imagem ficou a mais (${a.tempoExtra.toFixed(1)}s)`, String(a.tempoExtra));
+  check(a.epilogo >= 5, `o epílogo fica com os 5s escolhidos e o resto (${a.epilogo.toFixed(1)}s)`, `${a.epilogo}`);
+  // O último fotograma acontece mesmo no fim da música (não a meio).
+  const ultimoT = desenhos.at(-1)?.t ?? 0;
+  check(ultimoT >= a.duracao - 0.6, `desenha até ao fim (${ultimoT.toFixed(1)}s de ${a.duracao.toFixed(1)}s)`, `parou em ${ultimoT.toFixed(1)}s`);
+
+  // (b) epílogo automático: a mesma garantia.
+  instalarAmbiente([], { musicaSegundos: 100 });
+  const b = await correrCom(
+    mod.gerarVideo({
+      cenas: cinco(), transicao: 'fade', duracaoTransicao: 0.4, duracaoCena: 8,
+      musica, modoDuracao: 'trilha', musicaSegundos: 100, orientacao: 'narrativa', cenaFinal: 4,
+    }),
+    200000,
+  );
+  check(b.ok === true && b.duracao >= 99.5, `epílogo automático também cobre a música (${b.duracao.toFixed(1)}s)`, `${b.duracao}`);
+
+  // (c) música CURTA: não se estica nada e o epílogo escolhido respeita-se.
+  instalarAmbiente([], { musicaSegundos: 20 });
+  const c = await correrCom(
+    mod.gerarVideo({
+      cenas: cinco(), transicao: 'fade', duracaoTransicao: 0.4, duracaoCena: 8,
+      musica, modoDuracao: 'trilha', musicaSegundos: 20,
+      orientacao: 'narrativa', cenaFinal: 4, duracaoEpilogo: 5,
+    }),
+    200000,
+  );
+  check(c.ok === true, 'música curta: gera na mesma', JSON.stringify(c).slice(0, 100));
+  // 4 imagens de 8s no ciclo (a do epílogo sai dele) + 5s de epílogo.
+  check(c.duracao >= 36 && c.duracao <= 38, `as imagens mandam (${c.duracao.toFixed(1)}s = 32 + 5 de epílogo)`, `${c.duracao}`);
+  check(Math.abs(c.epilogo - 5) < 0.5, `o epílogo escolhido mantém-se (${c.epilogo.toFixed(1)}s)`, `${c.epilogo}`);
+  check(c.tempoExtra === 0, 'sem tempo extra inventado', String(c.tempoExtra));
+}
+
 console.log(falhas.length ? `\n=== ${falhas.length} FALHA(S) ===` : '\n=== GERAÇÃO DE VÍDEO OK ===');
 process.exit(falhas.length ? 1 : 0);

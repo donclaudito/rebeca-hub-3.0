@@ -994,7 +994,7 @@ console.log('\n[24] Enquadramento: o assunto deslocado fica no meio');
     const el = original(t);
     return t === 'canvas' ? comPixels(el) : el;
   };
-  const r = await correrCom(mod.gerarVideo({ cenas: cena, formato: '720x1280', duracaoCena: 2, enquadramento: 'personagem' }));
+  const r = await correrCom(mod.gerarVideo({ cenas: cena, formato: '720x1280', duracaoCena: 2, enquadramento: 'personagem', modoImagem: 'preencher' }));
   globalThis.document.createElement = original;
   check(r.ok === true, 'gera com o enquadramento inteligente', JSON.stringify(r).slice(0, 120));
 
@@ -1009,7 +1009,7 @@ console.log('\n[24] Enquadramento: o assunto deslocado fica no meio');
     const el = original(t);
     return t === 'canvas' ? comPixels(el) : el;
   };
-  const r2 = await correrCom(mod.gerarVideo({ cenas: cena, formato: '720x1280', duracaoCena: 2, enquadramento: 'centro' }));
+  const r2 = await correrCom(mod.gerarVideo({ cenas: cena, formato: '720x1280', duracaoCena: 2, enquadramento: 'centro', modoImagem: 'preencher' }));
   globalThis.document.createElement = original;
   check(r2.ok === true, 'gera com o recorte centrado', JSON.stringify(r2).slice(0, 100));
   const dxCentrado = desenhos.find((d) => d.img === 'c1')?.dx;
@@ -1066,7 +1066,7 @@ console.log('\n[25] Transições usam o MESMO enquadramento (sem salto nem fanta
     return t === 'canvas' ? comPixels(el) : el;
   };
   const r = await correrCom(mod.gerarVideo({
-    cenas, formato: '1280x720', transicao: 'fade', duracaoTransicao: 0.6, duracaoCena: 2, enquadramento: 'personagem',
+    cenas, formato: '1280x720', transicao: 'fade', duracaoTransicao: 0.6, duracaoCena: 2, enquadramento: 'personagem', modoImagem: 'preencher',
   }));
   globalThis.document.createElement = original;
   check(r.ok === true, 'gera com transição', JSON.stringify(r).slice(0, 120));
@@ -1089,6 +1089,70 @@ console.log('\n[25] Transições usam o MESMO enquadramento (sem salto nem fanta
   const folga = cabecaNoVideo / 720;
   check(folga > 0.04 && folga < 0.16, `a cabeça começa a ${(folga * 100).toFixed(1)}% do topo (folga de cabeça)`, `a cabeça começa a ${(folga * 100).toFixed(1)}% do topo`);
   check(cabecaNoVideo > 0, `a cabeça está DENTRO do vídeo (y=${cabecaNoVideo.toFixed(0)} px)`, `a cabeça ficou fora do vídeo (y=${cabecaNoVideo.toFixed(0)} px)`);
+}
+
+console.log('\n[26] Por omissão a imagem aparece INTEIRA (sem corte nem zoom)');
+{
+  // O utilizador: "as imagens saem recortadas, não como foram escolhidas — você
+  // está a reenquadrar com zoom". Numa imagem quadrada em 16:9, cobrir cortava
+  // ~44% da altura. Agora a imagem toda fica no quadro, sobre um fundo desfocado
+  // dela própria.
+  const l = 160, a = 160;
+  const pixels = new Uint8ClampedArray(l * a * 4);
+  for (let i = 0; i < l * a; i++) {
+    pixels[i * 4] = 200; pixels[i * 4 + 1] = 220; pixels[i * 4 + 2] = 240; pixels[i * 4 + 3] = 255;
+  }
+  for (let y = 0; y < 120; y++) {
+    for (let x = 40; x < 120; x++) {
+      const q = (Math.floor(x / 2) + Math.floor(y / 2)) % 2;
+      const i = y * l + x;
+      const v = q ? 20 : 240;
+      pixels[i * 4] = v; pixels[i * 4 + 1] = v; pixels[i * 4 + 2] = v;
+    }
+  }
+  const comPixels = (el) => {
+    el.getContext = () => {
+      const g = new Ctx2D();
+      g.getImageData = () => ({ data: pixels, width: l, height: a });
+      return g;
+    };
+    return el;
+  };
+
+  instalarAmbiente([], { musicaSegundos: 4 });
+  const original = globalThis.document.createElement;
+  globalThis.document.createElement = (t) => {
+    const el = original(t);
+    return t === 'canvas' ? comPixels(el) : el;
+  };
+  // SEM `modoImagem`: é o padrão que está a ser testado.
+  const r = await correrCom(
+    mod.gerarVideo({ cenas: [{ imagem: 'cI', audio: null, semFala: true, texto: '' }], formato: '1280x720', duracaoCena: 2 }),
+  );
+  globalThis.document.createElement = original;
+  check(r.ok === true, 'gera com o modo de imagem por omissão', JSON.stringify(r).slice(0, 100));
+
+  const daImagem = desenhos.filter((d) => d.img === 'cI' && d.escala * 1000 >= 300);
+  check(daImagem.length >= 2, `${daImagem.length} desenhos (fundo + imagem)`, String(daImagem.length));
+
+  // O ÚLTIMO desenho de cada instante é a imagem (o primeiro é o fundo).
+  const porInstante = new Map();
+  for (const d of daImagem) porInstante.set(d.t.toFixed(3), d);
+  const finais = [...porInstante.values()];
+  const ultimo = finais[finais.length - 1];
+  const lado = ultimo.escala * 1000; // imagem quadrada: w = h = lado
+  const fora = finais.filter((d) => {
+    const w = d.escala * 1000;
+    const x = d.dx;
+    const y = typeof d.dy === 'number' ? d.dy : 0;
+    return x < -1 || y < -1 || x + w > 1281 || y + w > 721;
+  });
+  check(fora.length === 0, `a imagem cabe toda no quadro em ${finais.length} instantes`, `${fora.length} instantes com a imagem a sair do quadro`);
+  // Quadrada em 16:9: cabe pela altura → 720×720, centrada (x = 280).
+  check(Math.abs(lado - 720) <= 2, `a imagem fica com 720 px de lado (${Math.round(lado)}) — toda, sem zoom`, String(Math.round(lado)));
+  check(Math.abs(ultimo.dx - 280) <= 2, `e centrada horizontalmente (x=${Math.round(ultimo.dx)})`, String(Math.round(ultimo.dx)));
+  const comFundo = [...porInstante.keys()].length;
+  check(comFundo > 0, `há fundo desfocado por baixo (${daImagem.length} desenhos em ${comFundo} instantes)`, String(comFundo));
 }
 
 console.log(falhas.length ? `\n=== ${falhas.length} FALHA(S) ===` : '\n=== GERAÇÃO DE VÍDEO OK ===');

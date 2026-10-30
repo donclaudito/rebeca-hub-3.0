@@ -48,6 +48,9 @@ const store = {};
 globalThis.localStorage = { getItem: (k) => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = String(v); }, removeItem: (k) => { delete store[k]; } };
 const sessao = {};
 globalThis.sessionStorage = { getItem: (k) => (k in sessao ? sessao[k] : null), setItem: (k, v) => { sessao[k] = String(v); }, removeItem: (k) => { delete sessao[k]; } };
+// Sem o token da sessão o Painel nem pede os vídeos (é o comportamento certo
+// desde o arranjo do 401): o teste tem de se passar por quem entrou.
+globalThis.localStorage.setItem('base44_access_token', 'token-de-teste');
 globalThis.location = { pathname: '/', search: '', hash: '' };
 globalThis.history = { replaceState: () => {} };
 globalThis.document = {

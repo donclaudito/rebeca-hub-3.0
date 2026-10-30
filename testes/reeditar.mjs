@@ -80,6 +80,9 @@ function criarIndexedDBFalso() {
 
 const store = {};
 globalThis.localStorage = { getItem: (k) => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = String(v); }, removeItem: (k) => { delete store[k]; } };
+// A app só pede os vídeos a quem tem sessão (o token que o shim da Base44 lê).
+// Sem ele o Painel mostra de propósito "entre na sua conta" e a lista fica vazia.
+globalThis.localStorage.setItem('base44_access_token', 'token-de-teste');
 globalThis.location = { pathname: '/', search: '', hash: '' };
 globalThis.history = { replaceState: (_a, _b, url) => { const h = String(url).split('#')[1] || ''; globalThis.location.hash = h ? `#${h}` : ''; } };
 globalThis.document = {

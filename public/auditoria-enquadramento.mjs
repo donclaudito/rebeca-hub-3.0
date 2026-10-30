@@ -33,7 +33,13 @@ const pct = (v) => Math.round(v * 100);
 //
 // `dados` = pixels RGBA da imagem, `largura`×`altura` (qualquer tamanho; a
 // análise corre numa cópia pequena, como no motor).
-export function avaliarEnquadramento({ dados, largura, altura, alvoW, alvoH, modo = 'personagem' }) {
+//
+// `modoImagem` tem de ser o mesmo que o vídeo vai usar, senão a auditoria
+// acusa um corte que o vídeo não faz:
+//   'inteira'   → a imagem aparece toda, com barras desfocadas; não há recorte,
+//                 portanto não se pode falar em "corta a cabeça";
+//   'preencher' → o motor corta para encher o quadro 16:9; aí sim mede-se a perda.
+export function avaliarEnquadramento({ dados, largura, altura, alvoW, alvoH, modo = 'personagem', modoImagem = 'inteira' }) {
   const vazio = {
     temAssunto: false,
     dentroDoQuadro: false,
@@ -61,13 +67,17 @@ export function avaliarEnquadramento({ dados, largura, altura, alvoW, alvoH, mod
   }
 
   const { vw, vh } = janelaVisivel(largura, altura, alvoW, alvoH);
-  const recorte = calcularRecorte({ largura, altura, alvoW, alvoH, dados, modo, area });
+  const preenche = modoImagem === 'preencher';
+  // Em "inteira" a janela é a imagem toda: nada é cortado pelo vídeo.
+  const recorte = preenche ? calcularRecorte({ largura, altura, alvoW, alvoH, dados, modo, area }) : { x: 0, y: 0 };
+  const janelaW = preenche ? vw : largura;
+  const janelaH = preenche ? vh : altura;
 
   // Quanto do personagem fica FORA da janela do vídeo (em % da janela).
-  const perdaTopo = vh > 0 ? Math.max(0, recorte.y - caixa.y0) / vh : 0;
-  const perdaBaixo = vh > 0 ? Math.max(0, caixa.y1 - (recorte.y + vh)) / vh : 0;
-  const perdaEsq = vw > 0 ? Math.max(0, recorte.x - caixa.x0) / vw : 0;
-  const perdaDir = vw > 0 ? Math.max(0, caixa.x1 - (recorte.x + vw)) / vw : 0;
+  const perdaTopo = janelaH > 0 ? Math.max(0, recorte.y - caixa.y0) / janelaH : 0;
+  const perdaBaixo = janelaH > 0 ? Math.max(0, caixa.y1 - (recorte.y + janelaH)) / janelaH : 0;
+  const perdaEsq = janelaW > 0 ? Math.max(0, recorte.x - caixa.x0) / janelaW : 0;
+  const perdaDir = janelaW > 0 ? Math.max(0, caixa.x1 - (recorte.x + janelaW)) / janelaW : 0;
 
   // A imagem em si já vem cortada? (a caixa do personagem encosta à borda)
   //   `toca*`   = muito perto da borda (enquadramento apertado);
@@ -80,11 +90,11 @@ export function avaliarEnquadramento({ dados, largura, altura, alvoW, alvoH, mod
 
   // Descentrado: distância do centro do personagem ao centro da janela.
   const centroPessoa = (caixa.x0 + caixa.x1) / 2;
-  const centroJanela = recorte.x + vw / 2;
-  const desvioCentro = vw > 0 ? Math.abs(centroPessoa - centroJanela) / vw : 0;
+  const centroJanela = recorte.x + janelaW / 2;
+  const desvioCentro = janelaW > 0 ? Math.abs(centroPessoa - centroJanela) / janelaW : 0;
 
   // Folga acima da cabeça (fração da janela). 0 = encostada ao topo.
-  const margemTopo = vh > 0 ? Math.max(0, caixa.y0 - recorte.y) / vh : 0;
+  const margemTopo = janelaH > 0 ? Math.max(0, caixa.y0 - recorte.y) / janelaH : 0;
 
   const avisos = [];
   let gravidade = 'ok';
@@ -177,14 +187,14 @@ function pixelsDaImagem(img, maxLado = 192) {
 }
 
 // Avalia todas as cenas (no máximo `limite`) e resume.
-export async function auditarCenas(imagens, alvoW, alvoH, { modo = 'personagem', limite = 12 } = {}) {
+export async function auditarCenas(imagens, alvoW, alvoH, { modo = 'personagem', modoImagem = 'inteira', limite = 12 } = {}) {
   const cenas = [];
   for (const img of (imagens || []).slice(0, limite)) {
     const nome = img.name || 'imagem';
     try {
       const el = await carregarImagem(img.file || img);
       const { dados, largura, altura } = pixelsDaImagem(el);
-      const d = avaliarEnquadramento({ dados, largura, altura, alvoW, alvoH, modo });
+      const d = avaliarEnquadramento({ dados, largura, altura, alvoW, alvoH, modo, modoImagem });
       cenas.push({ nome, ...d });
     } catch (e) {
       cenas.push({
@@ -195,7 +205,7 @@ export async function auditarCenas(imagens, alvoW, alvoH, { modo = 'personagem',
       });
     }
   }
-  return { cenas, ...resumir(cenas) };
+  return { cenas, modoImagem, ...resumir(cenas) };
 }
 
 // O resumo: o que há a corrigir e o que dizer ao Diretor.
@@ -206,7 +216,9 @@ export function resumir(cenas) {
   const cabecaCortada = lista.filter((c) =>
     (c.avisos || []).some((a) => /corta a cabeça|cortada na cabeça|borda de cima/i.test(a)),
   );
-  const pesFora = lista.filter((c) => (c.avisos || []).some((a) => /parte de baixo|borda de baixo/i.test(a)));
+  const pesFora = lista.filter((c) =>
+    (c.avisos || []).some((a) => /parte de baixo|borda de baixo|cortada em baixo|pés saem|pés encostam/i.test(a)),
+  );
   const descentradas = lista.filter((c) => (c.desvioCentro || 0) >= pct(DESCENTRADO));
   const semAssunto = lista.filter((c) => !c.temAssunto);
 

@@ -22,7 +22,7 @@ import { ajustarCues } from './srt.mjs';
 // Versão do motor. Aparece no resumo da página: serve para saber, sem dúvidas,
 // qual build está a correr no browser (um build antigo em cache foi uma das
 // causas de "não funcionou" que já apanhei).
-export const VERSAO_VIDEO = '3.9.10';
+export const VERSAO_VIDEO = '3.9.11';
 
 // Duração do FECHO: nos últimos segundos do vídeo (quando há trilha), a música
 // esmaece até ao silêncio e a imagem apaga suavemente para preto.
@@ -42,6 +42,15 @@ export const TRANSICOES = [
   { id: 'slideleft', rotulo: 'Deslizar Lateral', nota: 'a imagem nova entra pela direita' },
   { id: 'zoom', rotulo: 'Zoom', nota: 'aproxima-se antes de trocar' },
   { id: 'desfoque', rotulo: 'Desfocar', nota: 'desfoca antes de trocar' },
+];
+
+// Como a imagem ocupa o quadro do vídeo:
+//  - 'inteira'   → aparece TODA (o que sobra é a própria imagem desfocada);
+//  - 'preencher' → é ampliada até cobrir e o que sobra é cortado.
+// "inteira" é o padrão: a imagem sai como foi escolhida, sem zoom nem corte.
+export const MODOS_IMAGEM = [
+  { id: 'inteira', rotulo: 'Inteira (sem cortar)', nota: 'a imagem aparece toda; o que sobra é preenchido com ela desfocada' },
+  { id: 'preencher', rotulo: 'Preencher (corta)', nota: 'a imagem cobre o quadro todo e o que sobra é cortado' },
 ];
 
 export const DURACOES = [
@@ -306,6 +315,15 @@ function analisarEnquadramento(img, alvoW, alvoH, modo) {
   }
 }
 
+// Tamanho real de uma imagem, de um fotograma de vídeo ou de um canvas (o efeito
+// "água em movimento" desenha-se num canvas, que não tem naturalWidth).
+function medidasDe(img) {
+  return {
+    w: img.naturalWidth || img.videoWidth || img.width || 1,
+    h: img.naturalHeight || img.videoHeight || img.height || 1,
+  };
+}
+
 // Desenha a imagem (ou o fotograma atual do vídeo) a cobrir o canvas inteiro
 // (recorta o que sobra), sem deformar.
 //
@@ -315,11 +333,10 @@ function analisarEnquadramento(img, alvoW, alvoH, modo) {
 // (zoom e deslizar) e do epílogo, somados por cima do enquadramento.
 function desenharCobrindo(ctx, img, w, h, escala = 1, deslocamentoX = 0, deslocamentoY = 0) {
   const e = enquadramentoDe(img);
-  const completa = img.naturalWidth || img.videoWidth || 1;
-  const completaH = img.naturalHeight || img.videoHeight || 1;
+  const medidas = medidasDe(img);
   const fonte = e && e.fonte ? e.fonte : null;
-  const fonteW = e ? e.sw : completa;
-  const fonteH = e ? e.sh : completaH;
+  const fonteW = e ? e.sw : medidas.w;
+  const fonteH = e ? e.sh : medidas.h;
 
   const proporcao = Math.max(w / fonteW, h / fonteH) * escala;
   const dw = fonteW * proporcao;
@@ -334,6 +351,59 @@ function desenharCobrindo(ctx, img, w, h, escala = 1, deslocamentoX = 0, desloca
   else ctx.drawImage(img, x, y, dw, dh);
 }
 
+// ---------------------------------------------------------------- modo de imagem
+//
+//  "preencher" (o que estava): a imagem é ampliada até cobrir o quadro e o que
+//  sobra é CORTADO. Numa imagem quadrada num vídeo 16:9 isso corta ~44% da
+//  altura — foi o que o utilizador viu: a imagem escolhida saía recortada, como
+//  se lhe tivessem feito zoom.
+//
+//  "inteira" (o que passa a ser o padrão): a imagem aparece TODA, no tamanho em
+//  que foi escolhida, e o espaço que sobra é preenchido com a própria imagem
+//  desfocada e escurecida (o efeito normal de televisão). Nada é cortado e não
+//  há zoom nenhum sobre o conteúdo.
+let MODO_IMAGEM = 'inteira';
+
+function definirModoImagem(modo) {
+  MODO_IMAGEM = modo === 'preencher' ? 'preencher' : 'inteira';
+}
+
+// A imagem inteira, com o fundo desfocado dela própria.
+function desenharInteira(ctx, img, w, h, escala = 1, deslocamentoX = 0, deslocamentoY = 0) {
+  const e = enquadramentoDe(img);
+  const fonte = e && e.fonte ? e.fonte : null;
+  const medidas = medidasDe(img);
+  const sw = e ? e.sw : medidas.w;
+  const sh = e ? e.sh : medidas.h;
+  const sx = fonte ? fonte.x : 0;
+  const sy = fonte ? fonte.y : 0;
+
+  // 1) FUNDO: a mesma imagem a cobrir, desfocada e escurecida.
+  const cobrir = Math.max(w / sw, h / sh) * escala;
+  const bw = sw * cobrir;
+  const bh = sh * cobrir;
+  ctx.save();
+  if ('filter' in ctx) ctx.filter = 'blur(22px) brightness(0.55) saturate(0.9)';
+  ctx.drawImage(img, sx, sy, sw, sh, (w - bw) / 2 + deslocamentoX, (h - bh) / 2 + deslocamentoY, bw, bh);
+  ctx.restore();
+
+  // 2) A IMAGEM INTEIRA sobre o fundo: `min` (e não `max`) é o que garante que
+  //    nada fica de fora. Sem zoom sobre o conteúdo de propósito.
+  const conter = Math.min(w / sw, h / sh);
+  const dw = sw * conter;
+  const dh = sh * conter;
+  ctx.drawImage(img, sx, sy, sw, sh, (w - dw) / 2 + deslocamentoX, (h - dh) / 2 + deslocamentoY, dw, dh);
+}
+
+// O desenho de uma imagem/fotograma, conforme o modo escolhido.
+function desenharFoto(ctx, img, w, h, escala = 1, deslocamentoX = 0, deslocamentoY = 0) {
+  if (MODO_IMAGEM === 'preencher') {
+    desenharCobrindo(ctx, img, w, h, escala, deslocamentoX, deslocamentoY);
+    return;
+  }
+  desenharInteira(ctx, img, w, h, escala, deslocamentoX, deslocamentoY);
+}
+
 // Desenha o EPILOGO: a imagem final, parada no essencial, com o movimento
 // da orientação escolhida. p vai de 0 (começo do epílogo) a 1 (fim).
 function desenharEpilogo(ctx, w, h, de, img, tLocal, dur, orientacao, T) {
@@ -341,29 +411,29 @@ function desenharEpilogo(ctx, w, h, de, img, tLocal, dur, orientacao, T) {
   ctx.save();
   // ENTRADA: a imagem final chega a esbater da anterior (nos primeiros T s).
   if (de && T > 0 && tLocal < T) {
-    desenharCobrindo(ctx, de, w, h);
+    desenharFoto(ctx, de, w, h);
     ctx.globalAlpha = Math.min(1, Math.max(0, tLocal / T));
   } else {
     ctx.globalAlpha = 1;
   }
   if (orientacao === 'natureza') {
     // Aproximação lenta: a imagem de fecho instala-se (push-in suave).
-    desenharCobrindo(ctx, img, w, h, 1 + 0.1 * p);
+    desenharFoto(ctx, img, w, h, 1 + 0.1 * p);
   } else if (orientacao === 'narrativa') {
     // A câmara sobe e assenta na imagem final parada (plano-herói).
     const escala = Math.max(1.04, 1.28 - 0.24 * p);
     const deslocamentoY = h * 0.1 * (1 - p);
-    desenharCobrindo(ctx, img, w, h, escala, 0, deslocamentoY);
+    desenharFoto(ctx, img, w, h, escala, 0, deslocamentoY);
   } else if (orientacao === 'clipe') {
     // Imagem única, quieta; apaga para preto nos últimos 1,5s.
-    desenharCobrindo(ctx, img, w, h);
+    desenharFoto(ctx, img, w, h);
     const restante = dur - tLocal;
     if (restante < 1.5) {
       ctx.fillStyle = `rgba(0,0,0,${(1 - Math.max(0, restante) / 1.5).toFixed(3)})`;
       ctx.fillRect(0, 0, w, h);
     }
   } else {
-    desenharCobrindo(ctx, img, w, h);
+    desenharFoto(ctx, img, w, h);
   }
   ctx.restore();
 }
@@ -374,18 +444,18 @@ function desenharTransicao(ctx, w, h, de, para, t, tipo) {
   ctx.save();
   switch (tipo) {
     case 'corte':
-      desenharCobrindo(ctx, t < 0.5 ? de : para, w, h);
+      desenharFoto(ctx, t < 0.5 ? de : para, w, h);
       break;
 
     case 'slideleft':
-      desenharCobrindo(ctx, de, w, h, 1, -w * t);
-      desenharCobrindo(ctx, para, w, h, 1, w * (1 - t));
+      desenharFoto(ctx, de, w, h, 1, -w * t);
+      desenharFoto(ctx, para, w, h, 1, w * (1 - t));
       break;
 
     case 'zoom':
-      desenharCobrindo(ctx, de, w, h, 1 + 0.12 * t);
+      desenharFoto(ctx, de, w, h, 1 + 0.12 * t);
       ctx.globalAlpha = t;
-      desenharCobrindo(ctx, para, w, h, 1.12 - 0.12 * t);
+      desenharFoto(ctx, para, w, h, 1.12 - 0.12 * t);
       break;
 
     case 'desfoque':
@@ -393,20 +463,20 @@ function desenharTransicao(ctx, w, h, de, para, t, tipo) {
       // não souber desfocar, fica a passagem suave — nunca falha.
       if ('filter' in ctx) {
         ctx.filter = `blur(${(t * 10).toFixed(1)}px)`;
-        desenharCobrindo(ctx, de, w, h);
+        desenharFoto(ctx, de, w, h);
         ctx.filter = 'none';
         ctx.globalAlpha = t;
       } else {
         ctx.globalAlpha = 1;
       }
-      desenharCobrindo(ctx, para, w, h);
+      desenharFoto(ctx, para, w, h);
       break;
 
     case 'fade':
     default:
-      desenharCobrindo(ctx, de, w, h);
+      desenharFoto(ctx, de, w, h);
       ctx.globalAlpha = t;
-      desenharCobrindo(ctx, para, w, h);
+      desenharFoto(ctx, para, w, h);
       break;
   }
   ctx.restore();
@@ -484,7 +554,7 @@ function criarDesenhador({ ctx, w, h, imagens, inicios, duracoes, T, transicao, 
       ctx.save();
       ctx.globalAlpha = 1;
       if ('filter' in ctx) ctx.filter = 'none';
-      desenharCobrindo(ctx, quadro(k, agora), w, h);
+      desenharFoto(ctx, quadro(k, agora), w, h);
       ctx.restore();
     }
 
@@ -556,8 +626,13 @@ export async function gerarVideo({
   // Legendas incrustadas no vídeo, com o texto de cada cena. Desligado por omissão.
   legendas = false,
   // Como cortar a imagem para caber no formato: 'personagem' (procura o assunto e
-  // centra-o) ou 'centro' (recorte centrado).
+  // centra-o) ou 'centro' (recorte centrado). Só se aplica no modo "preencher".
   enquadramento = 'personagem',
+  // Como a imagem ocupa o quadro: 'inteira' (por omissão — a imagem aparece toda,
+  // o que sobra é preenchido com ela própria desfocada) ou 'preencher' (amplia
+  // até cobrir e CORTA o que sobra). "inteira" é o que garante que a imagem sai
+  // como foi escolhida, sem zoom nem corte.
+  modoImagem = 'inteira',
   // Legendas já prontas (a letra da música, distribuída pelo tempo). Quando vêm,
   // substituem as legendas tiradas da narração: as duas juntas enchiam o ecrã.
   legendasExternas = null,
@@ -619,6 +694,9 @@ export async function gerarVideo({
 
   const alvo = FORMATOS.find((f) => f.id === formato) || FORMATOS[1];
   const T = Math.min(2, Math.max(0.2, Number(duracaoTransicao) || 0.6));
+
+  // "inteira" (padrão) = a imagem aparece toda; "preencher" = corta para cobrir.
+  definirModoImagem(modoImagem);
 
   const canvas = canvasDado || document.createElement('canvas');
   canvas.width = alvo.w;

@@ -156,6 +156,9 @@ async function recolherProjeto(nome, { novo = false } = {}) {
       videoTransicao: state.videoTransicao,
       videoTransicaoRotulo: state.videoTransicaoRotulo || '',
       videoDuracao: state.videoDuracao,
+      // A imagem inteira (sem corte) é o que o projeto guarda por omissão: ao
+      // reabrir, o vídeo sai como o utilizador o deixou.
+      modoImagem: state.modoImagem || 'inteira',
       videoModo: state.videoModo,
       videoDuracaoCena: state.videoDuracaoCena,
       legendas: state.legendas,

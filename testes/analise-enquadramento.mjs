@@ -33,19 +33,44 @@ function imagemComPersonagem(largura, altura, bloco) {
 
 const alvo = { alvoW: 1920, alvoH: 1080 };
 
-console.log('\n[1] Personagem em pé numa imagem retrato: a cabeça fica, os pés saem');
+console.log('\n[1] Modo "preencher o quadro": a cabeça fica, os pés saem');
 {
   // 300×400 com o corpo todo (cabeça em y=40, pés em y=390). O vídeo é 16:9, a
   // janela só mostra ~169 px de altura: o corpo NÃO cabe — é normal cortar os
-  // pés, nunca a cabeça.
+  // pés, nunca a cabeça. Só acontece no modo "preencher" (com recorte).
   const l = 300, a = 400;
-  const d = mod.avaliarEnquadramento({ dados: imagemComPersonagem(l, a, [120, 40, 60, 350]), largura: l, altura: a, ...alvo });
+  const d = mod.avaliarEnquadramento({
+    dados: imagemComPersonagem(l, a, [120, 40, 60, 350]), largura: l, altura: a, ...alvo, modoImagem: 'preencher',
+  });
   check(d.temAssunto === true, 'identificou o personagem', 'não identificou');
   check(d.perdaTopo === 0, `nada da cabeça ficou fora (${d.perdaTopo}%)`, `${d.perdaTopo}% da cabeça fora`);
   check(d.perdaBaixo > 5, `a parte de baixo fica fora (${d.perdaBaixo}%) — medido, não adivinhado`, `perda de baixo: ${d.perdaBaixo}%`);
   check(d.avisos.some((x) => /parte de baixo/i.test(x)), `avisa da parte de baixo ("${d.avisos.join(' | ')}")`, d.avisos.join(' | '));
   check(d.dentroDoQuadro === false, 'a cena não está "toda dentro do quadro"', 'disse que estava tudo dentro');
   check(d.gravidade === 'media', `gravidade "media" (não é a cabeça) — ${d.gravidade}`, d.gravidade);
+}
+
+console.log('\n[1b] Modo "imagem inteira" (por omissão): NÃO se acusa um corte que o vídeo não faz');
+{
+  // A MESMA imagem, mas com o vídeo a mostrar tudo: como a imagem aparece
+  // completa, não há perda nenhuma para medir — e é falso dizer que o vídeo
+  // corta os pés. Foi este o erro que o utilizador viu ("re-enquadra com zoom").
+  const l = 300, a = 400;
+  const d = mod.avaliarEnquadramento({ dados: imagemComPersonagem(l, a, [120, 40, 60, 350]), largura: l, altura: a, ...alvo });
+  check(d.perdaTopo === 0 && d.perdaBaixo === 0, `nada fica fora (${d.perdaTopo}%/${d.perdaBaixo}%) — a imagem aparece toda`, `${d.perdaTopo}%/${d.perdaBaixo}%`);
+  check(d.dentroDoQuadro === true, 'a cena está toda dentro do quadro', 'disse que faltava alguma coisa');
+  check(d.gravidade === 'ok', `sem faltas (${d.gravidade}) — a imagem está bem`, `${d.gravidade}`);
+  check(!d.avisos.some((x) => /recorte|parte de baixo/i.test(x)), `não inventa cortes do vídeo ("${d.avisos.join(' | ') || 'sem avisos'}")`, d.avisos.join(' | '));
+}
+
+console.log('\n[1c] Modo "imagem inteira" continua a assinalar a imagem que JÁ vem cortada');
+{
+  // Aqui a culpa é da imagem de origem (a cabeça sai pela borda) e isso tem de
+  // ser dito na mesma — só se resolve a gerar de novo, não a mexer no vídeo.
+  const l = 200, a = 300;
+  const d = mod.avaliarEnquadramento({ dados: imagemComPersonagem(l, a, [80, 0, 40, 300]), largura: l, altura: a, ...alvo });
+  check(d.gravidade === 'grave', `continua grave (${d.gravidade})`, d.gravidade);
+  check(d.avisos.some((x) => /já vem cortada na cabeça/i.test(x)), `culpa a imagem, não o recorte ("${d.avisos.join(' | ')}")`, d.avisos.join(' | '));
 }
 
 console.log('\n[2] Imagem que já vem cortada na cabeça é assinalada como GRAVE');
@@ -150,6 +175,10 @@ console.log('\n[8] As páginas que usam a auditoria continuam a carregar');
   const fn = readFileSync('E:/youtube rebeca2/rebeca-hub-3.0-base44/base44/functions/analisarProducao/entry.ts', 'utf8');
   check(/enquadramento/.test(fn), 'a função da nuvem recebe/devolve o enquadramento', 'a função não fala de enquadramento');
   check(/Framing requirements/.test(fn), 'e tem a exigência em inglês na rede de segurança', 'sem rede de segurança');
+  // O modo de imagem do vídeo tem de chegar à auditoria e ao Diretor, senão a
+  // análise acusa um recorte que já não existe.
+  check(/modoImagem/.test(analise), 'a análise audita no MESMO modo de imagem do vídeo', 'a análise ignora o modo de imagem');
+  check(/imagemInteira|modoImagem/.test(fn), 'e o Diretor sabe se o vídeo recorta ou mostra a imagem toda', 'o Diretor não sabe o modo');
 }
 
 console.log(falhas.length ? `\n=== ${falhas.length} FALHA(S) ===` : '\n=== AUDITORIA DE ENQUADRAMENTO OK ===');

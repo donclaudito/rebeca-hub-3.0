@@ -1,6 +1,4 @@
 // Testa a aba de vídeo: controlos, deteção de suporte e o caminho de erro.
-console.error('>>> CHEGOU AO FIM DO FICHEIRO');
-// Testa a aba de vídeo: controlos, deteção de suporte e o caminho de erro.
 import { readFileSync } from 'node:fs';
 
 import { fileURLToPath } from 'node:url';
@@ -297,6 +295,25 @@ console.log('\n[2] Escolher transição e formato fica guardado');
   check(g.videoFormato === '1080x1920' && g.videoTransicao === ct.children[2].dataset.id && g.videoDuracao === Number(cd.children[3].dataset.id),
     `guardado: formato=${g.videoFormato} transicao=${g.videoTransicao} duracao=${g.videoDuracao}`,
     `guardado errado: ${JSON.stringify({ f: g.videoFormato, t: g.videoTransicao, d: g.videoDuracao })}`);
+}
+
+console.log('\n[2b] As imagens saem INTEIRAS por omissão (sem zoom nem corte)');
+{
+  const reg = await arrancar(true);
+  const ci = reg.get('vid-imagem');
+  check(!!ci && ci.children.length === 2, `dois modos de imagem (${ci ? ci.children.map((b) => b.textContent).join(' | ') : 'sem grupo'})`, 'sem os chips de imagem');
+  const marcado = ci.children.find((b) => b.classList.contains('on'));
+  check(marcado && marcado.dataset.id === 'inteira', `por omissão vem "Inteira" (${marcado && marcado.textContent})`, `marcado: ${marcado && marcado.dataset.id}`);
+  ci.children[1].click();
+  check(ci.children[1].classList.contains('on') && !ci.children[0].classList.contains('on'), 'escolher "Preencher" passa a marca', 'não trocou');
+  const g = JSON.parse(globalThis.localStorage.getItem('rh3nuvem') || '{}');
+  check(g.modoImagem === 'preencher', `a escolha fica guardada (${g.modoImagem})`, `guardado: ${g.modoImagem}`);
+  // O resumo tem de DIZER o modo antes de gravar — confirmação visível.
+  check(/const nota = [^\n]*notaImagem\(\)/.test(readFileSync(BASE + 'app.js', 'utf8')), 'o resumo do vídeo diz o modo de imagem', 'o resumo não fala do modo');
+  // E o modo viaja com o projeto: ao reabrir, o chip e o vídeo voltam iguais.
+  const proj = readFileSync(BASE + 'estudio-projetos.mjs', 'utf8');
+  check(/modoImagem: state\.modoImagem/.test(proj), 'o modo de imagem é guardado com o projeto', 'o projeto não guarda o modo');
+  check(/marcar\('vid-imagem'/.test(readFileSync(BASE + 'app.js', 'utf8')), 'e o chip volta marcado ao reabrir o projeto', 'o chip não é remarcado');
 }
 
 console.log('\n[3] Sem suporte de gravação: avisa e desativa');

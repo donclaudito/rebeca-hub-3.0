@@ -168,6 +168,10 @@ export async function gerarVideoFinal() {
       cenas,
       formato: state.videoFormato,
       transicao: state.videoTransicao,
+      // A imagem aparece INTEIRA por omissão (sem corte nem zoom); 'preencher'
+      // amplia e corta para cobrir o quadro. É a diferença entre a imagem "como
+      // foi escolhida" e a imagem recortada.
+      modoImagem: state.modoImagem || 'inteira',
       // Ondulação na zona da água: 'desligado' mantém tudo como era.
       agua: state.videoAgua || 'desligado',
       duracaoTransicao: state.videoDuracao,

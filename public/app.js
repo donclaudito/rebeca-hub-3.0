@@ -43,6 +43,8 @@ const state = {
   modoDuracao: 'natural',
   // Codec do ficheiro: 'vp8' (compatível) ou 'vp9' (mais pequeno).
   codec: 'vp8',
+  // Imagem no vídeo: 'inteira' (aparece toda, sem corte) ou 'preencher' (corta).
+  modoImagem: 'inteira',
   // Orientação do encerramento: '' (sem), 'natureza', 'narrativa' ou 'clipe'.
   // A imagem final (cenaFinal, pelo nome do ficheiro) sai no fim como epílogo,
   // parada e sem repetir a sequência.
@@ -1302,6 +1304,15 @@ function notaFecho() {
   return ' 🎬 Fecho: o vídeo acaba quando a música acaba — a última cena fica o tempo que faltar, com som e imagem a apagar suavemente no fim.';
 }
 
+// Nota do modo de imagem, para o resumo: o utilizador tem de SABER, antes de
+// gravar, se a imagem vai sair inteira ou cortada.
+function notaImagem() {
+  if (state.modoImagem === 'preencher') {
+    return ' 🔍 Imagem no vídeo: PREENCHER — é ampliada até cobrir o quadro e o que sobra é cortado.';
+  }
+  return ' 🖼️ Imagem no vídeo: INTEIRA — cada imagem aparece como foi escolhida, sem zoom nem corte (o que sobra é preenchido com ela desfocada).';
+}
+
 // Nota da letra, para o resumo: diz quantos versos e quanto tempo cada um leva.
 function notaLetra() {
   if (!state.letraLigada) return '';
@@ -1315,7 +1326,7 @@ function resumoVideo() {
   const m = modoVideo();
   const n = state.scenes.filter((s) => (s.texto || '').trim()).length || state.images.length;
   const musica = state.musicaFicheiro && querMusica();
-  const nota = state.letraLigada ? notaLetra() : legendasNota();
+  const nota = (state.letraLigada ? notaLetra() : legendasNota()) + notaImagem();
 
   if (state.videoModo === 'musica') {
     const seg = n * (Number(state.videoDuracaoCena) || 3.5);
@@ -1425,6 +1436,9 @@ function aplicarPreferenciasNaInterface() {
   marcar('vid-legendas', String(Boolean(state.legendas)));
   marcar('vid-modos', state.videoModo);
   marcar('vid-codec', state.codec);
+  // A imagem no vídeo (inteira ou a preencher) também é preferência do projeto:
+  // ao reabrir um projeto, o chip tem de mostrar o modo com que ele foi gravado.
+  marcar('vid-imagem', state.modoImagem || 'inteira');
   marcar('vid-orientacao', state.orientacao);
   const linhaF = $('linha-cena-final');
   if (linhaF) linhaF.hidden = !state.orientacao;
@@ -1933,6 +1947,31 @@ async function iniciarVideo() {
   state.codec = codecEscolhido.id;
   [...cc.children].forEach((x) => x.classList.toggle('on', x.dataset.id === state.codec));
 
+  // Imagem no vídeo: INTEIRA (por omissão) ou PREENCHER. É esta escolha que
+  // garante que a imagem sai como foi escolhida — em "preencher" ela é ampliada
+  // e cortada para cobrir o quadro.
+  const ci = $('vid-imagem');
+  if (ci) {
+    ci.innerHTML = '';
+    (mod.MODOS_IMAGEM || []).forEach((m) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'chip';
+      b.dataset.id = m.id;
+      b.textContent = m.rotulo;
+      b.title = m.nota;
+      b.onclick = () => {
+        state.modoImagem = m.id;
+        [...ci.children].forEach((x) => x.classList.toggle('on', x === b));
+        guardar();
+        resumoVideo();
+      };
+      ci.append(b);
+    });
+    if (!(mod.MODOS_IMAGEM || []).some((m) => m.id === state.modoImagem)) state.modoImagem = 'inteira';
+    [...ci.children].forEach((x) => x.classList.toggle('on', x.dataset.id === state.modoImagem));
+  }
+
   // Orientação do encerramento: chips + seletor da imagem final (epílogo).
   if (!mod.ORIENTACOES.some((o) => o.id === state.orientacao)) {
     state.orientacao = '';
@@ -2301,6 +2340,7 @@ function guardar() {
         legendasLetra: state.legendasLetra,
         modoDuracao: state.modoDuracao,
         codec: state.codec,
+        modoImagem: state.modoImagem,
         orientacao: state.orientacao,
         cenaFinal: state.cenaFinal,
         cenasFinais: state.cenasFinais,

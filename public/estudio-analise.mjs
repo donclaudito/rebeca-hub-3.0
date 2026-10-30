@@ -331,12 +331,17 @@ function alvoDoFormato() {
 }
 
 // Mede o enquadramento de cada cena (sem IA: são as contas do próprio motor).
+// O modo de imagem tem de ser o mesmo do vídeo — em "inteira" a imagem aparece
+// toda e seria falso acusar um corte que não existe.
 async function auditar() {  const { state } = ctx;
   if (!state.images.length) return null;
   try {
     const mod = await import('./auditoria-enquadramento.mjs');
     const { w, h } = alvoDoFormato();
-    return await mod.auditarCenas(state.images, w, h, { modo: 'personagem' });
+    return await mod.auditarCenas(state.images, w, h, {
+      modo: 'personagem',
+      modoImagem: state.modoImagem || 'inteira',
+    });
   } catch {
     return null; // a análise do Diretor segue sem os números
   }
@@ -442,7 +447,11 @@ function mostrarAuditoria(aud) {
     txt.textContent = 'Sem imagens para medir o enquadramento.';
     return;
   }
+  const inteira = aud.modoImagem !== 'preencher';
   txt.textContent =
+    (inteira
+      ? 'Modo de imagem: mostrar a imagem inteira (sem recorte nem zoom). '
+      : 'Modo de imagem: preencher o quadro (com recorte). ') +
     `${aud.veredicto}. ` +
     (aud.faltas.length
       ? `A corrigir: ${aud.faltas.join(' · ')}. O prompt refinado abaixo já inclui estas exigências.`
@@ -564,6 +573,7 @@ export async function analisarDiretor() {
       // respeitar nas melhorias e no prompt refinado.
       enquadramento: aud
         ? {
+            modoImagem: aud.modoImagem,
             veredicto: aud.veredicto,
             faltas: aud.faltas,
             exigencias: aud.exigencias,
@@ -582,9 +592,13 @@ export async function analisarDiretor() {
     //    se perde.
     const melhorias = Array.isArray(dados.melhorias) ? [...dados.melhorias] : [];
     if (aud && aud.faltas.length) {
+      const remedeio =
+        aud.modoImagem === 'preencher'
+          ? 'Isto resolve-se a gerar de novo as imagens com o prompt refinado, ou a escolher «Imagem inteira» (sem recorte).'
+          : 'Isto resolve-se a gerar de novo as imagens com o prompt refinado — com a imagem inteira não há recorte que corrija uma imagem mal enquadrada na origem.';
       melhorias.unshift({
         titulo: '⛔ Enquadramento (medido)',
-        detalhe: `${aud.faltas.join('; ')}. Isto resolve-se a gerar de novo as imagens com o prompt refinado: ${aud.exigencias.join('; ')}.`,
+        detalhe: `${aud.faltas.join('; ')}. ${remedeio} Exigências: ${aud.exigencias.join('; ')}.`,
       });
     }
 

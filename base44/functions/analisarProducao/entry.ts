@@ -122,8 +122,16 @@ export default async function (req) {
       ? aud.exigencias.filter((f) => typeof f === 'string').slice(0, 6)
       : [];
     const cenasEnq = Array.isArray(aud?.cenas) ? aud.cenas.slice(0, 12) : [];
+    // O MODO de imagem muda o diagnóstico: em "inteira" o vídeo mostra a imagem
+    // toda (com barras desfocadas) e não recorta nada — acusá-lo de cortar seria
+    // falso; a falta, se existir, já vem da imagem de origem.
+    const imagemInteira = aud?.modoImagem !== 'preencher';
     linhas.push('');
     linhas.push('## Enquadramento MEDIDO na app (números, não estimativa)');
+    adicionar(
+      'Modo de imagem do vídeo',
+      imagemInteira ? 'imagem inteira (sem recorte nem zoom)' : 'preencher o quadro (o vídeo recorta)',
+    );
     adicionar('Veredicto', aud?.veredicto);
     if (faltasEnq.length) {
       linhas.push('- Faltas medidas:');
@@ -155,6 +163,11 @@ export default async function (req) {
         '- promptRefinado: se as imagens tiverem falhas de geração (personagens inconsistentes entre cenas, artefactos, texto escrito na imagem, ENQUADRAMENTO fraco, partes do personagem cortadas, iluminação incoerente), UM prompt refinado em INGLÊS, pronto para colar num gerador de imagens, que corrige TODAS essas falhas e mantém o estilo infantil com proporção 16:9, uma frase rica sem listas.',
         '',
         'REGRA DO ENQUADRAMENTO (obrigatória): se houver QUALQUER falta de enquadramento medida — cabeça cortada, pés fora do quadro, personagem descentrado, membro cortado — o promptRefinado TEM de as corrigir TODAS, sem escolher só algumas, e TEM de terminar com esta exigência em inglês: "Framing requirements: keep the whole character inside the 16:9 frame — head, hands and feet fully visible, comfortable headroom above the head, subject centred and occupying roughly half of the frame height; no cropped limbs, no extreme close-ups, generous safe margins on every side." Não invente faltas que não estão medidas; se não houver nenhuma, não acrescente essa exigência.',
+        ...(imagemInteira
+          ? [
+              'MODO DE IMAGEM "INTEIRA": o vídeo mostra cada imagem completa, com barras desfocadas a preencher o quadro — NÃO há recorte nem zoom. Portanto: nunca diga que o vídeo corta a cabeça ou os pés; se a imagem de origem já vem cortada, diga-o como falha DA IMAGEM (resolve-se a gerar de novo, não a mexer no vídeo).',
+            ]
+          : []),
         '',
         'Seja EXAUSTIVO nas reformulações: prefira corrigir tudo o que a imagem permite corrigir a deixar falhas por mencionar. Se as imagens estiverem boas, devolva um prompt que eleve ainda mais a qualidade.',
         'Responda em português do Brasil, concreto e sem enrolação — exceto promptRefinado, que é sempre em inglês.',

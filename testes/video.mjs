@@ -21,6 +21,7 @@ let suportaCodecs = true;        // o browser falso sabe gravar WebM?
 let agendamentos = [];           // {clipe, quando}
 let fontesEmCiclo = [];          // fontes com loop (a trilha)
 let ganhosCriados = [];          // valores de ganho pedidos (narração=1, trilha=0.16)
+let fontesDeVideo = [];          // elementos <video> ligados ao áudio (devem ficar mudos)
 let retoques = [];               // fillRect no canvas (o véu preto do fecho)
 let musicaDuracao = 2;           // duração devolvida para a trilha (curta: o fecho com a música não estica as provas)
 let ultimoCtx = null;
@@ -58,6 +59,29 @@ class CanvasFalso {
 class ImagemFalsa {
   constructor() { this.naturalWidth = 1000; this.naturalHeight = 1000; setTimeout(() => this.onload?.(), 0); }
   set src(v) { this.nome = v; }
+}
+
+// <video> falso: o motor cria um destes para cada cena de vídeo. Guarda se o
+// som foi desligado (é o que os testes do áudio nativo verificam).
+let videosFalsos = [];
+class VideoFalso {
+  constructor() {
+    this.tagName = 'VIDEO';
+    this.videoWidth = 1280;
+    this.videoHeight = 720;
+    this.currentTime = 0;
+    this.muted = false;
+    this.volume = 1;
+    this.pausado = true;
+    videosFalsos.push(this);
+    setTimeout(() => this.onloadeddata?.(), 0);
+  }
+  set src(v) { this._src = v; this.nome = v; }
+  get src() { return this._src; }
+  play() { this.pausado = false; return Promise.resolve(); }
+  pause() { this.pausado = true; }
+  load() {}
+  removeAttribute() {}
 }
 
 // Buffer de áudio falso — imita o AudioBuffer a sério (com getChannelData).
@@ -99,6 +123,12 @@ class AudioCtxFalso {
     this._duracoes = [...duracoes];
   }
   createMediaStreamDestination() { return { stream: { getAudioTracks: () => [{ tipo: 'audio' }] } }; }
+  // O som de um clipe de vídeo entra por aqui. Registamos se foi ligado, para
+  // se poder provar que o áudio do clipe NÃO entra no vídeo.
+  createMediaElementSource(el) {
+    fontesDeVideo.push(el);
+    return { connect() {}, disconnect() {} };
+  }
   createGain() {
     const g = { gain: {}, connect() {}, disconnect() {} };
     Object.defineProperty(g.gain, 'value', { get: () => g._valor, set: (v) => { g._valor = v; ganhosCriados.push(v); } });
@@ -149,6 +179,8 @@ class GravadorFalso {
 function instalarAmbiente(duracoes, { musicaSegundos = 2 } = {}) {
   desenhos = []; agendamentos = []; fontesEmCiclo = []; ganhosCriados = []; legendasDesenhadas = []; retoques = []; fila = []; relogioMs = 0;
   mimesUsados = []; suportaCodecs = true;
+  // Cada ambiente começa sem <video> e sem ligações de áudio de clipes.
+  videosFalsos = []; fontesDeVideo = [];
   musicaDuracao = musicaSegundos;
   const ctx = new AudioCtxFalso(duracoes);
   ultimoCtx = ctx;
@@ -162,7 +194,9 @@ function instalarAmbiente(duracoes, { musicaSegundos = 2 } = {}) {
   };
   globalThis.Image = ImagemFalsa;
   globalThis.Blob = class { constructor(pedacos, o) { this.size = (pedacos || []).reduce((a, p) => a + (p.size || 0), 0); this.type = o?.type; } };
-  globalThis.document = { createElement: (t) => (t === 'canvas' ? new CanvasFalso() : {}) };
+  globalThis.document = {
+    createElement: (t) => (t === 'canvas' ? new CanvasFalso() : t === 'video' ? new VideoFalso() : {}),
+  };
   globalThis.performance = { now: () => relogioMs };
   globalThis.requestAnimationFrame = (fn) => fila.push(fn);
   return ctx;
@@ -1212,6 +1246,116 @@ console.log('\n[27] "Até acabar a música": o vídeo NUNCA acaba antes da trilh
   check(c.duracao >= 36 && c.duracao <= 38, `as imagens mandam (${c.duracao.toFixed(1)}s = 32 + 5 de epílogo)`, `${c.duracao}`);
   check(Math.abs(c.epilogo - 5) < 0.5, `o epílogo escolhido mantém-se (${c.epilogo.toFixed(1)}s)`, `${c.epilogo}`);
   check(c.tempoExtra === 0, 'sem tempo extra inventado', String(c.tempoExtra));
+}
+
+console.log('\n[28] O SOM DO CLIPE DE VÍDEO NÃO ENTRA (só narração + trilha)');
+{
+  // Um clipe anexado traz fala/ruído de origem. Ainda que o projeto antigo diga
+  // volume 1, o motor tem de o silenciar: ganho 0 na cena e o próprio elemento
+  // MUDO (duas travas, para nada escapar por fora do grafo de áudio).
+  instalarAmbiente([], { musicaSegundos: 3 });
+  const musica = { name: 'tema.mp3', arrayBuffer: () => Promise.resolve(new ArrayBuffer(64)) };
+  const r = await correrCom(
+    mod.gerarVideo({
+      cenas: [
+        { imagem: 'v1', video: true, semFala: true, texto: '', duracaoVideo: 2, videoVolume: 1, videoMudo: false },
+      ],
+      formato: '1280x720', transicao: 'corte', duracaoCena: 2,
+      musica, modoDuracao: 'trilha', musicaSegundos: 3,
+    }),
+  );
+  check(r.ok === true, 'gera com uma cena de vídeo', JSON.stringify(r).slice(0, 120));
+  check(videosFalsos.length === 1, `criou o <video> do clipe (${videosFalsos.length})`, String(videosFalsos.length));
+  const v = videosFalsos[0] || {};
+  check(v.muted === true, 'o elemento do clipe fica MUDO (muted=true)', `muted=${v.muted}`);
+  check(v.volume === 0, `e com volume 0 (${v.volume})`, String(v.volume));
+  check(fontesDeVideo.length === 1, 'o clipe foi ligado ao grafo de áudio', String(fontesDeVideo.length));
+  check(fontesDeVideo[0] === v, 'é o mesmo elemento (não há uma segunda cópia a tocar)', 'elemento diferente');
+  check(ganhosCriados.includes(0), `o ganho da cena de vídeo é 0 (ganhos: ${ganhosCriados.join(', ')})`, ganhosCriados.join(', '));
+  // A trilha continua a entrar: o vídeo não fica mudo.
+  check(r.comMusica === true, 'a trilha entra na mesma', `comMusica=${r.comMusica}`);
+}
+
+console.log('\n[29] A trilha entra no 0:00, sem fade de entrada nem silêncio inicial');
+{
+  const musica = await import(BASE + 'musica.mjs');
+
+  // (a) A música começa no MESMO instante em que a gravação começa (t = 0 do
+  // vídeo), sem fades de entrada: volume da trilha (16%) desde a 1.ª amostra.
+  const ganhos = [];
+  const fontes = [];
+  const ctxFalso = {
+    currentTime: 12.5,
+    createGain() {
+      const g = {
+        gain: {
+          value: 1,
+          cancelScheduledValues(v) { ganhos.push(['cancel', v]); },
+          setValueAtTime(v, t) { ganhos.push(['set', v, t]); },
+          linearRampToValueAtTime(v, t) { ganhos.push(['ramp', v, t]); },
+        },
+        connect() {}, disconnect() {},
+      };
+      Object.defineProperty(g.gain, 'value', {
+        get: () => 1,
+        set: (v) => { ganhos.push(['valor', v]); g._v = v; },
+      });
+      return g;
+    },
+    createBufferSource() {
+      const f = { loop: false, connect() {}, disconnect() {}, start(quando) { f.quando = quando; }, stop() {} };
+      fontes.push(f);
+      return f;
+    },
+  };
+  const trilha = musica.tocarTrilha({ ctx: ctxFalso, destino: {}, musica: new BufferFalso(20) });
+  check(fontes.length === 1 && fontes[0].loop === true, 'a trilha toca em ciclo', JSON.stringify(fontes.map((f) => f.loop)));
+  check(fontes[0].quando === 12.5, `começa JÁ, no instante atual do áudio (${fontes[0].quando})`, String(fontes[0].quando));
+  const volumeNoArranque = ganhos.find((g) => g[0] === 'valor');
+  check(volumeNoArranque && volumeNoArranque[1] === musica.VOLUME_TRILHA, `volume da trilha desde o início (${volumeNoArranque && volumeNoArranque[1]})`, JSON.stringify(ganhos));
+  check(!ganhos.some((g) => g[0] === 'ramp'), 'nenhum fade de ENTRADA agendado', JSON.stringify(ganhos));
+
+  // (b) Silêncio no início do ficheiro: cortado (é o "só começa depois").
+  const ctxBuf = { createBuffer: (canais, n, taxa) => new BufferFalso(n / taxa, 1, taxa) };
+  const comSilencio = new BufferFalso(3, 1, 1000);
+  const dados = comSilencio.getChannelData(0);
+  for (let i = 0; i < 400; i += 1) dados[i] = 0;              // 0,4 s de nada
+  for (let i = 400; i < dados.length; i += 1) dados[i] = 0.3;  // música
+  const corte1 = musica.recortarSilencioInicial(comSilencio, ctxBuf);
+  check(Math.abs(corte1.corte - 0.4) < 0.02, `corta os 0,4s de silêncio (${corte1.corte.toFixed(2)}s)`, String(corte1.corte));
+  check(Math.abs(corte1.buffer.duration - 2.6) < 0.05, `e a música fica com ${corte1.buffer.duration.toFixed(2)}s`, String(corte1.buffer.duration));
+  check(corte1.buffer.getChannelData(0)[0] > 0.2, 'o 1.º instante já tem som', String(corte1.buffer.getChannelData(0)[0]));
+
+  // (c) Entrada suave de propósito (som desde o início) fica como está.
+  const suave = new BufferFalso(2, 1, 1000);
+  const d2 = suave.getChannelData(0);
+  for (let i = 0; i < d2.length; i += 1) d2[i] = 0.02;
+  const corte2 = musica.recortarSilencioInicial(suave, ctxBuf);
+  check(corte2.corte === 0, 'não mexe numa introdução baixinha mas audível', String(corte2.corte));
+
+  // (d) Ficheiro mudo: não inventa corte nenhum.
+  const mudo = new BufferFalso(1, 1, 1000);
+  check(musica.recortarSilencioInicial(mudo, ctxBuf).corte === 0, 'ficheiro em silêncio total: não corta nada', 'cortou');
+
+  // (e) Pelo motor: o corte chega ao resultado (a página pode dizê-lo).
+  const ctx2 = instalarAmbiente([], { musicaSegundos: 3 });
+  const comGap = new BufferFalso(3, 1, 1000);
+  const dg = comGap.getChannelData(0);
+  for (let i = 300; i < dg.length; i += 1) dg[i] = 0.4;
+  // Só se troca a descodificação DESTE ambiente (é `ultimoCtx`, o que o
+  // `correrCom` faz avançar no tempo): criar outro AudioContext deixava o
+  // relógio parado e a gravação nunca acabava.
+  ctx2.decodeAudioData = () => Promise.resolve(comGap);
+  const r = await correrCom(
+    mod.gerarVideo({
+      cenas: [{ imagem: 'c1', audio: null, semFala: true, texto: '' }],
+      duracaoCena: 2, musica: { name: 'm.mp3', arrayBuffer: () => Promise.resolve(new ArrayBuffer(8)) },
+      modoDuracao: 'trilha', musicaSegundos: 3,
+    }),
+  );
+  check(r.ok === true, 'gera com a trilha cortada', JSON.stringify(r).slice(0, 110));
+  check(Math.abs(r.trilhaCorte - 0.3) < 0.03, `o resultado diz o corte (${r.trilhaCorte.toFixed(2)}s)`, String(r.trilhaCorte));
+  check(Math.abs(r.musicaSegundos - 2.7) < 0.05, `a duração usada é a da música já sem o silêncio (${r.musicaSegundos.toFixed(2)}s)`, String(r.musicaSegundos));
 }
 
 console.log(falhas.length ? `\n=== ${falhas.length} FALHA(S) ===` : '\n=== GERAÇÃO DE VÍDEO OK ===');

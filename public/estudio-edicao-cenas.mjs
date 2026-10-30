@@ -41,15 +41,19 @@ export function dadosDoCorte(cena) {
   return {
     inicio: Number(inicio.toFixed(2)),
     fim: Number(fim.toFixed(2)),
-    volume: Math.max(0, Math.min(1, Number(cena?.videoVolume ?? 1))),
-    mudo: Boolean(cena?.videoMudo),
+    // O som do clipe não é usado (nem se guarda escolha de volume): mantêm-se
+    // os campos só para os projetos antigos não perderem o corte.
+    volume: 0,
+    mudo: true,
   };
 }
 
 // O que o motor do vídeo (video.mjs) precisa de cada cena de vídeo.
+// O SOM vai sempre a zero: o áudio do clipe não entra no vídeo (o motor ainda
+// força `muted` no elemento, isto é a segunda trava).
 export function camposParaMotor(cena) {
-  const { inicio, fim, volume, mudo } = dadosDoCorte(cena);
-  return { videoInicio: inicio, videoFim: fim, videoVolume: volume, videoMudo: mudo };
+  const { inicio, fim } = dadosDoCorte(cena);
+  return { videoInicio: inicio, videoFim: fim, videoVolume: 0, videoMudo: true };
 }
 
 // Duração da cena de vídeo DEPOIS do corte — é ela que manda no ritmo.
@@ -98,7 +102,8 @@ function removerCena(img, cena) {
 }
 
 // ---------------------------------------------------------------- pré-escuta
-// Toca SÓ o trecho escolhido, com o volume (ou mudo) escolhido.
+// Toca SÓ o trecho escolhido, SEM som: é assim que ele entra no vídeo (o áudio
+// do clipe nunca é usado), por isso a prévia mostra exatamente o resultado.
 function ligarVerTrecho(vid, cena, btn, estado) {
   let tocando = false;
   const limpar = () => {
@@ -115,8 +120,8 @@ function ligarVerTrecho(vid, cena, btn, estado) {
     }
     const c = dadosDoCorte(cena);
     if (!(c.fim > c.inicio)) return toast('Defina um trecho válido: o fim depois do início.', 'err');
-    vid.muted = c.mudo;
-    vid.volume = c.volume;
+    vid.muted = true;
+    vid.volume = 0;
     try {
       vid.currentTime = c.inicio;
     } catch {
@@ -124,7 +129,7 @@ function ligarVerTrecho(vid, cena, btn, estado) {
     }
     tocando = true;
     btn.textContent = '⏹ Parar';
-    if (estado) estado.textContent = `a tocar ${sDois(c.inicio)}s → ${sDois(c.fim)}s${c.mudo ? ' · SEM som' : ` · som a ${Math.round(c.volume * 100)}%`}`;
+    if (estado) estado.textContent = `a tocar ${sDois(c.inicio)}s → ${sDois(c.fim)}s · sem som (o vídeo não usa o áudio do clipe)`;
     vid.ontimeupdate = () => {
       if (vid.currentTime >= c.fim) {
         vid.pause();
@@ -241,32 +246,16 @@ export function preencherCenaVideo(li, cena, img, indice) {
   inpFim.inp.addEventListener('change', aplicarCorte);
   linhaCorte.append(inpInicio.la, inpFim.la, trecho);
 
+  // O som do clipe NÃO tem controlo porque NÃO ENTRA no vídeo: um clipe anexado
+  // traz quase sempre fala ou ruído de origem, que se sobrepunha à narração e à
+  // trilha. O vídeo usa a IMAGEM do clipe; o som é sempre narração + trilha.
+  // Fica a nota, para não haver dúvida do que aconteceu ao som.
   const linhaSom = document.createElement('div');
   linhaSom.className = 'cve-linha';
-  const chkMudo = document.createElement('input');
-  chkMudo.type = 'checkbox';
-  chkMudo.checked = cortes.mudo;
-  const laMudo = document.createElement('label');
-  laMudo.className = 'cve-campo';
-  laMudo.append(chkMudo, document.createTextNode('sem som do vídeo'));
-  const rngVol = document.createElement('input');
-  rngVol.type = 'range';
-  rngVol.min = '0';
-  rngVol.max = '100';
-  rngVol.step = '5';
-  rngVol.value = String(Math.round(cortes.volume * 100));
-  const volLabel = document.createElement('span');
-  volLabel.className = 'cve-trecho';
-  volLabel.textContent = cortes.mudo ? 'sem som' : `som a ${Math.round(cortes.volume * 100)}%`;
-  const aplicarSom = () => {
-    cena.videoMudo = chkMudo.checked;
-    cena.videoVolume = Number(rngVol.value) / 100;
-    volLabel.textContent = chkMudo.checked ? 'sem som' : `som a ${rngVol.value}%`;
-    guardar();
-  };
-  rngVol.oninput = aplicarSom;
-  chkMudo.onchange = aplicarSom;
-  linhaSom.append(laMudo, rngVol, volLabel);
+  const notaSom = document.createElement('span');
+  notaSom.className = 'cve-trecho';
+  notaSom.textContent = '🔇 O som do clipe não entra no vídeo — só a narração e a trilha.';
+  linhaSom.append(notaSom);
 
   const estado = document.createElement('span');
   estado.className = 'hint cve-estado';

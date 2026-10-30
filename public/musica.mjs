@@ -71,6 +71,41 @@ function cortar(buffer, segundos, ctx) {
   return novo;
 }
 
+// SILÊNCIO NO INÍCIO DA FAIXA: muitos MP3/WAV começam com 0,2 a 2 s de nada
+// (sobra de masterização). Com a trilha a entrar no segundo 0 do vídeo, esse
+// nada ouvia-se como "a música só começa depois" — e o vídeo parecia sem som no
+// arranque. Aqui mede-se o primeiro instante com som e corta-se o que vem antes.
+//
+// Só se corta silêncio DIGITAL (abaixo de ~-48 dB) e nunca mais de MAX_CORTE
+// segundos: uma entrada suave de propósito (piano, cordas) fica como está.
+const LIMIAR_SOM = 0.004;
+const MAX_CORTE = 2;
+
+export function recortarSilencioInicial(buffer, ctx) {
+  if (!buffer || !buffer.length) return { buffer, corte: 0 };
+  const dados = buffer.getChannelData(0);
+  const taxa = buffer.sampleRate || 44100;
+  let primeiro = -1;
+  for (let i = 0; i < dados.length; i += 1) {
+    if (Math.abs(dados[i]) > LIMIAR_SOM) {
+      primeiro = i;
+      break;
+    }
+  }
+  // Nada de som (ficheiro mudo) ou som desde a primeira amostra: fica igual.
+  if (primeiro <= 0) return { buffer, corte: 0 };
+  const corte = primeiro / taxa;
+  // Abaixo de ~1 frame de áudio não vale a pena mexer.
+  if (corte < 0.02) return { buffer, corte: 0 };
+  // Acima do limite: corta só os primeiros MAX_CORTE segundos (o resto é
+  // provavelmente uma introdução em silêncio intencional).
+  const inicio = Math.min(primeiro, Math.floor(MAX_CORTE * taxa));
+  const n = dados.length - inicio;
+  const novo = ctx.createBuffer(1, n, taxa);
+  novo.getChannelData(0).set(dados.subarray(inicio));
+  return { buffer: novo, corte: inicio / taxa };
+}
+
 // Lê o ficheiro escolhido e devolve a música pronta a tocar.
 // Devolve sempre { ok } — nunca atira, para a página poder explicar o que falhou.
 export async function carregarTrilha(ficheiro, ctx) {
@@ -103,8 +138,19 @@ export async function carregarTrilha(ficheiro, ctx) {
     ? `A música tinha ${formatarDuracao(buffer.duration)}; usei só os primeiros ${LIMITE_MINUTOS} minutos (repete na mesma).`
     : '';
 
-  const musica = cortar(paraMono(buffer), MINUTOS, ctx);
-  return { ok: true, musica, duracao: musica.duration, aviso };
+  // Mono, dentro do limite e SEM silêncio no arranque: a trilha tem de soar no
+  // primeiro fotograma do vídeo (era este o "começa tarde" que se ouvia).
+  const mono = cortar(paraMono(buffer), MINUTOS, ctx);
+  const { buffer: musica, corte } = recortarSilencioInicial(mono, ctx);
+  return {
+    ok: true,
+    musica,
+    duracao: musica.duration,
+    // Quanto silêncio inicial foi cortado (0 = o ficheiro já começa com som).
+    // A página mostra-o na mensagem final do vídeo.
+    corte,
+    aviso,
+  };
 }
 
 // ============================================================

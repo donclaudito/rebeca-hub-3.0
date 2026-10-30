@@ -22,7 +22,7 @@ import { ajustarCues } from './srt.mjs';
 // Versão do motor. Aparece no resumo da página: serve para saber, sem dúvidas,
 // qual build está a correr no browser (um build antigo em cache foi uma das
 // causas de "não funcionou" que já apanhei).
-export const VERSAO_VIDEO = '3.9.12';
+export const VERSAO_VIDEO = '3.9.13';
 
 // Duração do FECHO: nos últimos segundos do vídeo (quando há trilha), a música
 // esmaece até ao silêncio e a imagem apaga suavemente para preto.
@@ -843,6 +843,9 @@ export async function gerarVideo({
   let musicaBuffer = null;
   let modTrilha = null;
   let avisoTrilha = '';
+  // Quantos segundos de silêncio foram tirados do início do ficheiro (0 = já
+  // começava com som). Vai no resultado para a página o poder dizer.
+  let corteTrilha = 0;
   if (musica) {
     try {
       modTrilha = await import('./musica.mjs');
@@ -853,6 +856,7 @@ export async function gerarVideo({
         musicaReal = r.duracao;
         musicaBuffer = r.musica;
         avisoTrilha = r.aviso;
+        corteTrilha = Number(r.corte) || 0;
       } else {
         musicaAviso = r.erro;
       }
@@ -869,22 +873,26 @@ export async function gerarVideo({
   // precisa (senão as duas passagens sobrepunham-se). Sem voz, é a duração fixa.
   const duracoes = duracoesDasCenas(marcaSemFala, clipes, T, duracaoCena, cenas);
 
-  // O SOM das cenas de vídeo vem do próprio ficheiro, tocado em tempo real e
-  // ligado ao mesmo destino da narração e da trilha (entra no vídeo gravado).
-  for (const [i, v] of elementosVideo.entries()) {
+  // O SOM PRÓPRIO DAS CENAS DE VÍDEO NÃO ENTRA NO FILME.
+  //
+  // Um clipe anexado traz quase sempre fala ou ruído de origem, que se
+  // sobrepunha à narração e à trilha (e às vezes em língua estrangeira). O
+  // vídeo do Rebeca Hub usa apenas a IMAGEM do clipe; o som é sempre narração
+  // + trilha. Por isso o ganho da cena é 0 e o próprio elemento fica MUDO
+  // (duas travas: se a ligação ao grafo falhar, o browser não toca nada).
+  for (const v of elementosVideo) {
     if (!v) continue;
+    // `muted` e não `volume = 0`: o mudo vale também fora do grafo de áudio.
+    try { v.muted = true; } catch { /* elemento estranho (testes) */ }
+    try { v.volume = 0; } catch { /* idem */ }
     try {
-      // O volume (ou o mudo) da cena passa por um ganho próprio, antes do
-      // ganho geral — é o "Ajustar áudio" da edição da cena.
       const ganhoDaCena = seq.ctx.createGain();
-      ganhoDaCena.gain.value = cenas[i].videoMudo
-        ? 0
-        : Math.max(0, Math.min(1, Number(cenas[i].videoVolume ?? 1)));
+      ganhoDaCena.gain.value = 0;
       seq.ctx.createMediaElementSource(v).connect(ganhoDaCena);
       ganhoDaCena.connect(seq.ganho);
-    } catch (e) {
-      try { await seq.ctx.close(); } catch { /* já fechado */ }
-      return { ok: false, erro: `não consegui ligar o som de um vídeo da montagem: ${e.message}` };
+    } catch {
+      // Sem grafo o clipe continua mudo (as duas travas acima). Não é razão
+      // para falhar a gravação: a imagem entra e o som fica só com a trilha.
     }
   }
   const natural = duracoes.reduce((a, d) => a + d, 0);
@@ -1347,6 +1355,8 @@ export async function gerarVideo({
     transicao,
     comMusica: Boolean(trilha && trilha.comecou),
     musicaAviso,
+    // Silêncio tirado do início da trilha (s) — a trilha entra no 0:00.
+    trilhaCorte: corteTrilha,
     legendas: listaCues.length,
     srt: listaCues.length ? legendasParaSrt(listaCues) : '',
     legendasDaLetra: Boolean(querLegendas && externas.length),

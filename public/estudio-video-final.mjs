@@ -288,6 +288,9 @@ export async function gerarVideoFinal() {
         `${r.tempoExtra > 0.2
           ? `🎵 A música acabou junto com o vídeo: a última imagem ficou mais ${Math.round(r.tempoExtra)}s para a trilha não ser cortada. `
           : ''}` +
+        `${r.trilhaCorte > 0.05
+          ? `🎵 A trilha entra logo no 0:00 (tirei ${(Math.round(r.trilhaCorte * 10) / 10).toString().replace('.', ',')}s de silêncio do início do ficheiro). `
+          : ''}` +
         `${r.legendas ? `${r.legendas} bloco(s) de legenda${r.legendasDaLetra ? ' (da letra)' : ''}. ` : ''}` +
         `Descarregado como ${nome}${r.srt ? ' e rebeca-video.srt' : ''}.` +
         `${r.musicaAviso ? ` ⚠️ ${r.musicaAviso}` : ''} (motor v${r.versao})` +

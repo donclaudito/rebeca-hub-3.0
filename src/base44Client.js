@@ -1,14 +1,17 @@
 // Cliente Base44 do Rebeca Hub 3.0.
 //
-// O `appId` vem da variável VITE_BASE44_APP_ID (ficheiro .env.local). O token
-// de acesso é gerido pelo próprio SDK — a app pode ser pública ou exigir sessão,
-// conforme a configuração do app na Base44.
+// O `appId` vem da variável VITE_BASE44_APP_ID (ficheiro .env.local) e, se ela
+// faltar, cai no id fixo da app. Esse id NÃO é um segredo — é o mesmo que
+// aparece no URL público da app — e tê-lo aqui evita a falha que aconteceu: um
+// build feito sem .env.local publicava uma página que não arrancava.
 import { createClient, getAccessToken } from '@base44/sdk';
 
-const appId = import.meta.env.VITE_BASE44_APP_ID;
+const APP_ID_DE_RESERVA = '6acd249f4ace16d50aecdc9b';
+
+const appId = import.meta.env.VITE_BASE44_APP_ID || APP_ID_DE_RESERVA;
 
 if (!appId) {
-  // Falha cedo e com uma mensagem clara: sem appId não há funções de nuvem.
+  // Só acontece se o id de reserva for apagado: sem appId não há nuvem.
   throw new Error(
     'Falta o VITE_BASE44_APP_ID. Crie um ficheiro .env.local com a linha:\n' +
       'VITE_BASE44_APP_ID=o_id_do_seu_app',

@@ -15,10 +15,10 @@
     "test:all": "npm test && npm run test:2 && npm run test:3 && npm run test:4"
   },
   "dependencies": {
-    "@base44/sdk": "^0.8.56"
+    "@base44/sdk": "^0.8.57"
   },
   "devDependencies": {
-    "@base44/vite-plugin": "^1.0.47",
+    "@base44/vite-plugin": "^1.0.50",
     "vite": "^8.2.0"
   }
 }

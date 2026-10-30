@@ -1478,9 +1478,12 @@ function notaCiclo() {
       'o vídeo fica com a duração das imagens. Experimente outro ficheiro (MP3 ou WAV).';
   }
   if (r.passagens === 1) {
-    return ` ℹ️ A música (${formatarMinutos(r.alvo)}) não é mais longa do que o vídeo (${formatarMinutos(r.total)}): não há nada a repetir.`;
+    return ` ℹ️ A música (${formatarMinutos(r.alvo)}) não é mais longa do que o vídeo (${formatarMinutos(r.total)}): não há nada a repetir. A música toca em ciclo por baixo.`;
   }
-  return ` 🔁 REPETE: as imagens passam ${r.passagens}×, até cobrir a música de ${formatarMinutos(r.alvo)}. O vídeo acaba na última cena (${formatarMinutos(r.total)}) e a música para junto.`;
+  // A promessa que dá nome ao chip: o vídeo NUNCA acaba antes da música. Se as
+  // imagens não dividirem o tempo certo, é a última imagem que fica mais tempo;
+  // a trilha nunca é cortada a meio (era o que estava a acontecer com epílogo).
+  return ` 🔁 REPETE: as imagens passam ${r.passagens}×, até cobrir a música de ${formatarMinutos(r.alvo)}. O vídeo cobre a música TODA e acaba com ela — se sobrar tempo, a última imagem fica mais tempo no ecrã para a trilha não ser cortada.`;
 }
 
 // Quanto tempo o vídeo levaria sem repetir nada.

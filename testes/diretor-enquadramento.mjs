@@ -62,6 +62,17 @@ globalThis.URL.createObjectURL = () => 'blob:x';
 globalThis.URL.revokeObjectURL = () => {};
 globalThis.Blob = class { constructor() { this.size = 10; this.type = 'image/jpeg'; } };
 globalThis.File = class { constructor(partes, nome) { this.name = nome; this.size = 10; } };
+// A análise do Diretor manda as imagens DENTRO do pedido (data URL), para não
+// gastar o armazenamento da Base44: o browser falso tem de saber ler ficheiros.
+globalThis.FileReader = class {
+  readAsDataURL() {
+    setTimeout(() => {
+      this.result =
+        'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+      this.onload?.();
+    }, 0);
+  }
+};
 
 // Imagem falsa: 200×300 com o personagem a começar na LINHA 0 (a cabeça sai
 // pela borda de cima) — é a falta mais grave e a que exige gerar de novo.

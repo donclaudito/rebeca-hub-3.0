@@ -21,6 +21,45 @@ const json = (corpo, status = 200) =>
 
 const corte = (t, n) => String(t || '').trim().slice(0, n);
 
+// O `deepseek-flash` NÃO descarrega imagens por URL: mesmo um URL público
+// devolve 400 "Failed to download image from <url>" (verificado com a chave da
+// app). As imagens têm de ir em base64, dentro do pedido.
+// Limites para o pedido não crescer sem controlo (base64 ocupa +33%).
+const MAX_IMAGEM_BYTES = 3 * 1024 * 1024;
+const MAX_TOTAL_BYTES = 8 * 1024 * 1024;
+
+// A IA aceita exatamente webp, png, jpeg e gif. O Content-Type do ficheiro
+// não serve para decidir (vem `application/octet-stream` e o input da app
+// aceita HEIC/AVIF/BMP/TIFF): o formato é lido dos primeiros bytes.
+const FORMATOS_IA = [
+  { tipo: 'image/jpeg', assinatura: [0xff, 0xd8, 0xff] },
+  { tipo: 'image/png', assinatura: [0x89, 0x50, 0x4e, 0x47] },
+  { tipo: 'image/gif', assinatura: [0x47, 0x49, 0x46, 0x38] },
+  { tipo: 'image/webp', assinatura: [0x52, 0x49, 0x46, 0x46] }, // "RIFF" (WEBP aos 8)
+];
+
+export function formatoDeImagem(bytes) {
+  for (const f of FORMATOS_IA) {
+    if (f.assinatura.every((b, i) => bytes[i] === b)) {
+      // "RIFF" também é wav/avi: confirmar WEBP no offset 8.
+      if (f.tipo === 'image/webp') {
+        const webp = [0x57, 0x45, 0x42, 0x50].every((b, i) => bytes[8 + i] === b);
+        if (!webp) continue;
+      }
+      return f.tipo;
+    }
+  }
+  return '';
+}
+
+function base64De(bytes) {
+  if (typeof bytes.toBase64 === 'function') return bytes.toBase64();
+  if (typeof Buffer !== 'undefined') return Buffer.from(bytes).toString('base64');
+  let s = '';
+  for (let i = 0; i < bytes.length; i += 1) s += String.fromCharCode(bytes[i]);
+  return btoa(s);
+}
+
 export default async function (req) {
   try {
     if (req.method !== 'POST') return json({ ok: false, error: 'Use POST.' }, 405);
@@ -36,33 +75,97 @@ export default async function (req) {
         ? { ...bruto, ...bruto.data }
         : bruto || {};
 
-    // Até 9 imagens (miniatura + cenas), cada uma pelo seu file_uri privado —
-    // nunca um URL vindo de fora.
-    const arquivos = (Array.isArray(corpo.arquivos) ? corpo.arquivos : [])
-      .filter((a) => a && typeof a.uri === 'string' && a.uri && a.uri.length < 500)
-      .slice(0, 9)
-      .map((a) => ({ nome: corte(a.nome, 80), uri: a.uri }));
-    if (!arquivos.length) {
-      return json({ ok: false, error: 'Envie as imagens da montagem (miniatura e cenas).' }, 400);
+    // Até 9 imagens (miniatura + cenas). Duas formas de receber:
+    //   1. `dataUrl` — a imagem vem DENTRO do pedido. É o caminho normal e não
+    //      gasta créditos de armazenamento (que respondem 402 quando acabam);
+    //   2. `uri` — o file_uri privado (caminho antigo, continua aceite).
+    const recebidos = Array.isArray(corpo.arquivos) ? corpo.arquivos : [];
+    const inline = recebidos
+      .map((a) => ({ nome: corte(a?.nome, 80), dataUrl: String(a?.dataUrl || '').trim() }))
+      .filter((a) => a.dataUrl.startsWith('data:image/') && a.dataUrl.length < 4_000_000)
+      .slice(0, 9);
+    const arquivos = recebidos
+      .map((a) => ({ nome: corte(a?.nome, 80), uri: String(a?.uri || a?.file_uri || '').trim() }))
+      .filter((a) => a.uri && a.uri.length < 500)
+      .slice(0, 9);
+    if (!inline.length && !arquivos.length) {
+      return json(
+        {
+          ok: false,
+          error:
+            `Envie as imagens da montagem (miniatura e cenas): chegaram ${recebidos.length} ficheiro(s) ` +
+            'e nenhum trazia uma imagem utilizável.',
+          debug: {
+            recebidos: recebidos.length,
+            primeiro: recebidos[0] && typeof recebidos[0] === 'object' ? Object.keys(recebidos[0]) : null,
+          },
+        },
+        400,
+      );
     }
 
-    // Assina cada imagem (as imagens da app são privadas): o modelo precisa de
-    // um URL aberto por alguns minutos para as ler.
-    const assinados = await Promise.allSettled(
-      arquivos.map(async (a) => {
-        const r = await base44.asServiceRole.integrations.Core.CreateFileSignedUrl({
-          file_uri: a.uri,
-          expires_in: 600,
-        });
-        return { nome: a.nome, url: r.signed_url };
-      }),
-    );
-    const urls = assinados
-      .filter((x) => x.status === 'fulfilled' && x.value && x.value.url)
-      .map((x) => x.value);
-    if (!urls.length) {
-      return json({ ok: false, error: 'Não consegui abrir as imagens da montagem.' }, 502);
+    // As imagens que vieram DENTRO do pedido já trazem os bytes: só é preciso
+    // conferir o formato (pelos primeiros bytes) e o tamanho.
+    const imagens = [];
+    const motivos = [];
+    let totalBytes = 0;
+    const juntar = (nome, bytes) => {
+      const tipo = formatoDeImagem(bytes);
+      if (!tipo) {
+        motivos.push(`${nome || 'imagem'}: formato não aceite pela IA`);
+        return;
+      }
+      if (bytes.length > MAX_IMAGEM_BYTES) {
+        motivos.push(`${nome || 'imagem'}: demasiado grande (${Math.round(bytes.length / 1048576)} MB)`);
+        return;
+      }
+      if (totalBytes + bytes.length > MAX_TOTAL_BYTES) {
+        motivos.push(`${nome || 'imagem'}: passa do limite total`);
+        return;
+      }
+      totalBytes += bytes.length;
+      imagens.push(`data:${tipo};base64,${base64De(bytes)}`);
+    };
+
+    for (const a of inline) {
+      const m = /^data:([^;,]+);base64,([\s\S]+)$/.exec(a.dataUrl);
+      if (!m) {
+        motivos.push(`${a.nome || 'imagem'}: data URL inválida`);
+        continue;
+      }
+      try {
+        juntar(a.nome, Uint8Array.from(atob(m[2]), (c) => c.charCodeAt(0)));
+      } catch {
+        motivos.push(`${a.nome || 'imagem'}: não consegui descodificar`);
+      }
     }
+
+    // As que vieram por URI privado NÃO são descarregadas aqui: assinar e
+    // descarregar ficheiros gasta os créditos de integrações da Base44, e essa
+    // é a conta que não se quer usar nesta app (o 402 a meio de uma análise
+    // deixava o Diretor sem imagens). A página envia tudo em base64; se algo
+    // chegar só como URI, diz-se o que fazer em vez de gastar créditos.
+    if (arquivos.length) {
+      motivos.push(
+        `${arquivos.length} imagem(ns) vieram como ficheiro privado (uri) e não são descarregadas ` +
+          '(gastaria créditos da Base44)',
+      );
+    }
+
+    if (!imagens.length) {
+      return json(
+        {
+          ok: false,
+          error:
+            'Não consegui ler as imagens da montagem: ' +
+            (motivos.slice(0, 2).join('; ') || 'nenhuma imagem utilizável') +
+            '. Gere o vídeo de novo e repita a análise.',
+          debug: { ficheiros: inline.length + arquivos.length, motivos: motivos.slice(0, 4) },
+        },
+        502,
+      );
+    }
+    if (motivos.length) console.warn('[analisarProducao] imagens ignoradas', motivos.slice(0, 6));
 
     // Os dados da gravação entram como texto: é o contexto de montagem que a
     // imagem sozinha não diz (duração, transição, epílogo, ciclo, legendas…).
@@ -151,7 +254,10 @@ export default async function (req) {
     const chamada = await pedirJSON({
       modelo: '',
       temperatura: 0.4,
-      imagens: urls.map((u) => u.url),
+      // A análise do Diretor é longa (três textos + melhorias + prompt): dar
+      // orçamento próprio evita o JSON cortado a meio.
+      maxTokens: 12000,
+      imagens,
       texto: [
         'Você é um Diretor de Fotografia e Editor de Vídeo Profissional analisando um vídeo infantil montado no browser a partir de imagens fixas, com transições, narração opcional e trilha sonora opcional.',
         'As imagens em anexo, por ordem: a PRIMEIRA é um fotograma do vídeo pronto (miniatura, captada no início da gravação); as seguintes são as cenas, na ordem em que aparecem no vídeo.',
@@ -223,6 +329,9 @@ export default async function (req) {
       sincronia,
       melhorias,
       promptRefinado,
+      // Quantas cenas ficaram de fora (formato não aceite / descarga falhada):
+      // aparece na resposta e evita a dúvida "porque é que ele não viu a cena 2?".
+      ...(motivos.length ? { ignoradas: motivos } : {}),
       ...(aplicar ? { aplicar } : {}),
     });
   } catch (erro) {

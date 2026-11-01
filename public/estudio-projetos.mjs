@@ -217,20 +217,29 @@ export async function guardarProjetoAgora(opcoes = {}) {
     // nuvem: é o que mantém a cópia da app em dia quando se reedita e salva
     // outra vez. Um projeto NOVO só vai para a nuvem quando o utilizador pedir
     // (ou ao guardar o vídeo dele).
+    // A cópia na nuvem é um EXTRA: se falhar (créditos, rede), o projeto já
+    // está guardado neste computador e o save NÃO se reporta como falhado.
+    let avisoNuvem = '';
     if (!comoNovo && projetos.nuvemId) {
       estadoProjeto('a guardar também na nuvem…');
-      const nuvem = await import('./projeto-nuvem.mjs');
-      projetos.nuvemId = await nuvem.guardarProjetoNuvem(dados, projetos.nuvemId);
-      await mod.guardarProjeto({ ...dados, nuvemId: projetos.nuvemId });
+      try {
+        const nuvem = await import('./projeto-nuvem.mjs');
+        projetos.nuvemId = await nuvem.guardarProjetoNuvem(dados, projetos.nuvemId);
+        await mod.guardarProjeto({ ...dados, nuvemId: projetos.nuvemId });
+      } catch (e) {
+        avisoNuvem = e.message;
+        toast(`Guardado neste computador. A nuvem falhou: ${e.message}`, 'err');
+      }
     }
     estadoProjeto(
       (comoNovo
         ? `Projeto NOVO "${dados.nome}" guardado${nomeAnterior ? ` — o "${nomeAnterior}" ficou como estava` : ''} · `
         : renomear && nomeAnterior && nomeAnterior !== dados.nome
           ? `Projeto renomeado para "${dados.nome}" · `
-          : `Projeto "${dados.nome}" guardado${projetos.nuvemId ? ' (aqui e na nuvem)' : ''} · `) +
-        `${dados.cenas.length} imagem(ns) · ${mod.tamanhoLegivel(mod.tamanhoDe(dados))}`,
-      'ok',
+          : `Projeto "${dados.nome}" guardado${avisoNuvem ? ' (só aqui — a nuvem falhou)' : projetos.nuvemId ? ' (aqui e na nuvem)' : ''} · `) +
+        `${dados.cenas.length} imagem(ns) · ${mod.tamanhoLegivel(mod.tamanhoDe(dados))}` +
+        `${avisoNuvem ? ` ⚠️ ${avisoNuvem}` : ''}`,
+      avisoNuvem ? 'err' : 'ok',
     );
     toast(
       comoNovo
@@ -302,6 +311,12 @@ export async function guardarNuvemAgora() {
     toast('Projeto guardado na nuvem. Está no 📺 Painel, em "Projetos guardados na nuvem".', 'ok');
     await desenharProjetos();
   } catch (e) {
+    const { semCreditos, MENSAGEM_SEM_CREDITOS } = await import('./creditos.mjs');
+    if (semCreditos(e)) {
+      estadoProjeto(`❌ ${MENSAGEM_SEM_CREDITOS}`, 'err');
+      toast('Sem créditos na Base44 para guardar na nuvem. O projeto está guardado neste computador.', 'err');
+      return;
+    }
     estadoProjeto(`❌ ${e.message}`, 'err');
     toast(e.message, 'err');
   } finally {

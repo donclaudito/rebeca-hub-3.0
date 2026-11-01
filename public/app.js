@@ -2311,6 +2311,15 @@ async function guardarNaNuvem() {
       /* sem janela (testes) */
     }
   } catch (e) {
+    // 402 = a Base44 recusou por falta de créditos de integrações (é o único
+    // sítio desta app que os usa: o armazenamento). Diz-se o que fazer, em vez
+    // de "Request failed with status code 402".
+    const { semCreditos, MENSAGEM_SEM_CREDITOS } = await import('./creditos.mjs');
+    if (semCreditos(e)) {
+      estadoVideo(`❌ ${MENSAGEM_SEM_CREDITOS}`, 'err');
+      toast('Sem créditos na Base44 para guardar na nuvem. O vídeo continua aqui — descarregue-o.', 'err');
+      return;
+    }
     estadoVideo(`❌ Não consegui guardar na nuvem: ${e.message}`, 'err');
     toast(`Não consegui guardar na nuvem: ${e.message}`, 'err');
   } finally {

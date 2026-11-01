@@ -57,17 +57,41 @@ export function explicarErroDeepSeek(status, detalhe) {
   return d.slice(0, 300) || `a DeepSeek respondeu ${status}`;
 }
 
-// Tira as cercas ```json que alguns modelos põem à volta do JSON.
-function limparJson(texto) {
+// Extrai o objeto JSON de uma resposta que pode vir com cercas, com texto à
+// volta ou truncada. Percorre as chaves equilibrando { } e [ ] e ignora o que
+// está dentro de strings (com escapes). O corte cego no primeiro { e no último
+// } estragava a resposta quando havia mais do que um objeto ou texto depois.
+export function limparJson(texto) {
   let t = String(texto || '').trim();
   if (t.startsWith('```')) t = t.replace(/^```[a-zA-Z]*\s*/, '').replace(/```\s*$/, '').trim();
-  // Se vier texto antes/depois, corta pelo primeiro { e pelo último }.
-  const i = t.indexOf('{');
-  const f = t.lastIndexOf('}');
-  if (i > 0 || (f >= 0 && f < t.length - 1)) {
-    if (i >= 0 && f > i) t = t.slice(i, f + 1);
+  const inicio = t.indexOf('{');
+  if (inicio < 0) return t;
+  let profundidade = 0;
+  let dentroDeTexto = false;
+  let escapado = false;
+  for (let i = inicio; i < t.length; i += 1) {
+    const c = t[i];
+    if (escapado) {
+      escapado = false;
+      continue;
+    }
+    if (c === '\\') {
+      escapado = true;
+      continue;
+    }
+    if (c === '"') {
+      dentroDeTexto = !dentroDeTexto;
+      continue;
+    }
+    if (dentroDeTexto) continue;
+    if (c === '{' || c === '[') profundidade += 1;
+    else if (c === '}' || c === ']') {
+      profundidade -= 1;
+      if (profundidade === 0) return t.slice(inicio, i + 1);
+    }
   }
-  return t;
+  // Não fechou: devolve do início ao fim (o parse falha e a repetição resolve).
+  return t.slice(inicio);
 }
 
 const espera = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -86,6 +110,10 @@ export async function pedirJSON({
   sistema = '',
   modelo = '',
   temperatura = 0.4,
+  // O `deepseek-flash` e um modelo que "pensa" antes de responder: o
+  // raciocinio conta para este orcamento. 8000 cobre a analise do Diretor (que
+  // e longa) com folga; se mesmo assim vier cortado, a repetição duplica-o.
+  maxTokens = 8000,
   timeout = 60_000,
   chave = '',
   buscar = null,
@@ -117,7 +145,11 @@ export async function pedirJSON({
   const escolhido = String(modelo || (imagens.length ? DEEPSEEK.modeloVisao : DEEPSEEK.modeloTexto)).trim();
   const inicio = Date.now();
 
-  for (let tentativa = 0; tentativa < 2; tentativa += 1) {
+  const mensagensBase = [...mensagens];
+  let orcamento = maxTokens;
+  let problema = '';
+
+  for (let tentativa = 0; tentativa < 3; tentativa += 1) {
     let resposta;
     try {
       resposta = await pedir(`${DEEPSEEK.url}/chat/completions`, {
@@ -125,8 +157,9 @@ export async function pedirJSON({
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${k}` },
         body: JSON.stringify({
           model: escolhido,
-          messages: mensagens,
+          messages: mensagensBase,
           temperature: temperatura,
+          max_tokens: orcamento,
           response_format: { type: 'json_object' },
         }),
         signal: AbortSignal.timeout(timeout),
@@ -146,7 +179,7 @@ export async function pedirJSON({
     if (!resposta.ok) {
       const detalhe = await resposta.text().catch(() => '');
       // 429/503 passam em segundos: repete UMA vez antes de desistir.
-      if ((resposta.status === 429 || resposta.status === 503) && tentativa === 0) {
+      if ((resposta.status === 429 || resposta.status === 503) && tentativa < 1) {
         await espera(1500);
         continue;
       }
@@ -155,24 +188,63 @@ export async function pedirJSON({
     }
 
     const corpo = await resposta.json().catch(() => ({}));
-    const textoResposta = corpo?.choices?.[0]?.message?.content;
+    const escolha = corpo?.choices?.[0] || {};
+    const textoResposta = escolha?.message?.content;
     if (!textoResposta) {
-      return { ok: false, status: 502, erro: 'A DeepSeek respondeu sem conteúdo. Tente outra vez.' };
-    }
-    let dados;
-    try {
-      dados = JSON.parse(limparJson(textoResposta));
-    } catch {
+      if (escolha.finish_reason === 'length' && tentativa < 2) {
+        orcamento = Math.min(orcamento * 2, 32000);
+        problema = 'sem conteúdo (limite de tokens)';
+        console.warn('[deepseek] resposta vazia por limite de tokens; a repetir com', orcamento);
+        continue;
+      }
       return {
         ok: false,
         status: 502,
-        erro: 'A DeepSeek respondeu num formato que não consegui ler (não era JSON). Tente outra vez.',
+        erro:
+          escolha.finish_reason === 'length'
+            ? 'A DeepSeek gastou o limite de tokens a pensar e não chegou a escrever a resposta. Tente com menos imagens.'
+            : 'A DeepSeek respondeu sem conteúdo. Tente outra vez.',
       };
     }
+
+    let dados = null;
+    try {
+      dados = JSON.parse(limparJson(textoResposta));
+    } catch {
+      dados = null;
+    }
     if (!dados || typeof dados !== 'object') {
-      return { ok: false, status: 502, erro: 'A DeepSeek devolveu uma resposta vazia.' };
+      problema = `${textoResposta.length} caracteres que não são JSON`;
+      console.warn(
+        '[deepseek] resposta não-JSON',
+        `finish=${escolha.finish_reason}`,
+        'inicio=',
+        textoResposta.slice(0, 200),
+        'fim=',
+        textoResposta.slice(-200),
+      );
+      if (tentativa < 2) {
+        if (escolha.finish_reason === 'length') orcamento = Math.min(orcamento * 2, 32000);
+        // Repetição guiada, na mesma conversa: o modelo sabe o que falhou e
+        // corrige em vez de repetir o mesmo erro.
+        mensagensBase.push({ role: 'assistant', content: textoResposta.slice(0, 4000) });
+        mensagensBase.push({
+          role: 'user',
+          content:
+            'A resposta anterior não era um objeto JSON válido (ou veio cortada). ' +
+            'Repete AGORA apenas o objeto JSON pedido, completo, sem texto antes ou depois, sem cercas de código.',
+        });
+        continue;
+      }
+      return {
+        ok: false,
+        status: 502,
+        erro:
+          `A DeepSeek não devolveu JSON válido (${problema}). ` +
+          'Tente outra vez; se repetir, a análise está a pedir uma resposta demasiado longa.',
+      };
     }
     return { ok: true, dados, texto: textoResposta, modelo: escolhido, ms: Date.now() - inicio };
   }
-  return { ok: false, status: 502, erro: 'A DeepSeek não respondeu depois de duas tentativas.' };
+  return { ok: false, status: 502, erro: 'A DeepSeek não respondeu com JSON válido depois de três tentativas.' };
 }

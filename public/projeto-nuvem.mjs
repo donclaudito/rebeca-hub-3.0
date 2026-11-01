@@ -34,18 +34,73 @@ const assinar = async (b, uri) =>
 
 // Guarda (ou atualiza, quando há id) um projeto na nuvem. Devolve o id.
 export async function guardarProjetoNuvem(dados, idNuvem) {
+  try {
+    return await enviarProjetoNuvem(dados, idNuvem);
+  } catch (e) {
+    // 402 = a Base44 recusou por falta de créditos do plano. Sem esta tradução
+    // a pessoa via "Request failed with status code 402".
+    if (e?.response?.status === 402 || /402|payment required/i.test(String(e?.message || ''))) {
+      throw new Error(
+        'A conta Base44 está SEM CRÉDITOS para guardar ficheiros na nuvem (erro 402). O projeto continua guardado NESTE computador; para voltar a ter cópia na nuvem, carregue créditos no painel da Base44 (Configurações → Faturação).',
+      );
+    }
+    throw e;
+  }
+}
+
+// Impressão digital barata de um ficheiro: nome + tamanho + tipo. Igual à da
+// última vez = é o mesmo ficheiro, não vale a pena subir outra vez (cada upload
+// é uma integração paga e um 402 quando os créditos acabam).
+export function impressaoDe(ficheiro, nome) {
+  return ficheiro ? `${nome || ''}|${Number(ficheiro.size) || 0}|${ficheiro.type || ''}` : '';
+}
+
+// Decide, cena a cena, o que precisa mesmo de subir. Puro de propósito: é a
+// regra que evita reenviar ficheiros iguais, e assim pode ser testada sem nuvem.
+export function planearEnvio(cenas = [], anteriores = []) {
+  return (cenas || []).map((cena, i) => {
+    const antes = anteriores[i] || {};
+    const imagemFp = impressaoDe(cena.imagem, cena.nome);
+    const audioFp = impressaoDe(cena.audio, cena.nome);
+    const reusarImagem = Boolean(imagemFp && antes.imagemFp === imagemFp && antes.imagem_uri);
+    const reusarAudio = Boolean(audioFp && antes.audioFp === audioFp && antes.audio_uri);
+    return {
+      cena,
+      imagemFp,
+      audioFp,
+      subirImagem: Boolean(cena.imagem) && !reusarImagem,
+      subirAudio: Boolean(cena.audio) && !reusarAudio,
+      imagem_uri: reusarImagem ? String(antes.imagem_uri) : '',
+      audio_uri: reusarAudio ? String(antes.audio_uri) : '',
+    };
+  });
+}
+
+async function enviarProjetoNuvem(dados, idNuvem) {
   const b = await cliente();
+  // Já existe uma cópia na nuvem? Aproveita os ficheiros que lá estão.
+  let anteriores = [];
+  if (idNuvem) {
+    try {
+      const reg = await b.entities.Projeto.get(idNuvem);
+      anteriores = cenasDe(reg);
+    } catch {
+      anteriores = [];
+    }
+  }
+
   const cenas = [];
-  for (const cena of dados.cenas || []) {
-    let imagem_uri = '';
-    let audio_uri = '';
-    if (cena.imagem) {
+  for (const plano of planearEnvio(dados.cenas, anteriores)) {
+    const { cena } = plano;
+    let imagem_uri = plano.imagem_uri;
+    let audio_uri = plano.audio_uri;
+    if (plano.subirImagem) {
       const r = await b.integrations.Core.UploadPrivateFile({
         file: new File([cena.imagem], cena.nome || 'imagem', { type: cena.imagem.type || 'image/png' }),
       });
       imagem_uri = r.file_uri;
     }
-    if (cena.audio) {
+    if (plano.subirAudio) {
       const r = await b.integrations.Core.UploadPrivateFile({
         file: new File([cena.audio], `${cena.nome || 'audio'}.${cena.audioExt || 'webm'}`, {
           type: cena.audio.type || 'audio/webm',
@@ -58,13 +113,17 @@ export async function guardarProjetoNuvem(dados, idNuvem) {
       texto: cena.texto || '',
       imagem_uri,
       audio_uri,
+      // Ficam guardadas para a próxima vez se poder saltar o upload.
+      imagemFp: plano.imagemFp,
+      audioFp: plano.audioFp,
       audioExt: cena.audioExt || '',
       previaVoz: cena.previaVoz || '',
       video: Boolean(cena.video),
       duracaoVideo: Number(cena.duracaoVideo) || 0,
       videoCorte: cena.videoCorte || null,
-      videoVolume: Number.isFinite(Number(cena.videoVolume)) ? Number(cena.videoVolume) : 1,
-      videoMudo: Boolean(cena.videoMudo),
+      // O som do próprio clipe nunca entra no vídeo (ver video.mjs).
+      videoVolume: 0,
+      videoMudo: true,
     });
   }
   // A entidade guarda as cenas como TEXTO JSON (a base não aceita listas de

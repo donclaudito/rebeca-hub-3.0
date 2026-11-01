@@ -1,4 +1,4 @@
-// ============================================================
+﻿// ============================================================
 //  Geração do vídeo no proprio browser
 //
 //  Não há ffmpeg na nuvem, por isso o vídeo é montado aqui: o browser desenha
@@ -22,7 +22,7 @@ import { ajustarCues } from './srt.mjs';
 // Versão do motor. Aparece no resumo da página: serve para saber, sem dúvidas,
 // qual build está a correr no browser (um build antigo em cache foi uma das
 // causas de "não funcionou" que já apanhei).
-export const VERSAO_VIDEO = '3.9.13';
+export const VERSAO_VIDEO = '3.9.14';
 
 // Duração do FECHO: nos últimos segundos do vídeo (quando há trilha), a música
 // esmaece até ao silêncio e a imagem apaga suavemente para preto.
@@ -571,8 +571,10 @@ function criarDesenhador({ ctx, w, h, imagens, inicios, duracoes, T, transicao, 
 // ---- som ----
 // O áudio vai para as colunas E para o gravador, através de um
 // MediaStreamAudioDestinationNode.
-function criarSequenciaAudio() {
-  const ctx = new AudioContext();
+function criarSequenciaAudio(ctxPronto) {
+  // Reaproveita o contexto acordado no clique (ver estudio-video-final.mjs);
+  // sem ele, cria um novo — o comportamento antigo.
+  const ctx = ctxPronto || new AudioContext();
   const destino = ctx.createMediaStreamDestination();
   const ganho = ctx.createGain();
   ganho.gain.value = 1;
@@ -678,6 +680,8 @@ export async function gerarVideo({
   duracaoEpilogo = 0,
   aoProgredir = () => {},
   deveParar = () => false,
+  // AudioContext já acordado pelo gesto do utilizador (opcional).
+  ctxAudio = null,
 }) {
   const querLegendas = Boolean(legendas);
   if (querLegendas && Array.isArray(legendasExternas)) {
@@ -794,7 +798,7 @@ export async function gerarVideo({
   }
 
   // 2) preparar o áudio
-  const seq = criarSequenciaAudio();
+  const seq = criarSequenciaAudio(ctxAudio);
 
   // O CONTEXTO DE ÁUDIO TEM DE ESTAR A CORRER. Se o browser o deixar SUSPENSO
   // (bloqueio de reprodução automática, página incorporada sem permissão), o
@@ -1251,8 +1255,19 @@ export async function gerarVideo({
 
       let interrompido = false;
       await new Promise((resolve) => {
-        resolverQuadro = resolve;
+        let vivo = true;
+        let empurrao = null;
+        const terminar = (porPedido = false) => {
+          if (!vivo) return;
+          vivo = false;
+          if (porPedido) interrompido = true;
+          clearInterval(empurrao);
+          resolverQuadro = null;
+          resolve();
+        };
+        resolverQuadro = () => terminar();
         const quadro = () => {
+          if (!vivo) return;
           const agora = relogio();
           // O "Parar" é ouvido a cada fotograma, não só entre cenas.
           const pedido = deveParar();
@@ -1260,12 +1275,11 @@ export async function gerarVideo({
           // relógio do áudio congelou e `agora` nunca mais avança.
           if (jaEstourou()) {
             pararPorPrazo();
-            resolve();
+            terminar();
             return;
           }
           if (agora >= inicios[i] + durFinal[i] || pedido) {
-            interrompido = pedido;
-            resolve();
+            terminar(pedido);
             return;
           }
           desenhar(i, agora);
@@ -1280,7 +1294,12 @@ export async function gerarVideo({
           });
           requestAnimationFrame(quadro);
         };
-        requestAnimationFrame(quadro);
+        // EMPURRÃO: em aba oculta o requestAnimationFrame deixa de ser chamado
+        // e o laço ficava congelado — o relógio do áudio continuava a andar e o
+        // vigia cortava a gravação toda. Os temporizadores são atrasados em
+        // segundo plano, mas não param: um por segundo basta para o laço fechar.
+        empurrao = setInterval(() => { if (vivo) quadro(); }, 1000);
+        quadro();
       });
 
       if (cenaDeVideo) {
@@ -1324,27 +1343,33 @@ export async function gerarVideo({
     try { await seq.ctx.close(); } catch { /* já fechado */ }
   }
 
-  if (estourou) {
-    return {
-      ok: false,
-      erro:
-        `A gravação passou do prazo de ${Math.round(prazoMs / 1000)} s para um vídeo de ` +
-        `${totalEfetivo.toFixed(0)} s e foi interrompida. O mais provável é o browser ter ` +
-        'suspenso o áudio — deixe esta aba visível e em primeiro plano durante a gravação. ' +
-        'O que já tinha sido gravado não foi aproveitado.',
-    };
-  }
-
   const blob = new Blob(pedacos, { type: mime });
   if (blob.size < 5000) {
     pedacos.length = 0;
-    return { ok: false, erro: 'a gravação ficou vazia — tente outra vez, sem mudar de janela durante a gravação' };
+    return {
+      ok: false,
+      erro: estourou
+        ? `A gravação foi interrompida no prazo de ${Math.round(prazoMs / 1000)} s sem nada ` +
+          'aproveitável. Deixe esta aba visível e em primeiro plano durante a gravação.'
+        : 'a gravação ficou vazia — tente outra vez, sem mudar de janela durante a gravação',
+    };
   }
 
   return {
     ok: true,
     blob,
     mime,
+    // O prazo estourou mas já havia vídeo gravado: entrega-se o que existe.
+    // Antes isto era um erro e o utilizador perdia os minutos já gravados.
+    ...(estourou
+      ? {
+          parcial: true,
+          aviso:
+            `A gravação foi cortada no prazo de ${Math.round(prazoMs / 1000)} s, com ` +
+            `${Math.round(acumulado)} s de ${totalEfetivo.toFixed(0)} s gravados. ` +
+            'Para o vídeo completo, deixe esta aba visível e em primeiro plano.',
+        }
+      : {}),
     // O que ficou REALMENTE gravado (pode não ser o que se pediu, se o browser
     // não souber fazer aquele codec).
     codec: /vp9/.test(mime) ? 'vp9' : /vp8/.test(mime) ? 'vp8' : 'desconhecido',

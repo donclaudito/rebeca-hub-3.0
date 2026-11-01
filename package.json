@@ -8,7 +8,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node testes/ligacoes.mjs && node testes/id-da-app.mjs && node testes/navegacao.mjs && node testes/reeditar.mjs && node testes/painel-nuvem.mjs && node testes/projeto-nome-novo.mjs && node testes/miniaturas.mjs && node testes/utilizador.mjs && node testes/urls-assinados.mjs && node testes/deepseek.mjs",
+    "test": "node testes/ligacoes.mjs && node testes/id-da-app.mjs && node testes/navegacao.mjs && node testes/reeditar.mjs && node testes/painel-nuvem.mjs && node testes/projeto-nome-novo.mjs && node testes/miniaturas.mjs && node testes/utilizador.mjs && node testes/urls-assinados.mjs && node testes/creditos.mjs && node testes/deepseek.mjs && node testes/analisar-producao-imagens.mjs",
     "test:2": "node testes/analise-enquadramento.mjs && node testes/diretor-enquadramento.mjs && node testes/legendas.mjs && node testes/enquadramento.mjs",
     "test:3": "node testes/projetos.mjs && node testes/fluxo.mjs",
     "test:4": "node testes/audio-duracao.mjs && node testes/interface.mjs && node testes/video.mjs && node testes/epilogo.mjs",

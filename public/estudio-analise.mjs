@@ -517,6 +517,89 @@ function metaDaMontagem(r, sinc = null) {
   };
 }
 
+// A app aceita "image/*" mas a IA só lê webp/png/jpeg/gif. Cada cena é
+// convertida para JPEG (máx. 1280 px) ANTES de subir: acaba com o 400
+// "unsupported image", reduz o pedido e a resposta chega mais depressa.
+const LADO_MAXIMO_ANALISE = 1280;
+const QUALIDADE_ANALISE = 0.82;
+
+async function cenaParaJpeg(ficheiro) {
+  const url = URL.createObjectURL(ficheiro);
+  try {
+    const imagem = await new Promise((resolve, reject) => {
+      const el = new Image();
+      el.onload = () => resolve(el);
+      el.onerror = () => reject(new Error(`não consegui ler ${ficheiro?.name || 'a imagem'}`));
+      el.src = url;
+    });
+    const largura = imagem.naturalWidth || 0;
+    const altura = imagem.naturalHeight || 0;
+    const maior = Math.max(largura, altura);
+    const escala = maior > LADO_MAXIMO_ANALISE ? LADO_MAXIMO_ANALISE / maior : 1;
+    const tela = document.createElement('canvas');
+    tela.width = Math.max(1, Math.round(largura * escala));
+    tela.height = Math.max(1, Math.round(altura * escala));
+    tela.getContext('2d').drawImage(imagem, 0, 0, tela.width, tela.height);
+    // Sem canvas/toBlob (browsers antigos, DOM falso dos testes) não há
+    // conversão: segue o original, e a função na nuvem decide pelos bytes.
+    if (typeof tela.toBlob !== 'function') return ficheiro;
+    const blob = await new Promise((resolve) => tela.toBlob(resolve, 'image/jpeg', QUALIDADE_ANALISE));
+    if (!blob) return ficheiro;
+    const nome = String(ficheiro?.name || 'cena').replace(/\.[^.]+$/, '') + '.jpg';
+    return new File([blob], nome, { type: 'image/jpeg' });
+  } catch {
+    // Qualquer falha (imagem que o canvas não lê, memória) cai para o original.
+    return ficheiro;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+// Lê o ficheiro em base64 para viajar DENTRO do pedido. É o caminho normal: não
+// toca no armazenamento da Base44, que responde 402 quando os créditos acabam.
+const lerComoDataUrl = (ficheiro) =>
+  new Promise((resolve) => {
+    try {
+      const fr = new FileReader();
+      fr.onload = () => resolve(String(fr.result || ''));
+      fr.onerror = () => resolve('');
+      fr.readAsDataURL(ficheiro);
+    } catch {
+      resolve('');
+    }
+  });
+
+// Segunda via para os bytes, sem FileReader: desenha no canvas e pede o JPEG.
+// Só existe para a análise NUNCA precisar do armazenamento da Base44 (é pago).
+async function dataUrlPeloCanvas(ficheiro) {
+  try {
+    const url = URL.createObjectURL(ficheiro);
+    try {
+      const img = await new Promise((resolve, reject) => {
+        const el = new Image();
+        el.onload = () => resolve(el);
+        el.onerror = () => reject(new Error('imagem ilegível'));
+        el.src = url;
+      });
+      const largura = img.naturalWidth || img.width || 0;
+      const altura = img.naturalHeight || img.height || 0;
+      if (!largura || !altura) return '';
+      const maior = Math.max(largura, altura);
+      const escala = maior > LADO_MAXIMO_ANALISE ? LADO_MAXIMO_ANALISE / maior : 1;
+      const tela = document.createElement('canvas');
+      tela.width = Math.max(1, Math.round(largura * escala));
+      tela.height = Math.max(1, Math.round(altura * escala));
+      tela.getContext('2d').drawImage(img, 0, 0, tela.width, tela.height);
+      if (typeof tela.toDataURL !== 'function') return '';
+      return String(tela.toDataURL('image/jpeg', QUALIDADE_ANALISE) || '');
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  } catch {
+    return '';
+  }
+}
+
 export async function analisarDiretor() {
   if (!ctx) return;
   const { state, $, toast, clienteBase44, videoAtual } = ctx;
@@ -542,45 +625,72 @@ export async function analisarDiretor() {
 
     const b = await clienteBase44();
 
-    // As imagens vão ao armazenamento privado (só esta app as abre) e o
-    // backend assina cada uma para a IA as ler. A PRIMEIRA é a miniatura do
-    // vídeo pronto; as seguintes são as cenas, por ordem.
+    // As imagens vão DENTRO do pedido em base64 (data URL): nenhum ficheiro é
+    // enviado para o armazenamento da Base44, que é uma integração paga e
+    // responde 402 quando os créditos acabam. A PRIMEIRA imagem é a miniatura
+    // do vídeo pronto; as seguintes são as cenas, por ordem.
     const arquivos = [];
-    if (state._miniatura) {
-      try {
-        const r = await b.integrations.Core.UploadPrivateFile({
-          file: new File([state._miniatura], 'miniatura.jpg', { type: 'image/jpeg' }),
-        });
-        arquivos.push({ nome: 'miniatura (fotograma do vídeo pronto)', uri: r.file_uri });
-      } catch {
-        /* a miniatura é opcional */
+    let bytesInline = 0;
+    const LIMITE_INLINE = 8 * 1024 * 1024;
+    const juntarImagem = async (ficheiro, nome) => {
+      let dataUrl = await lerComoDataUrl(ficheiro);
+      // Sem FileReader (browser estranho), o canvas ainda consegue os bytes.
+      if (!dataUrl) dataUrl = await dataUrlPeloCanvas(ficheiro);
+      if (!dataUrl) return false;
+      if (bytesInline + dataUrl.length > LIMITE_INLINE) {
+        console.warn('[análise] pedido cheio: a imagem', nome, 'fica de fora');
+        return false;
       }
+      bytesInline += dataUrl.length;
+      arquivos.push({ nome, dataUrl });
+      return true;
+    };
+
+    if (state._miniatura) {
+      await juntarImagem(
+        new File([state._miniatura], 'miniatura.jpg', { type: 'image/jpeg' }),
+        'miniatura (fotograma do vídeo pronto)',
+      );
     }
     for (const img of state.images.slice(0, 8)) {
-      try {
-        const r = await b.integrations.Core.UploadPrivateFile({ file: img.file });
-        arquivos.push({ nome: `cena: ${img.name}`.slice(0, 80), uri: r.file_uri });
-      } catch {
-        /* cena ilegível segue de fora */
-      }
+      // JPEG garantido (o formato original pode ser HEIC/AVIF/BMP/TIFF).
+      const ficheiro = await cenaParaJpeg(img.file);
+      await juntarImagem(ficheiro, `cena: ${img.name}`.slice(0, 80));
     }
-    if (!arquivos.length) throw new Error('não consegui enviar as imagens da montagem');
+    if (!arquivos.length) {
+      throw new Error(
+        'não consegui preparar as imagens da montagem para a IA (nenhuma pôde ser lida ' +
+          'neste browser). Nenhum crédito da Base44 foi usado.',
+      );
+    }
 
-    const resposta = await b.functions.invoke('analisarProducao', {
-      arquivos,
-      meta: metaDaMontagem(resultado, sincMedida),
-      // Os números do enquadramento vão como contexto: o Diretor tem de os
-      // respeitar nas melhorias e no prompt refinado.
-      enquadramento: aud
-        ? {
-            modoImagem: aud.modoImagem,
-            veredicto: aud.veredicto,
-            faltas: aud.faltas,
-            exigencias: aud.exigencias,
-            cenas: aud.cenas.map((c) => ({ nome: c.nome, avisos: c.avisos, gravidade: c.gravidade })),
-          }
-        : null,
-    });
+    // Em 4xx/5xx o SDK lança um AxiosError cuja `message` é só
+    // "Request failed with status code 400" — o motivo do servidor fica em
+    // `response.data`. Sem isto, a tela esconde a única informação útil.
+    let resposta;
+    try {
+      resposta = await b.functions.invoke('analisarProducao', {
+        arquivos,
+        meta: metaDaMontagem(resultado, sincMedida),
+        // Os números do enquadramento vão como contexto: o Diretor tem de os
+        // respeitar nas melhorias e no prompt refinado.
+        enquadramento: aud
+          ? {
+              modoImagem: aud.modoImagem,
+              veredicto: aud.veredicto,
+              faltas: aud.faltas,
+              exigencias: aud.exigencias,
+              cenas: aud.cenas.map((c) => ({ nome: c.nome, avisos: c.avisos, gravidade: c.gravidade })),
+            }
+          : null,
+      });
+    } catch (e) {
+      const dados = e?.response?.data;
+      const detalhe = dados?.error || dados?.message || e?.message || String(e);
+      const estado = e?.response?.status ? ` (HTTP ${e.response.status})` : '';
+      const extra = dados?.debug ? ` · ${JSON.stringify(dados.debug).slice(0, 160)}` : '';
+      throw new Error(`a análise falhou${estado}: ${detalhe}${extra}`);
+    }
 
     // Desembrulha: o SDK pode devolver { data: {...} } ou o próprio objeto.
     let dados = resposta?.data && typeof resposta.data === 'object' && resposta.ok === undefined ? resposta.data : resposta;

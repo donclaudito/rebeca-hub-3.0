@@ -13,6 +13,26 @@ export function iniciarVideoFinal(c) {
   ctx = c;
 }
 
+// ---- som: acordar o AudioContext NO CLIQUE ----
+// A permissão de áudio do browser (autoplay) vale poucos segundos depois do
+// gesto. O motor cria o AudioContext só depois de importar o módulo e carregar
+// as imagens — tempo suficiente para o contexto nascer SUSPENSO, e aí a
+// gravação falha com "o browser bloqueou o som" (ou pior, sai muda).
+// Este contexto é criado e acordado no próprio clique; o motor usa-o.
+let desbloqueio = null;
+
+function desbloquearAudio() {
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return null;
+    if (!desbloqueio || desbloqueio.state === 'closed') desbloqueio = new AC();
+    if (desbloqueio.state === 'suspended') desbloqueio.resume().catch(() => {});
+    return desbloqueio;
+  } catch {
+    return null;
+  }
+}
+
 export async function gerarVideoFinal() {
   if (!ctx) return;
   const {
@@ -25,6 +45,9 @@ export async function gerarVideoFinal() {
   if (state.busy) return;
   if (validarTempos && !validarTempos()) return;
   pararPreviaLetra?.();
+
+  // Antes de qualquer await: é agora que o gesto do utilizador ainda "vale".
+  const ctxAudio = desbloquearAudio();
 
   // Cenas de vídeo entram mesmo sem texto: quem manda nelas é o próprio ficheiro.
   const comTexto = state.scenes.filter((s) => (s.texto || '').trim() || s.video);
@@ -86,6 +109,25 @@ export async function gerarVideoFinal() {
   }
 
   const mod = await import('./video.mjs');
+
+  // Uma linha no console para o próximo diagnóstico (não bloqueia nada): diz
+  // se a página está dentro de outra, que codec o browser aceita e em que
+  // estado está o som.
+  try {
+    console.info(
+      '[vídeo] ambiente:',
+      JSON.stringify({
+        iframe: window.top !== window,
+        mediaRecorder: typeof window.MediaRecorder,
+        audioContext: typeof (window.AudioContext || window.webkitAudioContext),
+        mime: mod.escolherMime(state.codec) || '(nenhum)',
+        audio: ctxAudio ? ctxAudio.state : '(sem contexto)',
+      }),
+    );
+  } catch {
+    /* só diagnóstico */
+  }
+
   state.busy = true;
   document.getElementById('legendas-campos').disabled = true;
   state.pararVideo = false;
@@ -207,6 +249,8 @@ export async function gerarVideoFinal() {
       duracaoEpilogo: Number(state.durEpilogo) || 0,
       // Desenha no canvas visível: vê-se a montagem enquanto grava.
       canvas: preview,
+      // O contexto de som acordado no clique (evita nascer suspenso).
+      ctxAudio,
       aoProgredir: (p) => {
         if (p.fase === 'a gravar') {
           // Miniatura: o primeiro fotograma a partir de 1,5s, para não apanhar
@@ -293,17 +337,19 @@ export async function gerarVideoFinal() {
           : ''}` +
         `${r.legendas ? `${r.legendas} bloco(s) de legenda${r.legendasDaLetra ? ' (da letra)' : ''}. ` : ''}` +
         `Descarregado como ${nome}${r.srt ? ' e rebeca-video.srt' : ''}.` +
-        `${r.musicaAviso ? ` ⚠️ ${r.musicaAviso}` : ''} (motor v${r.versao})` +
+        `${r.musicaAviso ? ` ⚠️ ${r.musicaAviso}` : ''}` +
+        `${r.aviso ? ` ⚠️ ${r.aviso}` : ''} (motor v${r.versao})` +
         (r.codec === 'vp9'
           ? ' · ⚠️ Gravado em VP9: o Windows pode recusar abri-lo — use o VLC, ou mude "Ficheiro" para Compatível (VP8).'
           : ''),
       r.musicaAviso ? 'wait' : 'ok',
     );
     toast(
-      `${r.comVoz ? 'Vídeo pronto' : 'Vídeo só com música'} (${Math.round(r.duracao)}s)` +
+      `${r.parcial ? '⚠️ Vídeo PARCIAL' : r.comVoz ? 'Vídeo pronto' : 'Vídeo só com música'} ` +
+        `(${Math.round(r.duracao)}s)` +
         `${r.comMusica ? ', com trilha' : ''}${r.repetido ? `, ${r.passagens}× em ciclo` : ''}` +
         `${r.srt ? ' + legendas .srt' : ''}.`,
-      'ok',
+      r.parcial ? 'err' : 'ok',
     );
   } catch (e) {
     estadoVideo(`❌ ${e.message}`, 'err');

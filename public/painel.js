@@ -1204,4 +1204,45 @@ if (typeof window !== 'undefined') {
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') renovarSePreciso();
   });
+  // Versão nova no servidor? Avisa (uma vez por sessão).
+  avisarSeHaVersaoNova();
+}
+
+// ------------------------------------------------- versão nova do app
+// A página fica em cache no browser e, depois de uma publicação, continuava a
+// correr a versão ANTIGA — o utilizador via o mesmo erro já corrigido e não
+// havia forma de saber porquê. Aqui compara-se o ficheiro que a página está a
+// usar com o que o servidor serve agora; se forem diferentes, pede-se um
+// recarregamento forçado.
+async function avisarSeHaVersaoNova() {
+  try {
+    const html = await (await fetch('/', { cache: 'no-store' })).text();
+    const novo = (html.match(/assets\/(index-[\w-]+\.js)/) || [])[1] || '';
+    if (!novo) return;
+    const scripts = [...(document.getElementsByTagName('script') || [])]
+      .map((s) => String(s.src || ''))
+      .filter(Boolean);
+    const atual = (scripts.map((s) => (s.match(/index-[\w-]+\.js/) || [''])[0]).filter(Boolean)[0]) || '';
+    if (!atual || atual === novo) return;
+    try {
+      if (sessionStorage.getItem('rh3versaoavisada') === novo) return;
+      sessionStorage.setItem('rh3versaoavisada', novo);
+    } catch {
+      /* modo privado: avisa na mesma */
+    }
+    // Toast (não a caixa de avisos do Painel): a caixa pode estar a explicar a
+    // falta de sessão e não deve ser substituída por isto.
+    toast(
+      'Há uma versão NOVA da app e esta página ainda está com a antiga. ' +
+        'Carregue em Ctrl+Shift+R (Windows) ou Cmd+Shift+R (Mac) para a carregar.',
+      'err',
+    );
+    try {
+      console.warn('[app] versão antiga em uso:', atual, '→ servidor tem', novo);
+    } catch {
+      /* sem consola */
+    }
+  } catch {
+    /* sem rede: não se avisa nada */
+  }
 }

@@ -22,6 +22,7 @@ let agendamentos = [];           // {clipe, quando}
 let fontesEmCiclo = [];          // fontes com loop (a trilha)
 let ganhosCriados = [];          // valores de ganho pedidos (narração=1, trilha=0.16)
 let fontesDeVideo = [];          // elementos <video> ligados ao áudio (devem ficar mudos)
+let desenharQuebra = 0;          // quantas chamadas de drawImage devem rebentar (teste de robustez)
 let retoques = [];               // fillRect no canvas (o véu preto do fecho)
 let musicaDuracao = 2;           // duração devolvida para a trilha (curta: o fecho com a música não estica as provas)
 let ultimoCtx = null;
@@ -36,6 +37,12 @@ class Ctx2D {
   // instante, para as provas poderem ver o apagar suave.
   fillRect(x, y, w, h) { retoques.push({ t: relogioMs / 1000, alpha: this.globalAlpha, cor: this.fillStyle, x, y, w, h }); }
   drawImage(img, ...a) {
+    // Falha simulada do canvas (testes de robustez): as primeiras N chamadas
+    // rebentam, para se provar que a gravação NÃO fica pendurada.
+    if (desenharQuebra > 0) {
+      desenharQuebra -= 1;
+      throw new Error('canvas avariado');
+    }
     // 5 argumentos (imagem, x, y, w, h) ou 9 (imagem, sx, sy, sw, sh, x, y, w, h)
     // — o segundo aparece quando a imagem é recortada (barra preta a tirar).
     const nove = a.length >= 8;
@@ -180,7 +187,7 @@ function instalarAmbiente(duracoes, { musicaSegundos = 2 } = {}) {
   desenhos = []; agendamentos = []; fontesEmCiclo = []; ganhosCriados = []; legendasDesenhadas = []; retoques = []; fila = []; relogioMs = 0;
   mimesUsados = []; suportaCodecs = true;
   // Cada ambiente começa sem <video> e sem ligações de áudio de clipes.
-  videosFalsos = []; fontesDeVideo = [];
+  videosFalsos = []; fontesDeVideo = []; desenharQuebra = 0;
   musicaDuracao = musicaSegundos;
   const ctx = new AudioCtxFalso(duracoes);
   ultimoCtx = ctx;
@@ -1356,6 +1363,50 @@ console.log('\n[29] A trilha entra no 0:00, sem fade de entrada nem silêncio in
   check(r.ok === true, 'gera com a trilha cortada', JSON.stringify(r).slice(0, 110));
   check(Math.abs(r.trilhaCorte - 0.3) < 0.03, `o resultado diz o corte (${r.trilhaCorte.toFixed(2)}s)`, String(r.trilhaCorte));
   check(Math.abs(r.musicaSegundos - 2.7) < 0.05, `a duração usada é a da música já sem o silêncio (${r.musicaSegundos.toFixed(2)}s)`, String(r.musicaSegundos));
+}
+
+console.log('\n[30] A gravação nunca fica pendurada (o "barra parada e nunca acaba")');
+{
+  // (a) Um ficheiro que nunca abre desiste com o PRAZO e diz qual falhou.
+  const inicio = Date.now();
+  let erro = null;
+  try {
+    await mod.comPrazo(new Promise(() => {}), 1200, 'a imagem «x.jpg» não abriu');
+  } catch (e) {
+    erro = e;
+  }
+  const gasto = Date.now() - inicio;
+  check(Boolean(erro), 'comPrazo rejeita em vez de esperar para sempre', 'ficou pendente');
+  check(/não abriu/.test(String(erro && erro.message)), `a mensagem explica ("${String(erro && erro.message)}")`, String(erro && erro.message));
+  check(gasto < 3000, `desiste dentro do prazo (${gasto} ms)`, `${gasto} ms`);
+
+  // (b) Sem requestAnimationFrame (aba oculta), o laço continua na mesma.
+  const rAFOriginal = globalThis.requestAnimationFrame;
+  globalThis.requestAnimationFrame = () => 0; // nunca chama o callback
+  let quadros = 0;
+  await new Promise((resolve) => {
+    const passo = () => {
+      quadros += 1;
+      if (quadros >= 3) return resolve();
+      mod.proximoQuadro(passo);
+    };
+    mod.proximoQuadro(passo);
+  });
+  globalThis.requestAnimationFrame = rAFOriginal;
+  check(quadros === 3, `proximoQuadro avança sem rAF (${quadros} quadros)`, String(quadros));
+
+  // (c) Se um fotograma não se conseguir desenhar, a gravação termina na mesma.
+  instalarAmbiente([], { musicaSegundos: 2 });
+  desenharQuebra = 3;
+  const r = await correrCom(
+    mod.gerarVideo({
+      cenas: [{ imagem: 'c1', audio: null, semFala: true, texto: '' }],
+      formato: '1280x720', duracaoCena: 1.5,
+    }),
+  );
+  desenharQuebra = 0;
+  check(r.ok === true, 'a gravação acaba apesar de 3 fotogramas falhados', JSON.stringify(r).slice(0, 120));
+  check(r.duracao > 1, `e tem duração (${r.duracao.toFixed(2)}s)`, String(r.duracao));
 }
 
 console.log(falhas.length ? `\n=== ${falhas.length} FALHA(S) ===` : '\n=== GERAÇÃO DE VÍDEO OK ===');

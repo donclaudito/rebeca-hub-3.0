@@ -22,7 +22,7 @@ import { ajustarCues } from './srt.mjs';
 // Versão do motor. Aparece no resumo da página: serve para saber, sem dúvidas,
 // qual build está a correr no browser (um build antigo em cache foi uma das
 // causas de "não funcionou" que já apanhei).
-export const VERSAO_VIDEO = '3.9.14';
+export const VERSAO_VIDEO = '3.9.15';
 
 // Duração do FECHO: nos últimos segundos do vídeo (quando há trilha), a música
 // esmaece até ao silêncio e a imagem apaga suavemente para preto.
@@ -215,25 +215,68 @@ export function suporta() {
   }
 }
 
-const carregarImagem = (url) =>
-  new Promise((resolve, reject) => {
-    const i = new Image();
-    i.onload = () => resolve(i);
-    i.onerror = () => reject(new Error('não consegui ler uma das imagens'));
-    i.src = url;
+// Um prazo para qualquer espera. Sem isto, uma imagem ou um clipe que nunca
+// dispara `onload`/`onloadeddata` deixava a gravação PARADA para sempre, sem
+// erro nenhum: a barra ficava em "a preparar as imagens…" e o utilizador só
+// via uma linha de ambiente na consola (foi este o "nunca acaba").
+export function comPrazo(promessa, ms, mensagem) {
+  return new Promise((resolve, reject) => {
+    let terminado = false;
+    const relogio = setTimeout(() => {
+      if (terminado) return;
+      terminado = true;
+      reject(new Error(mensagem || `demorou mais de ${Math.round(ms / 1000)}s`));
+    }, Math.max(1000, Number(ms) || 20000));
+    Promise.resolve(promessa).then(
+      (v) => {
+        if (terminado) return;
+        terminado = true;
+        clearTimeout(relogio);
+        resolve(v);
+      },
+      (e) => {
+        if (terminado) return;
+        terminado = true;
+        clearTimeout(relogio);
+        reject(e);
+      },
+    );
   });
+}
+
+// Quanto tempo se espera por uma imagem/clipe antes de desistir com o nome.
+export const PRAZO_FICHEIRO = 25_000;
+export const PRAZO_AUDIO = 45_000;
+
+const carregarImagem = (url, nome = '') =>
+  comPrazo(
+    new Promise((resolve, reject) => {
+      const i = new Image();
+      i.onload = () => resolve(i);
+      i.onerror = () => reject(new Error(`não consegui ler a imagem${nome ? ` «${nome}»` : ''}`));
+      i.src = url;
+    }),
+    PRAZO_FICHEIRO,
+    `a imagem${nome ? ` «${nome}»` : ''} não abriu em ${Math.round(PRAZO_FICHEIRO / 1000)}s — ` +
+      'o ficheiro pode estar danificado ou num formato que o browser não abre (use JPG ou PNG)',
+  );
 
 // Cena de VÍDEO: carrega o ficheiro como <video>; cada fotograma é desenhado
-// durante a gravação e o som entra pela ligação ao destino do gravador.
-const carregarVideo = (url) =>
-  new Promise((resolve, reject) => {
-    const v = document.createElement('video');
-    v.preload = 'auto';
-    v.playsInline = true;
-    v.onloadeddata = () => resolve(v);
-    v.onerror = () => reject(new Error('não consegui ler um dos vídeos da montagem'));
-    v.src = url;
-  });
+// durante a gravação. O som do clipe NÃO entra (ver abaixo, no mute).
+const carregarVideo = (url, nome = '') =>
+  comPrazo(
+    new Promise((resolve, reject) => {
+      const v = document.createElement('video');
+      v.preload = 'auto';
+      v.playsInline = true;
+      v.onloadeddata = () => resolve(v);
+      v.onerror = () => reject(new Error(`não consegui ler o clipe${nome ? ` «${nome}»` : ''}`));
+      v.src = url;
+    }),
+    PRAZO_FICHEIRO,
+    `o clipe${nome ? ` «${nome}»` : ''} não abriu em ${Math.round(PRAZO_FICHEIRO / 1000)}s — ` +
+      'experimente MP4 (H.264) ou WebM; ficheiros enormes podem não abrir no browser',
+  );
 
 // O enquadramento de cada imagem fica aqui, indexado pela própria imagem
 // (WeakMap: não segura memória depois de a imagem sair).
@@ -598,11 +641,40 @@ async function descodificarClipes(seq, blobs, semFala) {
       clipes.push(seq.ctx.createBuffer(1, Math.floor(seq.ctx.sampleRate * SILENCIO_CURTO), seq.ctx.sampleRate));
       continue;
     }
+    // Com prazo: um áudio que o browser não consegue descodificar podia deixar a
+    // preparação pendurada (a barra parada, sem erro nenhum).
     const dados = await b.arrayBuffer();
-    clipes.push(await seq.ctx.decodeAudioData(dados.slice(0)));
+    clipes.push(
+      await comPrazo(
+        seq.ctx.decodeAudioData(dados.slice(0)),
+        PRAZO_AUDIO,
+        `o áudio da cena ${i + 1} não foi descodificado em ${Math.round(PRAZO_AUDIO / 1000)}s`,
+      ),
+    );
   }
   seq.clipes = clipes;
   return clipes;
+}
+
+// Um "fotograma seguinte" que NÃO depende só do requestAnimationFrame.
+//
+// Numa aba em segundo plano (ou com a janela minimizada) o rAF deixa de ser
+// chamado: o laço de desenho ficava à espera para sempre — a barra parada e
+// nenhum erro. Aqui o temporizador garante que o laço continua; quando o rAF
+// funciona, é ele que manda (o temporizador chega tarde e não faz nada).
+export function proximoQuadro(cb, ms = 33) {
+  let feito = false;
+  const correr = () => {
+    if (feito) return;
+    feito = true;
+    cb();
+  };
+  try {
+    requestAnimationFrame(correr);
+  } catch {
+    /* sem rAF (testes): fica o temporizador */
+  }
+  setTimeout(correr, Math.max(16, Math.round(Number(ms) || 33)));
 }
 
 // Grava o vídeo. cenas: [{ imagem: url, audio: Blob|null, semFala?: bool }]
@@ -757,7 +829,14 @@ export async function gerarVideo({
   const imagens = [];
   const elementosVideo = [];
   for (const [i, c] of cenas.entries()) {
-    const fonte = c.video ? await carregarVideo(c.imagem) : await carregarImagem(c.imagem);
+    // O nome vai junto: se um ficheiro não abrir, a mensagem diz QUAL.
+    let fonte;
+    try {
+      fonte = c.video ? await carregarVideo(c.imagem, c.nome || '') : await carregarImagem(c.imagem, c.nome || '');
+    } catch (e) {
+      try { await seq.ctx.close(); } catch { /* já fechado */ }
+      return { ok: false, erro: `não consegui preparar a cena ${i + 1}: ${e.message}` };
+    }
     imagens.push(fonte);
     // Depois de carregada, procura-se onde está o assunto — é isto que impede o
     // recorte de cortar a cara do personagem ou tirá-lo de quadro.
@@ -800,6 +879,17 @@ export async function gerarVideo({
   // 2) preparar o áudio
   const seq = criarSequenciaAudio(ctxAudio);
 
+  // TRAÇO DAS FASES (console). Cada passo escreve uma linha: quando a gravação
+  // fica parada, a ÚLTIMA linha diz exactamente onde — antes só havia a linha
+  // do ambiente e não se sabia se travou a ler imagens, áudio, trilha ou a gravar.
+  const traco = (...partes) => {
+    try {
+      console.info('[vídeo]', ...partes);
+    } catch {
+      /* só diagnóstico */
+    }
+  };
+
   // O CONTEXTO DE ÁUDIO TEM DE ESTAR A CORRER. Se o browser o deixar SUSPENSO
   // (bloqueio de reprodução automática, página incorporada sem permissão), o
   // gravador capta SILÊNCIO: o vídeo sai mudo e ninguém sabe porquê. Por isso
@@ -826,6 +916,7 @@ export async function gerarVideo({
     };
   }
 
+  traco('som a correr', seq.ctx.state || '');
   const marcaSemFala = cenas.map((c) => Boolean(c.semFala) || !c.audio);
   let clipes;
   try {
@@ -834,6 +925,7 @@ export async function gerarVideo({
     try { await seq.ctx.close(); } catch { /* já fechado */ }
     return { ok: false, erro: `não consegui ler o áudio de uma cena: ${e.message}` };
   }
+  traco('áudio das cenas pronto');
 
   // 2b) a trilha sonora (opcional). Se falhar, o vídeo sai sem música e a
   // página é avisada — nunca se perde o trabalho por causa da trilha.
@@ -868,6 +960,12 @@ export async function gerarVideo({
       musicaAviso = `não consegui usar a trilha: ${e.message}`;
     }
   }
+  traco(
+    'trilha',
+    musicaReal > 0 ? `${musicaReal.toFixed(1)}s` : 'sem trilha',
+    corteTrilha > 0 ? `(tirei ${corteTrilha.toFixed(1)}s de silêncio do início)` : '',
+    musicaAviso || '',
+  );
 
   // Há narração? Se não houver nenhuma, isto é uma montagem só com música:
   // cada imagem fica o tempo escolhido em vez de seguir uma voz que não existe.
@@ -1103,6 +1201,13 @@ export async function gerarVideo({
   }
   // Com trilha, o vídeo acaba NO INSTANTE em que a música acaba — nunca antes.
   const terminouComMusica = duracaoMusica > 0 && Math.abs(total - duracaoMusica) < 0.5;
+  traco(
+    'plano',
+    `${total.toFixed(1)}s`,
+    `${ciclos.length} cenas`,
+    passagens > 1 ? `${passagens}x as imagens` : 'sem repetição',
+    acrescentoFim > 0 ? `+${acrescentoFim.toFixed(1)}s na última cena` : '',
+  );
 
   // Legendas externas com tempos finais: aplica-se o ajuste ESCOLHIDO na
   // página (desvio e factor), e só se o utilizador o pediu. Sem ajuste, os
@@ -1191,10 +1296,18 @@ export async function gerarVideo({
     fechoEm: duracaoMusica > 0 ? total - Math.min(FECHO_SEGUNDOS, total / 2) : -1,
     aguaGestor,
   });
-  desenhar(0, 0);
+  // O primeiro fotograma tem de existir antes de gravar, senão o vídeo começa
+  // preto. Se este desenho falhar, a gravação continua (o laço tenta outra vez):
+  // rebentar aqui deixava a página sem vídeo e sem explicação.
+  try {
+    desenhar(0, 0);
+  } catch (e) {
+    console.warn('[vídeo] o primeiro fotograma falhou (segue a gravação):', e && e.message);
+  }
 
   gravador.start(250);
   const inicioAudio = seq.ctx.currentTime;
+  traco('a gravar', `${total.toFixed ? total.toFixed(1) : total}s`);
 
   // A MÚSICA ENTRA AGORA, no primeiro instante gravado — e não antes. Era
   // ligada durante a preparação, quando o relógio do vídeo ainda não tinha
@@ -1221,6 +1334,8 @@ export async function gerarVideo({
   const relogio = () => Math.max(0, seq.ctx.currentTime - inicioAudio);
   const agoraCtx = () => seq.ctx.currentTime;
   let acumulado = 0;
+  // Avisa só UMA vez se um fotograma não se conseguir desenhar.
+  let falhouDesenho = false;
   const totalCenas = ciclos.length;
 
   try {
@@ -1247,7 +1362,10 @@ export async function gerarVideo({
         try {
           // Começa no INÍCIO do corte escolhido (não no começo do ficheiro).
           fonteAtual.currentTime = Math.max(0, Number(cenas[ciclos[i]._fonte].videoInicio) || 0);
-          await fonteAtual.play();
+          // Com prazo: `play()` pode ficar PENDENTE para sempre (política de
+          // reprodução automática, ficheiro ainda a carregar) e a gravação
+          // ficava parada nesta cena, sem erro nenhum.
+          await comPrazo(fonteAtual.play(), 6000, 'o clipe não começou a tocar');
         } catch {
           /* segue com o fotograma parado; a cena continua */
         }
@@ -1282,17 +1400,31 @@ export async function gerarVideo({
             terminar(pedido);
             return;
           }
-          desenhar(i, agora);
-          aoProgredir({
-            fase: 'a gravar',
-            atual: (Number.isInteger(ciclos[i]._fonte) ? ciclos[i]._fonte : i % cenas.length) + 1,
-            total: cenas.length,
-            passagem: (ciclos[i]._passagem || 0) + 1,
-            passagens,
-            segundos: agora,
-            totalSegundos: totalEfetivo,
-          });
-          requestAnimationFrame(quadro);
+          // Desenhar pode falhar (uma imagem que o canvas não aceita, memória,
+          // WebGL do efeito da água). Sem este try, a exceção saía do callback e
+          // a gravação ficava pendurada à espera do fotograma seguinte.
+          try {
+            desenhar(i, agora);
+          } catch (e) {
+            if (!falhouDesenho) {
+              falhouDesenho = true;
+              console.warn('[vídeo] falha a desenhar um fotograma (segue a gravação):', e && e.message);
+            }
+          }
+          try {
+            aoProgredir({
+              fase: 'a gravar',
+              atual: (Number.isInteger(ciclos[i]._fonte) ? ciclos[i]._fonte : i % cenas.length) + 1,
+              total: cenas.length,
+              passagem: (ciclos[i]._passagem || 0) + 1,
+              passagens,
+              segundos: agora,
+              totalSegundos: totalEfetivo,
+            });
+          } catch {
+            /* a página pode não estar pronta para o progresso */
+          }
+          proximoQuadro(quadro);
         };
         // EMPURRÃO: em aba oculta o requestAnimationFrame deixa de ser chamado
         // e o laço ficava congelado — o relógio do áudio continuava a andar e o
@@ -1343,6 +1475,7 @@ export async function gerarVideo({
     try { await seq.ctx.close(); } catch { /* já fechado */ }
   }
 
+  traco('gravado', `${(Number(acumulado) || 0).toFixed(1)}s`, `de ${total.toFixed(1)}s planeados`);
   const blob = new Blob(pedacos, { type: mime });
   if (blob.size < 5000) {
     pedacos.length = 0;

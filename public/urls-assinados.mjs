@@ -171,6 +171,28 @@ function avisarLimite() {
   }
 }
 
+// 402 = a conta está SEM CRÉDITOS de integrações (o armazenamento é pago). Não
+// é sessão inválida nem excesso de pedidos: insistir não resolve e repetir 12
+// vezes só enchia a consola. Avisa-se uma vez e a página diz o que fazer.
+let avisouDosCreditos = false;
+function avisarCreditos() {
+  if (avisouDosCreditos) return;
+  avisouDosCreditos = true;
+  try {
+    if (typeof window !== 'undefined' && window.dispatchEvent) {
+      window.dispatchEvent(new Event('rh-sem-creditos'));
+    }
+  } catch {
+    /* sem janela (testes) */
+  }
+}
+
+// Mensagem única da falta de créditos (a mesma em toda a app).
+export const MENSAGEM_CREDITOS =
+  'A conta Base44 está SEM CRÉDITOS de integrações (erro 402): os ficheiros privados ' +
+  '(vídeos, miniaturas, imagens dos projetos) não podem ser abertos nem guardados. ' +
+  'Carregue créditos em app.base44.com (Settings → Billing).';
+
 // Esquece um URL guardado (quando expirou, por exemplo).
 export function esquecer(uri, expira = 24 * 60 * 60) {
   const cache = lerCache();
@@ -254,6 +276,13 @@ async function pedirComRecuo(pedir, uri, expira, chave) {
         const estado = Number(
           (e && (e.status ?? e.statusCode ?? (e.response && e.response.status))) ?? NaN,
         );
+        // 402 antes de tudo: sem créditos não é sessão nem rajada. Termina já,
+        // avisa uma vez e devolve a frase certa (em vez de "sessão expirou" ou
+        // "a Base44 está a limitar pedidos", que seriam mentira).
+        if (estado === 402 || /402|payment required/i.test(msg)) {
+          avisarCreditos();
+          throw new Error(MENSAGEM_CREDITOS);
+        }
         falhasSeguidas += 1;
         // 422 NÃO entra aqui: neste endpoint um 422 é erro de validação do
         // corpo (por exemplo `expires_in` acima de 3600), não sessão inválida.

@@ -137,5 +137,32 @@ console.log('\n[5] A fila não fica presa quando um pedido falha');
   check((await falhou) === 'falhou', 'e o que falhou dá erro a quem pediu', 'não deu erro');
 }
 
+console.log('\n[6] 402 (sem créditos): para logo, avisa e explica — não é sessão nem rajada');
+{
+  limpar();
+  let tentativas = 0;
+  const pedir = async () => {
+    tentativas += 1;
+    const e = new Error('Request failed with status code 402');
+    e.response = { status: 402 };
+    throw e;
+  };
+  let erro = null;
+  try {
+    await mod.assinar('private/pago.webm', 3600, { pedir });
+  } catch (e) {
+    erro = e;
+  }
+  check(Boolean(erro), 'dá erro em vez de ficar pendente', 'não deu erro');
+  check(/cr[eé]ditos/i.test(String(erro && erro.message)), `o erro fala de créditos ("${String(erro && erro.message).slice(0, 70)}…")`, String(erro && erro.message));
+  check(!/sess[ãa]o/i.test(String(erro && erro.message)), 'não manda entrar na conta (não é problema de sessão)', String(erro && erro.message));
+  check(tentativas === 1, `não repete o pedido (${tentativas} tentativa)`, `${tentativas} tentativas`);
+  check(eventos.includes('rh-sem-creditos'), 'avisa a página (rh-sem-creditos)', eventos.join(', '));
+  check(!eventos.includes('rh-sessao-invalida'), 'e não marca a sessão como inválida', eventos.join(', '));
+
+  // A mensagem é a mesma que os outros módulos usam (uma só frase na app).
+  check(/SEM CRÉDITOS/.test(mod.MENSAGEM_CREDITOS), 'a mensagem está no módulo dos URLs', 'sem mensagem');
+}
+
 console.log(falhas.length ? `\n=== ${falhas.length} FALHA(S) ===` : '\n=== URLS ASSINADOS OK ===');
 process.exit(falhas.length ? 1 : 0);

@@ -140,11 +140,26 @@ function ehFaltaDeSessao(e) {
   return estado === 401 || estado === 403;
 }
 
+// 402 (sem créditos de integrações): não é sessão nem excesso de pedidos. O
+// Painel diz a verdade — sem créditos os ficheiros privados não abrem nem se
+// guardam — em vez de "tente outra vez".
+function avisarSemCreditos() {
+  const av = $('aviso-painel');
+  if (av) {
+    av.hidden = false;
+    av.textContent =
+      'A conta Base44 está SEM CRÉDITOS de integrações (erro 402): as miniaturas e os vídeos ' +
+      'guardados na nuvem não podem ser abertos. Carregue créditos em app.base44.com ' +
+      '(Settings → Billing) e recarregue a página.';
+  }
+}
+
 try {
   if (typeof window !== 'undefined' && window.addEventListener) {
     window.addEventListener('rh-limite-pedidos', avisarLimite);
     window.addEventListener('rh-sessao-invalida', avisarSessao);
     window.addEventListener('rh-sem-sessao', avisarSemSessao);
+    window.addEventListener('rh-sem-creditos', avisarSemCreditos);
     // Entrou na conta: o Painel pode ter ficado sem miniaturas por falta de
     // sessão. Pede-se tudo de novo — com o token novo a assinatura passa.
     window.addEventListener('rh-entrou', () => {

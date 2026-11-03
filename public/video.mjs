@@ -22,7 +22,7 @@ import { ajustarCues } from './srt.mjs';
 // Versão do motor. Aparece no resumo da página: serve para saber, sem dúvidas,
 // qual build está a correr no browser (um build antigo em cache foi uma das
 // causas de "não funcionou" que já apanhei).
-export const VERSAO_VIDEO = '3.9.15';
+export const VERSAO_VIDEO = '3.9.16';
 
 // Duração do FECHO: nos últimos segundos do vídeo (quando há trilha), a música
 // esmaece até ao silêncio e a imagem apaga suavemente para preto.
@@ -37,7 +37,8 @@ export const FORMATOS = [
 ];
 
 export const TRANSICOES = [
-  { id: 'fade', rotulo: 'Fade Suave', nota: 'escurece e clareia entre imagens' },
+  { id: 'fade', rotulo: 'Fade Suave', nota: 'dissolve uma imagem na outra (o mais discreto)' },
+  { id: 'escurecer', rotulo: 'Escurecer', nota: 'passa por preto a meio — ar de cinema entre cenas' },
   { id: 'corte', rotulo: 'Corte Seco', nota: 'passa sem efeito' },
   { id: 'slideleft', rotulo: 'Deslizar Lateral', nota: 'a imagem nova entra pela direita' },
   { id: 'zoom', rotulo: 'Zoom', nota: 'aproxima-se antes de trocar' },
@@ -411,6 +412,38 @@ function definirModoImagem(modo) {
   MODO_IMAGEM = modo === 'preencher' ? 'preencher' : 'inteira';
 }
 
+// O fundo desfocado de uma imagem, guardado e reutilizado.
+//
+// O `blur(22px)` feito a cada fotograma, no tamanho da saída, é das operações
+// mais caras que existem no canvas: a 1080p derrubava a taxa de fotogramas e o
+// vídeo saía aos saltos. O desfoque é de baixa frequência, por isso desenha-se
+// UMA vez numa cópia pequena (1/8) e depois estica-se — o resultado é igual ao
+// olho e o custo por fotograma passa a ser um `drawImage` simples.
+const fundosDesfocados = new WeakMap();
+
+function fundoDesfocado(img, sx, sy, sw, sh, bw, bh) {
+  const chave = `${Math.round(bw)}x${Math.round(bh)}`;
+  const guardado = fundosDesfocados.get(img);
+  if (guardado && guardado.chave === chave && guardado.canvas) return guardado.canvas;
+  try {
+    const c = document.createElement('canvas');
+    // Marcado como AUXILIAR: não é um desenho do vídeo (as provas em testes/video.mjs
+    // usam isto para não contarem o fundo como uma cena).
+    c.auxiliar = true;
+    c.width = Math.max(2, Math.round(bw / 8));
+    c.height = Math.max(2, Math.round(bh / 8));
+    const g = c.getContext('2d');
+    if (!g) return null;
+    // O blur acompanha a redução (22 px a 1/8 ≈ 3 px), o resto é igual.
+    if ('filter' in g) g.filter = 'blur(3px) brightness(0.55) saturate(0.9)';
+    g.drawImage(img, sx, sy, sw, sh, 0, 0, c.width, c.height);
+    fundosDesfocados.set(img, { chave, canvas: c });
+    return c;
+  } catch {
+    return null;
+  }
+}
+
 // A imagem inteira, com o fundo desfocado dela própria.
 function desenharInteira(ctx, img, w, h, escala = 1, deslocamentoX = 0, deslocamentoY = 0) {
   const e = enquadramentoDe(img);
@@ -421,14 +454,23 @@ function desenharInteira(ctx, img, w, h, escala = 1, deslocamentoX = 0, deslocam
   const sx = fonte ? fonte.x : 0;
   const sy = fonte ? fonte.y : 0;
 
-  // 1) FUNDO: a mesma imagem a cobrir, desfocada e escurecida.
-  const cobrir = Math.max(w / sw, h / sh) * escala;
+  // 1) FUNDO: a mesma imagem a cobrir, desfocada e escurecida. O desfoque é
+  //    guardado SEM escala (o zoom das passagens só estica a cópia pronta).
+  const cobrir = Math.max(w / sw, h / sh);
   const bw = sw * cobrir;
   const bh = sh * cobrir;
-  ctx.save();
-  if ('filter' in ctx) ctx.filter = 'blur(22px) brightness(0.55) saturate(0.9)';
-  ctx.drawImage(img, sx, sy, sw, sh, (w - bw) / 2 + deslocamentoX, (h - bh) / 2 + deslocamentoY, bw, bh);
-  ctx.restore();
+  const x = (w - bw * escala) / 2 + deslocamentoX;
+  const y = (h - bh * escala) / 2 + deslocamentoY;
+  const fundo = fundoDesfocado(img, sx, sy, sw, sh, bw, bh);
+  if (fundo) {
+    ctx.drawImage(fundo, 0, 0, fundo.width, fundo.height, x, y, bw * escala, bh * escala);
+  } else {
+    // Sem canvas auxiliar: o caminho antigo, mais caro mas correto.
+    ctx.save();
+    if ('filter' in ctx) ctx.filter = 'blur(22px) brightness(0.55) saturate(0.9)';
+    ctx.drawImage(img, sx, sy, sw, sh, x, y, bw * escala, bh * escala);
+    ctx.restore();
+  }
 
   // 2) A IMAGEM INTEIRA sobre o fundo: `min` (e não `max`) é o que garante que
   //    nada fica de fora. Sem zoom sobre o conteúdo de propósito.
@@ -481,44 +523,72 @@ function desenharEpilogo(ctx, w, h, de, img, tLocal, dur, orientacao, T) {
   ctx.restore();
 }
 
+// Suavização das passagens. Uma transição linear (o que estava) mexe a velocidade
+// constante e o olho nota o "arranque" e a "travagem" — é o que faz uma montagem
+// parecer amadora. Com smoothstep (3t²-2t³) a passagem começa devagar, acelera no
+// meio e assenta no fim. Mantém t=0→0, t=0,5→0,5 e t=1→1, por isso a ligação
+// entre as duas metades da passagem continua sem salto.
+export function suavizar(t) {
+  const x = Math.min(1, Math.max(0, Number(t) || 0));
+  return x * x * (3 - 2 * x);
+}
+
 // Desenha um instante da passagem entre a imagem `de` e a imagem `para`.
 // t vai de 0 (só a anterior) a 1 (só a seguinte).
 function desenharTransicao(ctx, w, h, de, para, t, tipo) {
   ctx.save();
+  // `corte` é a única que NÃO se suaviza: um corte seco é instantâneo.
+  const u = tipo === 'corte' ? Math.min(1, Math.max(0, Number(t) || 0)) : suavizar(t);
   switch (tipo) {
     case 'corte':
-      desenharFoto(ctx, t < 0.5 ? de : para, w, h);
+      desenharFoto(ctx, u < 0.5 ? de : para, w, h);
       break;
 
     case 'slideleft':
-      desenharFoto(ctx, de, w, h, 1, -w * t);
-      desenharFoto(ctx, para, w, h, 1, w * (1 - t));
+      desenharFoto(ctx, de, w, h, 1, -w * u);
+      desenharFoto(ctx, para, w, h, 1, w * (1 - u));
       break;
 
     case 'zoom':
-      desenharFoto(ctx, de, w, h, 1 + 0.12 * t);
-      ctx.globalAlpha = t;
-      desenharFoto(ctx, para, w, h, 1.12 - 0.12 * t);
+      desenharFoto(ctx, de, w, h, 1 + 0.12 * u);
+      ctx.globalAlpha = u;
+      desenharFoto(ctx, para, w, h, 1.12 - 0.12 * u);
       break;
 
     case 'desfoque':
       // Desfoca a imagem que está a sair e vai abrindo a que entra. Se o browser
       // não souber desfocar, fica a passagem suave — nunca falha.
       if ('filter' in ctx) {
-        ctx.filter = `blur(${(t * 10).toFixed(1)}px)`;
+        ctx.filter = `blur(${(u * 10).toFixed(1)}px)`;
         desenharFoto(ctx, de, w, h);
         ctx.filter = 'none';
-        ctx.globalAlpha = t;
+        ctx.globalAlpha = u;
       } else {
         ctx.globalAlpha = 1;
       }
       desenharFoto(ctx, para, w, h);
       break;
 
+    case 'escurecer': {
+      // Passa por PRETO a meio: a imagem sai a escurecer, o ecrã fica preto e a
+      // seguinte abre. É a passagem "de capítulo" — a que dá ar de cinema em vez
+      // de um simples esbater. `p` vai de 0 a 1 a meio e volta a 0 no fim.
+      const p = u < 0.5 ? u * 2 : (1 - u) * 2;
+      desenharFoto(ctx, u < 0.5 ? de : para, w, h);
+      ctx.save();
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = `rgba(0,0,0,${Math.min(1, Math.max(0, p)).toFixed(3)})`;
+      ctx.fillRect(0, 0, w, h);
+      ctx.restore();
+      break;
+    }
+
     case 'fade':
     default:
+      // Dissolver cruzado: as duas imagens estão no ecrã ao mesmo tempo e a
+      // soma das opacidades mantém-se — não há escurecimento a meio.
       desenharFoto(ctx, de, w, h);
-      ctx.globalAlpha = t;
+      ctx.globalAlpha = u;
       desenharFoto(ctx, para, w, h);
       break;
   }
@@ -1230,7 +1300,32 @@ export async function gerarVideo({
   }
 
   // 3) começar a gravar
-  const fluxoVideo = canvas.captureStream(fps);
+  //
+  // FOTOGRAMAS À MÃO, quando o browser deixa: com `captureStream(0)` o canvas só
+  // entrega um fotograma quando lhe pedimos (`requestFrame`). Assim cada desenho
+  // dá exactamente um fotograma — sem duplicados nem saltos, que era o que se
+  // via nos clipes (o vídeo saía com fotogramas repetidos e outros perdidos).
+  // Sem `requestFrame` (browsers antigos), fica a captura automática a `fps`.
+  let fluxoVideo = canvas.captureStream(0);
+  let pedirFotograma = () => {};
+  const faixaVideo = fluxoVideo && fluxoVideo.getVideoTracks ? fluxoVideo.getVideoTracks()[0] : null;
+  if (faixaVideo && typeof faixaVideo.requestFrame === 'function') {
+    pedirFotograma = () => {
+      try {
+        faixaVideo.requestFrame();
+      } catch {
+        /* já parado */
+      }
+    };
+  } else {
+    // Esse browser não sabe emitir à mão: descarta-se este fluxo e usa-se o fixo.
+    try {
+      for (const t of fluxoVideo.getTracks ? fluxoVideo.getTracks() : []) t.stop();
+    } catch {
+      /* já parado */
+    }
+    fluxoVideo = canvas.captureStream(fps);
+  }
   const fluxo = new MediaStream([...fluxoVideo.getVideoTracks(), ...seq.destino.stream.getAudioTracks()]);
   const gravador = new MediaRecorder(fluxo, { mimeType: mime, videoBitsPerSecond: 5_000_000 });
   const pedacos = [];
@@ -1301,6 +1396,7 @@ export async function gerarVideo({
   // rebentar aqui deixava a página sem vídeo e sem explicação.
   try {
     desenhar(0, 0);
+    pedirFotograma();
   } catch (e) {
     console.warn('[vídeo] o primeiro fotograma falhou (segue a gravação):', e && e.message);
   }
@@ -1405,6 +1501,9 @@ export async function gerarVideo({
           // a gravação ficava pendurada à espera do fotograma seguinte.
           try {
             desenhar(i, agora);
+            // Um desenho = um fotograma gravado (captura à mão). Sem isto o
+            // encoder repetia fotogramas e perdia outros: era o "saltar".
+            pedirFotograma();
           } catch (e) {
             if (!falhouDesenho) {
               falhouDesenho = true;

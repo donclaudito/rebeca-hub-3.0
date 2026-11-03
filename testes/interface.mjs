@@ -270,7 +270,7 @@ console.log('\n[1] Browser COM suporte: controlos prontos');
   check(abas.children.length === 3, `3 abas à esquerda (${abas.children.map((b) => b.textContent).join(' | ')})`, `${abas.children.length}: ${abas.children.map((b) => b.textContent).join(', ')}`);
   check(reg.get('vid-formato').children.length === 5, `5 formatos no seletor (${reg.get('vid-formato').children.map((o) => o.textContent).join(', ')})`, `${reg.get('vid-formato').children.length}`);
   const ct = reg.get('vid-transicoes');
-  check(ct.children.length === 5, `5 transições (${ct.children.map((b) => b.textContent).join(', ')})`, `${ct.children.length}`);
+  check(ct.children.length === 6, `6 transições (${ct.children.map((b) => b.textContent).join(', ')})`, `${ct.children.length}`);
   check(reg.get('vid-duracoes').children.length === 4, `4 durações (${reg.get('vid-duracoes').children.map((b) => b.textContent).join(', ')})`, `${reg.get('vid-duracoes').children.length}`);
   check(ct.children.filter((b) => b.classList.contains('on')).length === 1, 'exatamente uma transição marcada', `${ct.children.filter((b) => b.classList.contains('on')).length} marcadas`);
   const tagBtn = html.slice(html.indexOf('id="btn-video"'), html.indexOf('id="btn-video"') + 120);

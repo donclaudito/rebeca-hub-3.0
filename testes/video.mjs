@@ -23,13 +23,16 @@ let fontesEmCiclo = [];          // fontes com loop (a trilha)
 let ganhosCriados = [];          // valores de ganho pedidos (narração=1, trilha=0.16)
 let fontesDeVideo = [];          // elementos <video> ligados ao áudio (devem ficar mudos)
 let desenharQuebra = 0;          // quantas chamadas de drawImage devem rebentar (teste de robustez)
+let suportaRequestFrame = true;  // o canvas falso sabe emitir fotogramas "à mão"?
+let ultimaFaixaVideo = null;     // faixa de vídeo do último captureStream(0)
+let contextosAuxiliares = 0;     // canvas auxiliares criados (o fundo desfocado deve ser 1 por imagem)
 let retoques = [];               // fillRect no canvas (o véu preto do fecho)
 let musicaDuracao = 2;           // duração devolvida para a trilha (curta: o fecho com a música não estica as provas)
 let ultimoCtx = null;
 let ultimoGravador = null;
 
 class Ctx2D {
-  constructor() { this.globalAlpha = 1; this.filter = 'none'; this._p = []; }
+  constructor(auxiliar = false) { this.globalAlpha = 1; this.filter = 'none'; this._p = []; this.registar = !auxiliar; }
   save() { this._p.push({ a: this.globalAlpha, f: this.filter }); }
   restore() { const s = this._p.pop(); if (s) { this.globalAlpha = s.a; this.filter = s.f; } }
   clearRect() {}
@@ -43,6 +46,11 @@ class Ctx2D {
       desenharQuebra -= 1;
       throw new Error('canvas avariado');
     }
+    // Canvas auxiliar (o fundo desfocado, a análise) não é um desenho do vídeo —
+    // nem como destino nem como ORIGEM (o fundo desfocado é desenhado a partir
+    // de um canvas auxiliar).
+    if (!this.registar) return;
+    if (img && img.auxiliar) return;
     // 5 argumentos (imagem, x, y, w, h) ou 9 (imagem, sx, sy, sw, sh, x, y, w, h)
     // — o segundo aparece quando a imagem é recortada (barra preta a tirar).
     const nove = a.length >= 8;
@@ -58,9 +66,28 @@ class Ctx2D {
 }
 
 class CanvasFalso {
-  constructor(nome = 'novo') { this.nome = nome; this.width = 0; this.height = 0; this._ctx = new Ctx2D(); }
-  getContext() { return this._ctx; }
-  captureStream(fps) { this.fps = fps; return { getVideoTracks: () => [{ tipo: 'video' }], getAudioTracks: () => [] }; }
+  constructor(nome = 'novo') { this.nome = nome; this.width = 0; this.height = 0; this.auxiliar = false; this._ctx = null; }
+  getContext() {
+    // O `auxiliar` só é conhecido depois de o motor marcar o canvas: o contexto
+    // é criado no primeiro pedido, já com a marca certa.
+    if (!this._ctx) {
+      this._ctx = new Ctx2D(Boolean(this.auxiliar));
+      if (this.auxiliar) contextosAuxiliares += 1;
+    }
+    return this._ctx;
+  }
+  captureStream(fps) {
+    this.fps = fps;
+    // Com `fps = 0` o browser real devolve uma faixa "à mão". O falso imita os
+    // dois casos conforme `suportaRequestFrame`, para se provar o caminho novo.
+    const faixa = { tipo: 'video' };
+    if (fps === 0 && suportaRequestFrame) {
+      faixa.quadrosPedidos = 0;
+      faixa.requestFrame = () => { faixa.quadrosPedidos += 1; };
+      ultimaFaixaVideo = faixa;
+    }
+    return { getVideoTracks: () => [faixa], getAudioTracks: () => [], getTracks: () => [faixa] };
+  }
 }
 
 class ImagemFalsa {
@@ -187,7 +214,7 @@ function instalarAmbiente(duracoes, { musicaSegundos = 2 } = {}) {
   desenhos = []; agendamentos = []; fontesEmCiclo = []; ganhosCriados = []; legendasDesenhadas = []; retoques = []; fila = []; relogioMs = 0;
   mimesUsados = []; suportaCodecs = true;
   // Cada ambiente começa sem <video> e sem ligações de áudio de clipes.
-  videosFalsos = []; fontesDeVideo = []; desenharQuebra = 0;
+  videosFalsos = []; fontesDeVideo = []; desenharQuebra = 0; contextosAuxiliares = 0; ultimaFaixaVideo = null;
   musicaDuracao = musicaSegundos;
   const ctx = new AudioCtxFalso(duracoes);
   ultimoCtx = ctx;
@@ -271,7 +298,11 @@ console.log('\n[2] 3 cenas: gravação, tempos e ficheiro final');
   check(r.ok === true, 'devolveu ok', JSON.stringify(r).slice(0, 200));
   check(r.extensao === 'webm' && /vp8,opus/.test(r.mime), `formato: ${r.mime} (VP8, por compatibilidade)`, r.mime);
   check(canvas.width === 1280 && canvas.height === 720, `canvas no tamanho certo: ${canvas.width}×${canvas.height}`, `${canvas.width}×${canvas.height}`);
-  check(canvas.fps === 30, 'captura a 30 fps', String(canvas.fps));
+  // Com `requestFrame`, a captura é À MÃO (fps 0 = o canvas só entrega quando
+  // lhe pedimos): é isso que evita fotogramas duplicados/perdidos.
+  check(canvas.fps === 0 && ultimaFaixaVideo && ultimaFaixaVideo.quadrosPedidos > 0,
+    `captura à mão: ${ultimaFaixaVideo ? ultimaFaixaVideo.quadrosPedidos : 0} fotogramas pedidos`,
+    `fps=${canvas.fps} pedidos=${ultimaFaixaVideo ? ultimaFaixaVideo.quadrosPedidos : 'sem faixa'}`);
   check(perto(r.duracao, 6.0, 0.05), `duração total ≈ 6,0s (soma das cenas): ${r.duracao.toFixed(2)}s`, `${r.duracao}`);
   check(r.blob.size > 5000, `ficheiro com ${r.blob.size} bytes`, String(r.blob.size));
 
@@ -1407,6 +1438,61 @@ console.log('\n[30] A gravação nunca fica pendurada (o "barra parada e nunca a
   desenharQuebra = 0;
   check(r.ok === true, 'a gravação acaba apesar de 3 fotogramas falhados', JSON.stringify(r).slice(0, 120));
   check(r.duracao > 1, `e tem duração (${r.duracao.toFixed(2)}s)`, String(r.duracao));
+}
+
+console.log('\n[31] Montagem mais fluida e passagens com easing');
+{
+  // (a) Easing: smoothstep. Começa devagar, acelera no meio, assenta no fim;
+  //     mantém 0, 0,5 e 1 nos sítios certos (senão a passagem dava um salto).
+  check(mod.suavizar(0) === 0 && mod.suavizar(1) === 1, 'suavizar(0)=0 e suavizar(1)=1', `${mod.suavizar(0)}/${mod.suavizar(1)}`);
+  check(Math.abs(mod.suavizar(0.5) - 0.5) < 1e-9, 'e o meio continua no meio (0,5)', String(mod.suavizar(0.5)));
+  check(mod.suavizar(0.25) < 0.25 && mod.suavizar(0.75) > 0.75, 'arranca devagar e trava no fim', `${mod.suavizar(0.25)} / ${mod.suavizar(0.75)}`);
+  let monotono = true;
+  let anterior = -1;
+  for (let i = 0; i <= 20; i += 1) {
+    const v = mod.suavizar(i / 20);
+    if (v < anterior) monotono = false;
+    anterior = v;
+  }
+  check(monotono, 'a curva nunca recua', 'recuou');
+
+  // (b) A transição nova "Escurecer" passa por PRETO a meio.
+  check(mod.TRANSICOES.some((t) => t.id === 'escurecer'), 'a transição "Escurecer" existe', JSON.stringify(mod.TRANSICOES.map((t) => t.id)));
+  instalarAmbiente([], { musicaSegundos: 0 });
+  const r = await correrCom(
+    mod.gerarVideo({
+      cenas: [
+        { imagem: 'a1', audio: null, semFala: true, texto: '' },
+        { imagem: 'a2', audio: null, semFala: true, texto: '' },
+      ],
+      formato: '1280x720', transicao: 'escurecer', duracaoTransicao: 1, duracaoCena: 3,
+    }),
+  );
+  check(r.ok === true, 'gera com "Escurecer"', JSON.stringify(r).slice(0, 110));
+  const pretos = retoques.filter((x) => /^rgba\(0,0,0/.test(String(x.cor || '')));
+  check(pretos.length > 0, `pinta preto na passagem (${pretos.length} vezes)`, String(pretos.length));
+  const maisPreto = pretos.reduce((a, b) => (Number(b.alpha) > Number(a.alpha) ? b : a), { alpha: 0 });
+  check(Number(maisPreto.alpha) > 0.75, `e chega a preto (alpha ${Number(maisPreto.alpha).toFixed(2)})`, String(maisPreto.alpha));
+  // Nos extremos a imagem está inteira (não fica preto no meio das cenas).
+  const imagens = new Set(desenhos.map((d) => d.img));
+  check(imagens.has('a1') && imagens.has('a2'), 'as duas imagens aparecem', [...imagens].join(','));
+
+  // (c) O fundo desfocado é calculado UMA vez por imagem, não em cada fotograma.
+  instalarAmbiente([], { musicaSegundos: 0 });
+  const antesDeFrames = contextosAuxiliares;
+  const r2 = await correrCom(
+    mod.gerarVideo({
+      cenas: [
+        { imagem: 'b1', audio: null, semFala: true, texto: '' },
+        { imagem: 'b2', audio: null, semFala: true, texto: '' },
+      ],
+      formato: '1280x720', transicao: 'fade', duracaoCena: 2,
+    }),
+  );
+  const quadros = desenhos.filter((d) => d.img === 'b1' || d.img === 'b2').length;
+  const auxiliares = contextosAuxiliares - antesDeFrames;
+  check(r2.ok === true && quadros > 60, `gravou ${quadros} desenhos`, String(quadros));
+  check(auxiliares <= 3, `o fundo desfocado foi construído ${auxiliares} vez(es) para ${quadros} desenhos`, `${auxiliares} para ${quadros}`);
 }
 
 console.log(falhas.length ? `\n=== ${falhas.length} FALHA(S) ===` : '\n=== GERAÇÃO DE VÍDEO OK ===');

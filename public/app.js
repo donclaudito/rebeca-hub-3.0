@@ -2629,7 +2629,11 @@ async function init() {
       // Vídeo arrastado pergunta o destino; imagens seguem para o estúdio.
       const videos = ficheiros.filter(ehFicheiroVideo);
       const imagens = ficheiros.filter((f) => !videos.includes(f));
-      if (videos.length) carregarVideoFicheiro(videos[0]);
+      // Vários vídeos arrastados entram todos (pela ordem dos nomes).
+      if (videos.length) {
+        if (modVideoCarregado?.carregarVideosFicheiros) modVideoCarregado.carregarVideosFicheiros(videos);
+        else carregarVideoFicheiro(videos[0]);
+      }
       if (imagens.length) addImages(imagens);
     }
   });

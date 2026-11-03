@@ -91,6 +91,38 @@ function miniaturaDoVideo(file, duracao) {
 }
 
 // ---------------------------------------------------------------- entrada
+// Vários vídeos de uma vez (uma pasta inteira, ou vários escolhidos).
+//
+// Um só ficheiro continua a perguntar o destino (estúdio ou Painel). Vários vão
+// TODOS para o estúdio, pela ordem dos nomes — é o caso de quem tem uma pasta de
+// clipes e quer montá-los numa sequência. Subir muitos para a nuvem seria uma
+// integração paga por ficheiro (e o utilizador teria de os guardar um a um),
+// por isso não se faz sem pedir.
+export function filtrarVideos(lista) {
+  const todos = Array.from(lista || []);
+  const videos = todos.filter(ehFicheiroVideo);
+  const recusados = todos.filter((f) => !ehFicheiroVideo(f)).map((f) => f.name || 'ficheiro');
+  return { videos, recusados };
+}
+
+// Ordem natural dos nomes: "clipe 2" antes de "clipe 10" (a ordem alfabética
+// pura punha o 10 logo a seguir ao 1, e a montagem saía trocada).
+export function ordenarPorNome(lista) {
+  const natural = new Intl.Collator('pt', { numeric: true, sensitivity: 'base' });
+  return [...(lista || [])].sort((a, b) => natural.compare(String(a.name || ''), String(b.name || '')));
+}
+
+export async function carregarVideosFicheiros(lista) {
+  const { videos, recusados } = filtrarVideos(lista);
+  if (recusados.length) {
+    toast(`${recusados.length} ficheiro(s) não são vídeo e ficaram de fora: ${recusados.slice(0, 3).join(', ')}`, 'err');
+  }
+  if (!videos.length) return;
+  if (videos.length === 1) return carregarVideoFicheiro(videos[0]);
+  // Vários: entram todos como cenas de vídeo, pela ordem dos nomes.
+  await abrirVariosNoEstudio(ordenarPorNome(videos));
+}
+
 export async function carregarVideoFicheiro(file) {
   if (!file) return;
   if (!ehFicheiroVideo(file)) return toast('Esse ficheiro não parece ser um vídeo.', 'err');
@@ -104,18 +136,62 @@ export async function carregarVideoFicheiro(file) {
 // Opção 1: o vídeo entra no ESTÚDIO como cena de vídeo (intercala com imagens).
 async function abrirVideoNoEstudio(file) {
   toast('A ler o vídeo…');
-  let duracao = 0;
-  try {
-    const lida = (await medidasDoVideo(file)).duracao;
-    duracao = Number.isFinite(lida) && lida > 0 ? lida : 0;
-  } catch {
-    /* segue sem a duração lida */
-  }
+  const duracao = await duracaoDoFicheiro(file);
   state.images.push({ id: crypto.randomUUID(), file, name: file.name, url: URL.createObjectURL(file), video: true, duracao });
   renderThumbs();
   renderScenes();
   toast('Vídeo adicionado ao estúdio — arraste para mudar a ordem.', 'ok');
   trocarParaEstudio();
+}
+
+// Lê a duração do ficheiro; 0 quando não consegue (a cena entra na mesma).
+async function duracaoDoFicheiro(file) {
+  try {
+    const lida = (await medidasDoVideo(file)).duracao;
+    return Number.isFinite(lida) && lida > 0 ? lida : 0;
+  } catch {
+    return 0;
+  }
+}
+
+// Vários vídeos de uma vez: uma cena por cada, pela ordem dos nomes, com
+// progresso — numa pasta de 20 clipes a pessoa tem de ver que está a andar.
+async function abrirVariosNoEstudio(ficheiros) {
+  const total = ficheiros.length;
+  const entram = [];
+  const falharam = [];
+  for (const [i, file] of ficheiros.entries()) {
+    toast(`A ler os vídeos… ${i + 1}/${total} (${file.name})`);
+    const duracao = await duracaoDoFicheiro(file);
+    if (!duracao) {
+      // Sem duração o clipe ficaria com 0s na montagem: fica de fora e diz-se.
+      falharam.push(file.name);
+      continue;
+    }
+    entram.push({ file, duracao });
+    state.images.push({
+      id: crypto.randomUUID(),
+      file,
+      name: file.name,
+      url: URL.createObjectURL(file),
+      video: true,
+      duracao,
+    });
+  }
+  renderThumbs();
+  renderScenes();
+  trocarParaEstudio();
+  if (entram.length && falharam.length) {
+    toast(
+      `${entram.length} vídeo(s) na montagem, pela ordem dos nomes · ${falharam.length} ficou(aram) de fora ` +
+        `(sem duração legível: ${falharam.slice(0, 3).join(', ')})`,
+      'err',
+    );
+  } else if (entram.length) {
+    toast(`${entram.length} vídeos na montagem, pela ordem dos nomes — arraste para mudar a ordem.`, 'ok');
+  } else {
+    toast('Não consegui ler nenhum desses vídeos (experimente MP4 ou WebM).', 'err');
+  }
 }
 
 // Volta à vista do estúdio (o painel.js é quem manda nas vistas).
@@ -181,7 +257,8 @@ export function iniciar(ctx) {
   clienteBase44 = ctx.clienteBase44;
   $('btn-video-load').onclick = () => $('input-video').click();
   $('input-video').onchange = (e) => {
-    if (e.target.files?.length) carregarVideoFicheiro(e.target.files[0]);
+    // Vários de uma vez: entra tudo (o destino "Painel" só faz sentido a um).
+    if (e.target.files?.length) carregarVideosFicheiros(e.target.files);
     e.target.value = '';
   };
   $('btn-destino-estudio').onclick = () => {
